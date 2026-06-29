@@ -12,6 +12,21 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
   });
 
   if (!response.ok) {
+    const body = await response.text();
+
+    if (body) {
+      let message = body;
+
+      try {
+        const parsed = JSON.parse(body) as { error?: string; message?: string };
+        message = parsed.error ?? parsed.message ?? body;
+      } catch {
+        message = body;
+      }
+
+      throw new Error(message);
+    }
+
     throw new Error(`Request failed with status ${response.status}`);
   }
 

@@ -6,9 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.gestioncaravana.application.port.in.CreateCaravanUseCase.CreateCaravanCommand;
 import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
-import com.gestioncaravana.domain.CaravanMainStats;
-import com.gestioncaravana.domain.CaravanCampaignStatus;
+import com.gestioncaravana.domain.CaravanWagon;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -31,6 +31,7 @@ class CaravanManagementServiceTest {
     activeSelection = new InMemoryActiveSelection();
     service = new CaravanManagementService(
         repository,
+        new InMemoryCaravanWagonRepository(),
         activeSelection,
         Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
   }
@@ -97,6 +98,46 @@ class CaravanManagementServiceTest {
     @Override
     public Optional<CaravanCampaign> findById(UUID id) {
       return caravans.stream().filter(caravan -> caravan.id().equals(id)).findFirst();
+    }
+  }
+
+  private static final class InMemoryCaravanWagonRepository implements CaravanWagonRepositoryPort {
+    private final List<CaravanWagon> wagons = new ArrayList<>();
+
+    @Override
+    public CaravanWagon save(CaravanWagon wagon) {
+      wagons.removeIf(existing -> existing.id().equals(wagon.id()));
+      wagons.add(wagon);
+      return wagon;
+    }
+
+    @Override
+    public List<CaravanWagon> findAllByCaravanId(UUID caravanId) {
+      return wagons.stream().filter(wagon -> wagon.caravanId().equals(caravanId)).toList();
+    }
+
+    @Override
+    public Optional<CaravanWagon> findById(UUID caravanId, UUID wagonId) {
+      return wagons.stream()
+          .filter(wagon -> wagon.caravanId().equals(caravanId) && wagon.id().equals(wagonId))
+          .findFirst();
+    }
+
+    @Override
+    public void deleteById(UUID caravanId, UUID wagonId) {
+      wagons.removeIf(wagon -> wagon.caravanId().equals(caravanId) && wagon.id().equals(wagonId));
+    }
+
+    @Override
+    public long countByCaravanId(UUID caravanId) {
+      return wagons.stream().filter(wagon -> wagon.caravanId().equals(caravanId)).count();
+    }
+
+    @Override
+    public long countByCaravanIdAndWagonTypeCode(UUID caravanId, String wagonTypeCode) {
+      return wagons.stream()
+          .filter(wagon -> wagon.caravanId().equals(caravanId) && wagon.wagonTypeCode().equals(wagonTypeCode))
+          .count();
     }
   }
 

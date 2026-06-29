@@ -2,9 +2,14 @@ package com.gestioncaravana.adapter.in.web;
 
 import com.gestioncaravana.application.port.in.CreateCaravanUseCase;
 import com.gestioncaravana.application.port.in.DeleteCaravanUseCase;
+import com.gestioncaravana.application.port.in.DeleteCaravanWagonUseCase;
 import com.gestioncaravana.application.port.in.GetActiveCaravanUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanUseCase;
 import com.gestioncaravana.application.port.in.ListCaravansUseCase;
+import com.gestioncaravana.application.port.in.ListCaravanWagonsUseCase;
+import com.gestioncaravana.application.port.in.ListWagonCatalogUseCase;
+import com.gestioncaravana.application.port.in.AddCaravanWagonUseCase;
+import com.gestioncaravana.application.port.in.GetCaravanWagonUseCase;
 import com.gestioncaravana.application.port.in.SelectActiveCaravanUseCase;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -29,6 +34,11 @@ public class CaravanController {
   private final GetCaravanUseCase getCaravanUseCase;
   private final SelectActiveCaravanUseCase selectActiveCaravanUseCase;
   private final GetActiveCaravanUseCase getActiveCaravanUseCase;
+  private final ListWagonCatalogUseCase listWagonCatalogUseCase;
+  private final ListCaravanWagonsUseCase listCaravanWagonsUseCase;
+  private final GetCaravanWagonUseCase getCaravanWagonUseCase;
+  private final AddCaravanWagonUseCase addCaravanWagonUseCase;
+  private final DeleteCaravanWagonUseCase deleteCaravanWagonUseCase;
 
   public CaravanController(
       CreateCaravanUseCase createCaravanUseCase,
@@ -36,13 +46,23 @@ public class CaravanController {
       ListCaravansUseCase listCaravansUseCase,
       GetCaravanUseCase getCaravanUseCase,
       SelectActiveCaravanUseCase selectActiveCaravanUseCase,
-      GetActiveCaravanUseCase getActiveCaravanUseCase) {
+      GetActiveCaravanUseCase getActiveCaravanUseCase,
+      ListWagonCatalogUseCase listWagonCatalogUseCase,
+      ListCaravanWagonsUseCase listCaravanWagonsUseCase,
+      GetCaravanWagonUseCase getCaravanWagonUseCase,
+      AddCaravanWagonUseCase addCaravanWagonUseCase,
+      DeleteCaravanWagonUseCase deleteCaravanWagonUseCase) {
     this.createCaravanUseCase = createCaravanUseCase;
     this.deleteCaravanUseCase = deleteCaravanUseCase;
     this.listCaravansUseCase = listCaravansUseCase;
     this.getCaravanUseCase = getCaravanUseCase;
     this.selectActiveCaravanUseCase = selectActiveCaravanUseCase;
     this.getActiveCaravanUseCase = getActiveCaravanUseCase;
+    this.listWagonCatalogUseCase = listWagonCatalogUseCase;
+    this.listCaravanWagonsUseCase = listCaravanWagonsUseCase;
+    this.getCaravanWagonUseCase = getCaravanWagonUseCase;
+    this.addCaravanWagonUseCase = addCaravanWagonUseCase;
+    this.deleteCaravanWagonUseCase = deleteCaravanWagonUseCase;
   }
 
   @PostMapping("/caravans")
@@ -78,5 +98,35 @@ public class CaravanController {
   ActiveCaravanResponse getActive() {
     return new ActiveCaravanResponse(
         getActiveCaravanUseCase.getActive().map(CaravanResponseMapper::toResponse).orElse(null));
+  }
+
+  @GetMapping("/caravans/{caravanId}/wagons/catalog")
+  List<WagonCatalogItemResponse> listWagonCatalog(@PathVariable UUID caravanId) {
+    getCaravanUseCase.getById(caravanId);
+    return listWagonCatalogUseCase.list().stream().map(CaravanWagonResponseMapper::toResponse).toList();
+  }
+
+  @GetMapping("/caravans/{caravanId}/wagons")
+  List<CaravanWagonResponse> listCaravanWagons(@PathVariable UUID caravanId) {
+    return listCaravanWagonsUseCase.list(caravanId).stream().map(CaravanWagonResponseMapper::toResponse).toList();
+  }
+
+  @GetMapping("/caravans/{caravanId}/wagons/{wagonId}")
+  CaravanWagonResponse getCaravanWagon(@PathVariable UUID caravanId, @PathVariable UUID wagonId) {
+    return CaravanWagonResponseMapper.toResponse(getCaravanWagonUseCase.getById(caravanId, wagonId));
+  }
+
+  @PostMapping("/caravans/{caravanId}/wagons")
+  ResponseEntity<CaravanWagonResponse> addCaravanWagon(
+      @PathVariable UUID caravanId, @Valid @RequestBody AddCaravanWagonRequest request) {
+    var created = addCaravanWagonUseCase.execute(
+        caravanId, new AddCaravanWagonUseCase.AddCaravanWagonCommand(request.wagonTypeCode()));
+    return ResponseEntity.status(HttpStatus.CREATED).body(CaravanWagonResponseMapper.toResponse(created));
+  }
+
+  @org.springframework.web.bind.annotation.DeleteMapping("/caravans/{caravanId}/wagons/{wagonId}")
+  ResponseEntity<Void> deleteCaravanWagon(@PathVariable UUID caravanId, @PathVariable UUID wagonId) {
+    deleteCaravanWagonUseCase.delete(caravanId, wagonId);
+    return ResponseEntity.noContent().build();
   }
 }

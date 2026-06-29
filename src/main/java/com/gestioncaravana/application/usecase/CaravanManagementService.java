@@ -10,7 +10,9 @@ import com.gestioncaravana.application.port.in.DeleteCaravanUseCase;
 import com.gestioncaravana.application.port.in.SelectActiveCaravanUseCase;
 import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
+import com.gestioncaravana.domain.WagonCatalog;
 import java.time.Clock;
 import java.util.List;
 import java.util.Optional;
@@ -29,14 +31,17 @@ public class CaravanManagementService
         GetActiveCaravanUseCase {
 
   private final CaravanCampaignRepositoryPort campaignRepository;
+  private final CaravanWagonRepositoryPort wagonRepository;
   private final ActiveCaravanSelectionPort activeSelectionPort;
   private final Clock clock;
 
   public CaravanManagementService(
       CaravanCampaignRepositoryPort campaignRepository,
+      CaravanWagonRepositoryPort wagonRepository,
       ActiveCaravanSelectionPort activeSelectionPort,
       Clock clock) {
     this.campaignRepository = campaignRepository;
+    this.wagonRepository = wagonRepository;
     this.activeSelectionPort = activeSelectionPort;
     this.clock = clock;
   }
@@ -97,6 +102,11 @@ public class CaravanManagementService
   }
 
   private CaravanCampaignView toView(CaravanCampaign campaign, boolean active) {
+    var wagons = wagonRepository.findAllByCaravanId(campaign.id()).stream()
+        .map(wagon -> WagonCatalog.findByCode(wagon.wagonTypeCode())
+            .map(type -> type.name())
+            .orElse(wagon.wagonTypeCode()))
+        .toList();
     return new CaravanCampaignView(
         campaign.id(),
         campaign.name(),
@@ -113,7 +123,7 @@ public class CaravanManagementService
         active,
         campaign.createdAt(),
         campaign.updatedAt(),
-        List.of(),
+        wagons,
         List.of(),
         List.of(),
         List.of());

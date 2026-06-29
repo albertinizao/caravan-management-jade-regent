@@ -188,6 +188,7 @@ onMounted(refresh);
               <section>
                 <h3>Carros</h3>
                 <p class="muted">{{ selectedCaravan.wagons.length }} elementos</p>
+                <RouterLink class="section-link" to="/wagons">Abrir vista de carros</RouterLink>
               </section>
               <section>
                 <h3>Viajeros</h3>
@@ -428,6 +429,14 @@ dd {
   padding: 0.85rem;
   border: 1px solid #e5e7eb;
   border-radius: 0.85rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.section-link {
+  color: #1d4ed8;
+  text-decoration: none;
+  font-weight: 600;
 }
 
 .list {

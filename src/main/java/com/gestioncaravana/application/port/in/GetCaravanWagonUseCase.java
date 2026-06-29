@@ -1,0 +1,9 @@
+package com.gestioncaravana.application.port.in;
+
+import com.gestioncaravana.application.model.CaravanWagonView;
+import java.util.UUID;
+
+public interface GetCaravanWagonUseCase {
+
+  CaravanWagonView getById(UUID caravanId, UUID wagonId);
+}

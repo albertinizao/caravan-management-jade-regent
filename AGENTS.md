@@ -21,6 +21,7 @@ Use **Maven** for the backend and **npm** for the frontend.
 - Put use-case implementations in `application/usecase`.
 - Put HTTP adapters in `adapter/in/web`.
 - Put persistence and wiring adapters in `adapter/out/*`.
+- Default persistence is local H2 stored under `data/`; do not introduce an external database unless the requirement changes.
 - Keep ArchUnit rules in tests whenever a new package boundary appears.
 - Frontend uses Vue 3 + Vite + TypeScript.
 - Shared UI lives in `frontend/src/components`.

@@ -6,6 +6,7 @@ Monorepo skeleton for a hexagonal backend and a lightweight frontend.
 
 - Backend: Java 25, Spring Boot 4.1.0, Maven
 - Frontend: Node 22, Vue 3, Vite, TypeScript
+- Persistence: self-contained H2 database stored locally under `data/`
 
 ## Architecture
 
@@ -47,6 +48,8 @@ Monorepo skeleton for a hexagonal backend and a lightweight frontend.
 
 - `.\mvnw.cmd test`
 - `.\mvnw.cmd spring-boot:run`
+
+The backend uses a local H2 file database, so no external database service is required.
 
 ### Frontend
 

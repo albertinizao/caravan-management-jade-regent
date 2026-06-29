@@ -1,6 +1,7 @@
 package com.gestioncaravana.adapter.in.web;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record CaravanWagonResponse(
@@ -23,5 +24,6 @@ public record CaravanWagonResponse(
     String specialBenefit,
     String description,
     String notes,
+    List<CaravanWagonImprovementResponse> improvements,
     Instant createdAt,
     Instant updatedAt) {}

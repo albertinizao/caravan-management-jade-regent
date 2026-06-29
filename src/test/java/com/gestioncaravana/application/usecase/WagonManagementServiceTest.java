@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
 import com.gestioncaravana.domain.CaravanMainStats;
 import com.gestioncaravana.domain.CaravanCampaignStatus;
 import com.gestioncaravana.domain.CaravanWagon;
+import com.gestioncaravana.domain.CaravanWagonImprovement;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -23,15 +25,18 @@ class WagonManagementServiceTest {
 
   private InMemoryCaravanRepository caravanRepository;
   private InMemoryWagonRepository wagonRepository;
+  private InMemoryImprovementRepository improvementRepository;
   private WagonManagementService service;
 
   @BeforeEach
   void setUp() {
     caravanRepository = new InMemoryCaravanRepository();
     wagonRepository = new InMemoryWagonRepository();
+    improvementRepository = new InMemoryImprovementRepository();
     service = new WagonManagementService(
         caravanRepository,
         wagonRepository,
+        improvementRepository,
         Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
   }
 
@@ -49,6 +54,7 @@ class WagonManagementServiceTest {
     assertThat(created.name()).isEqualTo("Carro Cubierto");
     assertThat(service.list(caravan.id())).hasSize(1);
     assertThat(service.getById(caravan.id(), created.id()).wagonTypeCode()).isEqualTo("carro-cubierto");
+    assertThat(service.getById(caravan.id(), created.id()).improvements()).isEmpty();
   }
 
   @Test
@@ -90,6 +96,41 @@ class WagonManagementServiceTest {
     service.delete(caravan.id(), created.id());
 
     assertThat(service.list(caravan.id())).isEmpty();
+  }
+
+  @Test
+  void addsAndRemovesImprovementAndUpdatesDerivedStats() {
+    var caravan = createCaravan();
+    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto"));
+
+    var withImprovement = service.execute(
+        caravan.id(),
+        wagon.id(),
+        new com.gestioncaravana.application.port.in.AddCaravanWagonImprovementUseCase.AddCaravanWagonImprovementCommand("refuerzo-para-carros"));
+
+    assertThat(withImprovement.hitPoints()).isEqualTo(40);
+    assertThat(withImprovement.cargoCapacity()).isEqualTo(3);
+    assertThat(withImprovement.improvements()).hasSize(1);
+
+    var improvementId = withImprovement.improvements().getFirst().id();
+    var afterRemoval = service.execute(caravan.id(), wagon.id(), improvementId);
+
+    assertThat(afterRemoval.hitPoints()).isEqualTo(30);
+    assertThat(afterRemoval.improvements()).isEmpty();
+  }
+
+  @Test
+  void rejectsIncompatibleImprovements() {
+    var caravan = createCaravan();
+    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto"));
+    service.execute(caravan.id(), wagon.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonImprovementUseCase.AddCaravanWagonImprovementCommand("patines-de-hielo"));
+
+    assertThatThrownBy(() -> service.execute(
+        caravan.id(),
+        wagon.id(),
+        new com.gestioncaravana.application.port.in.AddCaravanWagonImprovementUseCase.AddCaravanWagonImprovementCommand("ruedas-mejoradas")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Incompatible");
   }
 
   private CaravanCampaign createCaravan() {
@@ -161,6 +202,40 @@ class WagonManagementServiceTest {
       return wagons.stream()
           .filter(wagon -> wagon.caravanId().equals(caravanId) && wagon.wagonTypeCode().equals(wagonTypeCode))
           .count();
+    }
+  }
+
+  private static final class InMemoryImprovementRepository implements CaravanWagonImprovementRepositoryPort {
+    private final List<CaravanWagonImprovement> improvements = new ArrayList<>();
+
+    @Override
+    public CaravanWagonImprovement save(CaravanWagonImprovement improvement) {
+      improvements.removeIf(existing -> existing.id().equals(improvement.id()));
+      improvements.add(improvement);
+      return improvement;
+    }
+
+    @Override
+    public List<CaravanWagonImprovement> findAllByCaravanIdAndWagonId(UUID caravanId, UUID wagonId) {
+      return improvements.stream()
+          .filter(improvement -> improvement.caravanId().equals(caravanId) && improvement.wagonId().equals(wagonId))
+          .toList();
+    }
+
+    @Override
+    public Optional<CaravanWagonImprovement> findById(UUID caravanId, UUID wagonId, UUID improvementId) {
+      return improvements.stream()
+          .filter(improvement -> improvement.caravanId().equals(caravanId)
+              && improvement.wagonId().equals(wagonId)
+              && improvement.id().equals(improvementId))
+          .findFirst();
+    }
+
+    @Override
+    public void deleteById(UUID caravanId, UUID wagonId, UUID improvementId) {
+      improvements.removeIf(improvement -> improvement.caravanId().equals(caravanId)
+          && improvement.wagonId().equals(wagonId)
+          && improvement.id().equals(improvementId));
     }
   }
 }

@@ -1,6 +1,7 @@
 package com.gestioncaravana.application.model;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record CaravanWagonView(
@@ -23,5 +24,6 @@ public record CaravanWagonView(
     String specialBenefit,
     String description,
     String notes,
+    List<CaravanWagonImprovementView> improvements,
     Instant createdAt,
     Instant updatedAt) {}

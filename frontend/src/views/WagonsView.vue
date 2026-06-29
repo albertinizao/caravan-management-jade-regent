@@ -2,9 +2,23 @@
 import { computed, onMounted, ref } from "vue";
 
 import { getActiveCaravan, listCaravans } from "@/services/caravans";
-import { addCaravanWagon, deleteCaravanWagon, getCaravanWagon, listCaravanWagons, listWagonCatalog } from "@/services/wagons";
+import {
+  addCaravanWagon,
+  addCaravanWagonImprovement,
+  deleteCaravanWagon,
+  deleteCaravanWagonImprovement,
+  getCaravanWagon,
+  listCaravanWagons,
+  listWagonCatalog,
+  listWagonImprovementCatalog,
+} from "@/services/wagons";
 import type { Caravan } from "@/types/caravan";
-import type { CaravanWagon, WagonCatalogItem } from "@/types/wagon";
+import type {
+  CaravanWagon,
+  CaravanWagonImprovement,
+  WagonCatalogItem,
+  WagonImprovementCatalogItem,
+} from "@/types/wagon";
 
 const caravans = ref<Caravan[]>([]);
 const activeCaravan = ref<Caravan | null>(null);
@@ -16,8 +30,14 @@ const error = ref<string | null>(null);
 const addModalOpen = ref(false);
 const selectedCatalogCode = ref<string | null>(null);
 const selectedWagon = ref<CaravanWagon | null>(null);
+const improvementCatalog = ref<WagonImprovementCatalogItem[]>([]);
+const improvementModalOpen = ref(false);
+const selectedImprovementCode = ref<string | null>(null);
+const improvementsExpanded = ref(false);
+const improvementDeleteMode = ref(false);
 const addTypeFilter = ref<"all" | "viajeros" | "mercancias" | "especiales">("all");
 const addSearch = ref("");
+const improvementSearch = ref("");
 const wagonsTypeFilter = ref<"all" | "viajeros" | "mercancias" | "especiales">("all");
 const wagonsSearch = ref("");
 
@@ -27,6 +47,14 @@ const selectedCatalogItem = computed(() => {
   }
 
   return null;
+});
+
+const selectedImprovementItem = computed(() => {
+  if (!selectedImprovementCode.value) {
+    return null;
+  }
+
+  return improvementCatalog.value.find((item) => item.code === selectedImprovementCode.value) ?? null;
 });
 
 const totalCapacity = computed(() => (activeCaravan.value ? 10 + activeCaravan.value.level : 0));
@@ -40,6 +68,12 @@ const visibleCatalogItems = computed(() =>
 const visibleWagons = computed(() =>
   wagons.value.filter((item) => matchesTypeFilter(item.category, wagonsTypeFilter.value))
     .filter((item) => matchesSearch(item.name, wagonsSearch.value))
+);
+
+const visibleImprovementItems = computed(() =>
+  improvementCatalog.value
+    .filter((item) => matchesSearch(item.name, improvementSearch.value))
+    .sort((left, right) => Number(right.available) - Number(left.available))
 );
 
 async function refresh() {
@@ -114,6 +148,9 @@ async function openWagonDetails(wagon: CaravanWagon) {
 
   try {
     selectedWagon.value = await getCaravanWagon(activeCaravan.value.id, wagon.id);
+    improvementModalOpen.value = false;
+    selectedImprovementCode.value = null;
+    improvementSearch.value = "";
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to load wagon details";
   }
@@ -148,11 +185,111 @@ async function handleDeleteSelectedWagon() {
 
 function closeModal() {
   selectedWagon.value = null;
+  improvementModalOpen.value = false;
+  selectedImprovementCode.value = null;
+  improvementCatalog.value = [];
+  improvementsExpanded.value = false;
+  improvementDeleteMode.value = false;
 }
 
 function closeAddModal() {
   addModalOpen.value = false;
   selectedCatalogCode.value = null;
+}
+
+function replaceWagonInList(updatedWagon: CaravanWagon) {
+  const index = wagons.value.findIndex((wagon) => wagon.id === updatedWagon.id);
+  if (index >= 0) {
+    wagons.value.splice(index, 1, updatedWagon);
+  }
+}
+
+async function openImprovementModal() {
+  if (!activeCaravan.value || !selectedWagon.value) {
+    return;
+  }
+
+  try {
+    improvementCatalog.value = await listWagonImprovementCatalog(activeCaravan.value.id, selectedWagon.value.id);
+    selectedImprovementCode.value = improvementCatalog.value.find((item) => item.available)?.code
+      ?? improvementCatalog.value[0]?.code
+      ?? null;
+    improvementSearch.value = "";
+    improvementModalOpen.value = true;
+    improvementsExpanded.value = true;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Failed to load improvement catalog";
+  }
+}
+
+function toggleImprovementsExpanded() {
+  improvementsExpanded.value = !improvementsExpanded.value;
+  if (!improvementsExpanded.value) {
+    improvementDeleteMode.value = false;
+  }
+}
+
+function toggleImprovementDeleteMode() {
+  improvementDeleteMode.value = !improvementDeleteMode.value;
+  if (improvementDeleteMode.value) {
+    improvementsExpanded.value = true;
+  }
+}
+
+async function handleAddSelectedImprovement() {
+  if (!activeCaravan.value || !selectedWagon.value || !selectedImprovementItem.value) {
+    return;
+  }
+
+  submitting.value = true;
+  error.value = null;
+
+  try {
+    const updatedWagon = await addCaravanWagonImprovement(activeCaravan.value.id, selectedWagon.value.id, {
+      improvementTypeCode: selectedImprovementItem.value.code,
+    });
+    selectedWagon.value = updatedWagon;
+    replaceWagonInList(updatedWagon);
+    improvementCatalog.value = await listWagonImprovementCatalog(activeCaravan.value.id, selectedWagon.value.id);
+    selectedImprovementCode.value = selectedImprovementItem.value.code;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Failed to add improvement";
+  } finally {
+    submitting.value = false;
+  }
+}
+
+async function handleRemoveImprovement(improvement: CaravanWagonImprovement) {
+  if (!activeCaravan.value || !selectedWagon.value) {
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `¿Seguro que quieres eliminar "${improvement.name}" del carro "${selectedWagon.value.name}"?`
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  submitting.value = true;
+  error.value = null;
+
+  try {
+    const updatedWagon = await deleteCaravanWagonImprovement(
+      activeCaravan.value.id,
+      selectedWagon.value.id,
+      improvement.id,
+    );
+    selectedWagon.value = updatedWagon;
+    replaceWagonInList(updatedWagon);
+    improvementCatalog.value = await listWagonImprovementCatalog(activeCaravan.value.id, selectedWagon.value.id);
+    selectedImprovementCode.value = selectedImprovementItem.value?.code ?? null;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Failed to delete improvement";
+  } finally {
+    submitting.value = false;
+  }
 }
 
 function categoryFilterKey(category: string) {
@@ -465,6 +602,9 @@ onMounted(refresh);
               <h2>{{ selectedWagon.name }}</h2>
             </div>
             <div class="detail-actions">
+              <button class="secondary-button" type="button" :disabled="submitting" @click="openImprovementModal">
+                Mejoras
+              </button>
               <button class="danger-button" type="button" :disabled="submitting" @click="handleDeleteSelectedWagon">
                 Eliminar
               </button>
@@ -499,9 +639,156 @@ onMounted(refresh);
             <p>{{ selectedWagon.notes }}</p>
           </section>
 
+          <section class="info-block improvements-accordion">
+            <div class="accordion-header">
+              <button class="accordion-title-button" type="button" @click="toggleImprovementsExpanded">
+                <div class="accordion-title">
+                  <h3>Mejoras aplicadas</h3>
+                  <p class="muted">{{ selectedWagon.improvements.length }} mejoras</p>
+                </div>
+              </button>
+
+              <div class="accordion-actions">
+                <button class="secondary-button" type="button" :disabled="submitting" @click="openImprovementModal">
+                  Añadir mejora
+                </button>
+                <button class="secondary-button" type="button" :class="{ active: improvementDeleteMode }" @click="toggleImprovementDeleteMode">
+                  Eliminar
+                </button>
+                <button class="secondary-button" type="button" @click="toggleImprovementsExpanded">
+                  {{ improvementsExpanded ? "Ocultar" : "Mostrar" }}
+                </button>
+              </div>
+            </div>
+
+            <div v-if="improvementsExpanded">
+              <div v-if="selectedWagon.improvements.length === 0" class="muted">
+                Este carro todavía no tiene mejoras.
+              </div>
+              <div v-else class="improvements-list">
+                <article v-for="improvement in selectedWagon.improvements" :key="improvement.id" class="improvement-card">
+                  <div>
+                    <strong>{{ improvement.name }}</strong>
+                    <p class="muted">{{ improvement.category }}</p>
+                    <p>{{ improvement.specialBenefit }}</p>
+                  </div>
+                  <div v-if="improvementDeleteMode" class="improvement-actions">
+                    <button
+                      class="trash-button"
+                      type="button"
+                      :disabled="submitting"
+                      :aria-label="`Eliminar ${improvement.name}`"
+                      @click="handleRemoveImprovement(improvement)"
+                    >
+                      🗑
+                    </button>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </section>
+
           <p class="muted meta-line">
             Añadido el {{ new Date(selectedWagon.createdAt).toLocaleString() }}
           </p>
+        </div>
+      </div>
+    </teleport>
+
+    <teleport to="body">
+      <div v-if="improvementModalOpen" class="modal-backdrop" @click.self="improvementModalOpen = false">
+        <div class="modal modal-add">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">Añadir mejora</p>
+              <h2>{{ selectedWagon?.name }}</h2>
+            </div>
+            <button class="ghost-button" type="button" @click="improvementModalOpen = false">Cerrar</button>
+          </div>
+
+          <div class="filters">
+            <label class="search-field">
+              <span>Buscador</span>
+              <input v-model="improvementSearch" type="search" placeholder="Buscar mejora" />
+            </label>
+            <div class="search-action-row">
+              <button
+                class="primary-button confirm-button"
+                :class="{ loading: submitting }"
+                type="button"
+                :disabled="submitting || !selectedImprovementItem || !selectedImprovementItem.available"
+                @click="handleAddSelectedImprovement"
+              >
+                <span v-if="submitting" class="spinner" aria-hidden="true"></span>
+                <span class="confirm-label">{{ submitting ? "Añadiendo…" : "Confirmar" }}</span>
+                <span v-if="!submitting" class="confirm-arrow" aria-hidden="true">→</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="add-layout">
+            <div class="catalog-list">
+              <button
+                v-for="item in visibleImprovementItems"
+                :key="item.code"
+                class="catalog-item"
+                :class="{ selected: item.code === selectedImprovementItem?.code }"
+                type="button"
+                @click="selectedImprovementCode = item.code"
+              >
+                <div>
+                  <strong>{{ item.name }}</strong>
+                  <p class="muted">{{ item.category }}</p>
+                  <p v-if="item.blockedReason" class="limit-warning">{{ item.blockedReason }}</p>
+                  <p v-else class="limit-ok">
+                    Disponible {{ item.repeatable ? `(${item.ownedCount}/${item.maxPerWagon})` : item.available ? "sí" : "no" }}
+                  </p>
+                </div>
+                <div class="catalog-meta">
+                  <span>{{ item.costExpression }}</span>
+                  <span v-if="item.repeatable">Repetible</span>
+                  <span v-else>Límite {{ item.maxPerWagon }}</span>
+                </div>
+              </button>
+            </div>
+
+            <div v-if="selectedImprovementItem" class="preview">
+              <div class="preview-top">
+                <div>
+                  <h3>{{ selectedImprovementItem.name }}</h3>
+                  <p class="muted">{{ selectedImprovementItem.category }}</p>
+                </div>
+              </div>
+
+              <dl class="stats">
+                <div><dt>Coste</dt><dd>{{ selectedImprovementItem.costExpression }}</dd></div>
+                <div><dt>Máx.</dt><dd>{{ selectedImprovementItem.maxPerWagon }}</dd></div>
+                <div><dt>Aplicadas</dt><dd>{{ selectedImprovementItem.ownedCount }}</dd></div>
+                <div><dt>Repetible</dt><dd>{{ selectedImprovementItem.repeatable ? "Sí" : "No" }}</dd></div>
+              </dl>
+
+              <section class="info-block">
+                <h4>Beneficio especial</h4>
+                <p>{{ selectedImprovementItem.specialBenefit }}</p>
+              </section>
+
+              <section class="info-block">
+                <h4>Descripción</h4>
+                <p>{{ selectedImprovementItem.description }}</p>
+              </section>
+
+              <section v-if="selectedImprovementItem.notes" class="info-block">
+                <h4>Notas</h4>
+                <p>{{ selectedImprovementItem.notes }}</p>
+              </section>
+
+              <section class="info-block">
+                <h4>Estado</h4>
+                <p v-if="selectedImprovementItem.available" class="limit-ok">Disponible para añadir</p>
+                <p v-else class="limit-warning">{{ selectedImprovementItem.blockedReason ?? "No disponible" }}</p>
+              </section>
+            </div>
+          </div>
         </div>
       </div>
     </teleport>
@@ -753,6 +1040,82 @@ dd {
   gap: 0.35rem;
 }
 
+.improvements-accordion {
+  gap: 0.75rem;
+}
+
+.accordion-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.accordion-title-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.accordion-title {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.accordion-state {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.accordion-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.improvements-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.improvement-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.85rem;
+  background: white;
+}
+
+.improvement-actions {
+  display: flex;
+  align-items: start;
+}
+
+.trash-button {
+  width: 2.4rem;
+  height: 2.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  border: 1px solid #fecaca;
+  background: #fee2e2;
+  color: #991b1b;
+  cursor: pointer;
+  font-size: 1.05rem;
+}
+
+.secondary-button.active {
+  border-color: #1d4ed8;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
 .table-wrap {
   overflow: auto;
   margin-top: 1rem;
@@ -789,6 +1152,7 @@ dd {
 
 .primary-button,
 .ghost-button,
+.secondary-button,
 .primary-link {
   display: inline-flex;
   align-items: center;
@@ -798,6 +1162,7 @@ dd {
 }
 
 .primary-button,
+.secondary-button,
 .ghost-button {
   padding: 0.8rem 1rem;
   border: 1px solid #cbd5e1;
@@ -883,6 +1248,11 @@ dd {
 
 .ghost-button {
   background: white;
+}
+
+.secondary-button {
+  background: #f8fafc;
+  border-color: #d1d5db;
 }
 
 .primary-link {

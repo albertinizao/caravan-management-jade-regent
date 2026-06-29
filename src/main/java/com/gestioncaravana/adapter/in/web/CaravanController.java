@@ -10,11 +10,18 @@ import com.gestioncaravana.application.port.in.ListCaravanWagonsUseCase;
 import com.gestioncaravana.application.port.in.ListWagonCatalogUseCase;
 import com.gestioncaravana.application.port.in.AddCaravanWagonUseCase;
 import com.gestioncaravana.application.port.in.AddCaravanWagonImprovementUseCase;
+import com.gestioncaravana.application.port.in.AddCaravanTravelerUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanWagonUseCase;
+import com.gestioncaravana.application.port.in.GetCaravanTravelerUseCase;
 import com.gestioncaravana.application.port.in.DeleteCaravanWagonImprovementUseCase;
 import com.gestioncaravana.application.port.in.SelectActiveCaravanUseCase;
+import com.gestioncaravana.application.port.in.ListCaravanTravelersUseCase;
 import com.gestioncaravana.application.port.in.ListCaravanWagonImprovementsUseCase;
 import com.gestioncaravana.application.port.in.ListWagonImprovementCatalogUseCase;
+import com.gestioncaravana.application.port.in.ListTravelerRoleCatalogUseCase;
+import com.gestioncaravana.application.port.in.UpdateCaravanTravelerRoleUseCase;
+import com.gestioncaravana.application.port.in.UpdateCaravanTravelerUseCase;
+import com.gestioncaravana.application.port.in.UpdateCaravanTravelerWagonUseCase;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -40,6 +47,13 @@ public class CaravanController {
   private final GetActiveCaravanUseCase getActiveCaravanUseCase;
   private final ListWagonCatalogUseCase listWagonCatalogUseCase;
   private final ListWagonImprovementCatalogUseCase listWagonImprovementCatalogUseCase;
+  private final ListTravelerRoleCatalogUseCase listTravelerRoleCatalogUseCase;
+  private final ListCaravanTravelersUseCase listCaravanTravelersUseCase;
+  private final GetCaravanTravelerUseCase getCaravanTravelerUseCase;
+  private final AddCaravanTravelerUseCase addCaravanTravelerUseCase;
+  private final UpdateCaravanTravelerUseCase updateCaravanTravelerUseCase;
+  private final UpdateCaravanTravelerWagonUseCase updateCaravanTravelerWagonUseCase;
+  private final UpdateCaravanTravelerRoleUseCase updateCaravanTravelerRoleUseCase;
   private final ListCaravanWagonImprovementsUseCase listCaravanWagonImprovementsUseCase;
   private final ListCaravanWagonsUseCase listCaravanWagonsUseCase;
   private final GetCaravanWagonUseCase getCaravanWagonUseCase;
@@ -57,6 +71,13 @@ public class CaravanController {
       GetActiveCaravanUseCase getActiveCaravanUseCase,
       ListWagonCatalogUseCase listWagonCatalogUseCase,
       ListWagonImprovementCatalogUseCase listWagonImprovementCatalogUseCase,
+      ListTravelerRoleCatalogUseCase listTravelerRoleCatalogUseCase,
+      ListCaravanTravelersUseCase listCaravanTravelersUseCase,
+      GetCaravanTravelerUseCase getCaravanTravelerUseCase,
+      AddCaravanTravelerUseCase addCaravanTravelerUseCase,
+      UpdateCaravanTravelerUseCase updateCaravanTravelerUseCase,
+      UpdateCaravanTravelerWagonUseCase updateCaravanTravelerWagonUseCase,
+      UpdateCaravanTravelerRoleUseCase updateCaravanTravelerRoleUseCase,
       ListCaravanWagonImprovementsUseCase listCaravanWagonImprovementsUseCase,
       ListCaravanWagonsUseCase listCaravanWagonsUseCase,
       GetCaravanWagonUseCase getCaravanWagonUseCase,
@@ -72,6 +93,13 @@ public class CaravanController {
     this.getActiveCaravanUseCase = getActiveCaravanUseCase;
     this.listWagonCatalogUseCase = listWagonCatalogUseCase;
     this.listWagonImprovementCatalogUseCase = listWagonImprovementCatalogUseCase;
+    this.listTravelerRoleCatalogUseCase = listTravelerRoleCatalogUseCase;
+    this.listCaravanTravelersUseCase = listCaravanTravelersUseCase;
+    this.getCaravanTravelerUseCase = getCaravanTravelerUseCase;
+    this.addCaravanTravelerUseCase = addCaravanTravelerUseCase;
+    this.updateCaravanTravelerUseCase = updateCaravanTravelerUseCase;
+    this.updateCaravanTravelerWagonUseCase = updateCaravanTravelerWagonUseCase;
+    this.updateCaravanTravelerRoleUseCase = updateCaravanTravelerRoleUseCase;
     this.listCaravanWagonImprovementsUseCase = listCaravanWagonImprovementsUseCase;
     this.listCaravanWagonsUseCase = listCaravanWagonsUseCase;
     this.getCaravanWagonUseCase = getCaravanWagonUseCase;
@@ -120,6 +148,94 @@ public class CaravanController {
   List<WagonCatalogItemResponse> listWagonCatalog(@PathVariable UUID caravanId) {
     getCaravanUseCase.getById(caravanId);
     return listWagonCatalogUseCase.list().stream().map(CaravanWagonResponseMapper::toResponse).toList();
+  }
+
+  @GetMapping("/caravans/{caravanId}/travelers/roles/catalog")
+  List<TravelerRoleCatalogItemResponse> listTravelerRoleCatalog(@PathVariable UUID caravanId) {
+    getCaravanUseCase.getById(caravanId);
+    return listTravelerRoleCatalogUseCase.list().stream().map(CaravanTravelerResponseMapper::toResponse).toList();
+  }
+
+  @GetMapping("/caravans/{caravanId}/travelers")
+  List<CaravanTravelerResponse> listCaravanTravelers(
+      @PathVariable UUID caravanId,
+      @org.springframework.web.bind.annotation.RequestParam(required = false) String query,
+      @org.springframework.web.bind.annotation.RequestParam(required = false) String roleCode,
+      @org.springframework.web.bind.annotation.RequestParam(required = false) UUID wagonId) {
+    return listCaravanTravelersUseCase.list(caravanId, query, roleCode, wagonId).stream()
+        .map(CaravanTravelerResponseMapper::toResponse)
+        .toList();
+  }
+
+  @GetMapping("/caravans/{caravanId}/travelers/{travelerId}")
+  CaravanTravelerResponse getCaravanTraveler(@PathVariable UUID caravanId, @PathVariable UUID travelerId) {
+    return CaravanTravelerResponseMapper.toResponse(getCaravanTravelerUseCase.getById(caravanId, travelerId));
+  }
+
+  @PostMapping("/caravans/{caravanId}/travelers")
+  ResponseEntity<CaravanTravelerResponse> addCaravanTraveler(
+      @PathVariable UUID caravanId, @Valid @RequestBody AddCaravanTravelerRequest request) {
+    var created = addCaravanTravelerUseCase.execute(
+        caravanId,
+        new AddCaravanTravelerUseCase.AddCaravanTravelerCommand(
+            request.fullName(),
+            request.description(),
+            request.availableRoleCodes(),
+            request.activeRoleCodes(),
+            request.activeRoleCode(),
+            request.maxActiveRoleCount(),
+            request.salary(),
+            request.contractConditions(),
+            request.consumption(),
+            request.servedTravelerId()));
+    return ResponseEntity.status(HttpStatus.CREATED).body(CaravanTravelerResponseMapper.toResponse(created));
+  }
+
+  @PutMapping("/caravans/{caravanId}/travelers/{travelerId}")
+  CaravanTravelerResponse updateCaravanTraveler(
+      @PathVariable UUID caravanId,
+      @PathVariable UUID travelerId,
+      @Valid @RequestBody UpdateCaravanTravelerRequest request) {
+    return CaravanTravelerResponseMapper.toResponse(
+        updateCaravanTravelerUseCase.execute(
+            caravanId,
+            travelerId,
+            new UpdateCaravanTravelerUseCase.UpdateCaravanTravelerCommand(
+                request.fullName(),
+                request.description(),
+                request.availableRoleCodes(),
+                request.activeRoleCodes(),
+                request.activeRoleCode(),
+                request.maxActiveRoleCount(),
+                request.wagonId(),
+                request.salary(),
+                request.contractConditions(),
+                request.consumption(),
+                request.servedTravelerId())));
+  }
+
+  @PutMapping("/caravans/{caravanId}/travelers/{travelerId}/wagon")
+  CaravanTravelerResponse updateCaravanTravelerWagon(
+      @PathVariable UUID caravanId,
+      @PathVariable UUID travelerId,
+      @RequestBody UpdateCaravanTravelerWagonRequest request) {
+    return CaravanTravelerResponseMapper.toResponse(
+        updateCaravanTravelerWagonUseCase.execute(
+            caravanId, travelerId, new UpdateCaravanTravelerWagonUseCase.UpdateCaravanTravelerWagonCommand(request.wagonId())));
+  }
+
+  @PutMapping("/caravans/{caravanId}/travelers/{travelerId}/role")
+  CaravanTravelerResponse updateCaravanTravelerRole(
+      @PathVariable UUID caravanId,
+      @PathVariable UUID travelerId,
+      @Valid @RequestBody UpdateCaravanTravelerRoleRequest request) {
+    return CaravanTravelerResponseMapper.toResponse(
+        updateCaravanTravelerRoleUseCase.execute(
+            caravanId, travelerId, new UpdateCaravanTravelerRoleUseCase.UpdateCaravanTravelerRoleCommand(
+                request.activeRoleCodes(),
+                request.activeRoleCode(),
+                request.maxActiveRoleCount(),
+                request.servedTravelerId())));
   }
 
   @GetMapping("/caravans/{caravanId}/wagons/{wagonId}/improvements/catalog")

@@ -6,8 +6,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.gestioncaravana.application.port.in.CreateCaravanUseCase.CreateCaravanCommand;
 import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
+import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
 import java.time.Clock;
 import java.time.Instant;
@@ -32,6 +34,7 @@ class CaravanManagementServiceTest {
     service = new CaravanManagementService(
         repository,
         new InMemoryCaravanWagonRepository(),
+        new InMemoryTravelerRepository(),
         activeSelection,
         Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
   }
@@ -138,6 +141,41 @@ class CaravanManagementServiceTest {
       return wagons.stream()
           .filter(wagon -> wagon.caravanId().equals(caravanId) && wagon.wagonTypeCode().equals(wagonTypeCode))
           .count();
+    }
+  }
+
+  private static final class InMemoryTravelerRepository implements CaravanTravelerRepositoryPort {
+    private final List<CaravanTraveler> travelers = new ArrayList<>();
+
+    @Override
+    public CaravanTraveler save(CaravanTraveler traveler) {
+      travelers.removeIf(existing -> existing.id().equals(traveler.id()));
+      travelers.add(traveler);
+      return traveler;
+    }
+
+    @Override
+    public List<CaravanTraveler> findAllByCaravanId(UUID caravanId) {
+      return travelers.stream().filter(traveler -> traveler.caravanId().equals(caravanId)).toList();
+    }
+
+    @Override
+    public Optional<CaravanTraveler> findById(UUID caravanId, UUID travelerId) {
+      return travelers.stream()
+          .filter(traveler -> traveler.caravanId().equals(caravanId) && traveler.id().equals(travelerId))
+          .findFirst();
+    }
+
+    @Override
+    public long countByCaravanIdAndWagonId(UUID caravanId, UUID wagonId) {
+      return travelers.stream()
+          .filter(traveler -> traveler.caravanId().equals(caravanId) && wagonId.equals(traveler.wagonId()))
+          .count();
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      travelers.removeIf(traveler -> traveler.caravanId().equals(caravanId));
     }
   }
 

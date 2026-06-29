@@ -8,6 +8,7 @@
 
       <nav class="nav">
         <RouterLink to="/">Caravanas</RouterLink>
+        <RouterLink to="/travelers">Viajeros</RouterLink>
         <RouterLink to="/wagons">Carros</RouterLink>
       </nav>
     </header>

@@ -193,6 +193,7 @@ onMounted(refresh);
               <section>
                 <h3>Viajeros</h3>
                 <p class="muted">{{ selectedCaravan.travelers.length }} elementos</p>
+                <RouterLink class="section-link" to="/travelers">Abrir vista de viajeros</RouterLink>
               </section>
               <section>
                 <h3>Bestias</h3>

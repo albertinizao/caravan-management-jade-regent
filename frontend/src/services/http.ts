@@ -15,5 +15,15 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
     throw new Error(`Request failed with status ${response.status}`);
   }
 
-  return (await response.json()) as T;
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const body = await response.text();
+
+  if (!body) {
+    return undefined as T;
+  }
+
+  return JSON.parse(body) as T;
 }

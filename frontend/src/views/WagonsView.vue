@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
+import { useToast } from "@/composables/useToast";
 import { getActiveCaravan, listCaravans } from "@/services/caravans";
+import { listCaravanBeasts, updateCaravanBeastAssignment, clearCaravanBeastAssignment } from "@/services/beasts";
 import {
   addCaravanWagon,
   addCaravanWagonImprovement,
@@ -12,8 +14,10 @@ import {
   listWagonCatalog,
   listWagonImprovementCatalog,
 } from "@/services/wagons";
+import { listCaravanTravelers, updateCaravanTravelerWagon } from "@/services/travelers";
 import type { Caravan } from "@/types/caravan";
 import type { CaravanBeast } from "@/types/beast";
+import type { CaravanTraveler } from "@/types/traveler";
 import type {
   CaravanWagon,
   CaravanWagonImprovement,
@@ -25,12 +29,21 @@ const caravans = ref<Caravan[]>([]);
 const activeCaravan = ref<Caravan | null>(null);
 const catalog = ref<WagonCatalogItem[]>([]);
 const wagons = ref<CaravanWagon[]>([]);
+const travelers = ref<CaravanTraveler[]>([]);
+const beasts = ref<CaravanBeast[]>([]);
 const loading = ref(true);
 const submitting = ref(false);
+const pendingAction = ref<string | null>(null);
 const error = ref<string | null>(null);
 const addModalOpen = ref(false);
 const selectedCatalogCode = ref<string | null>(null);
 const selectedWagon = ref<CaravanWagon | null>(null);
+const assignmentModalOpen = ref(false);
+const assignmentModalMode = ref<"traveler" | "beast-traveler" | "beast-draft">("traveler");
+const assignmentModalError = ref<string | null>(null);
+const assignmentModalSuccess = ref<{ id: number; message: string } | null>(null);
+let assignmentModalSuccessId = 0;
+let assignmentModalSuccessTimer: number | null = null;
 const improvementCatalog = ref<WagonImprovementCatalogItem[]>([]);
 const improvementModalOpen = ref(false);
 const selectedImprovementCode = ref<string | null>(null);
@@ -42,6 +55,12 @@ const addSearch = ref("");
 const improvementSearch = ref("");
 const wagonsTypeFilter = ref<"all" | "viajeros" | "mercancias" | "especiales">("all");
 const wagonsSearch = ref("");
+const draftMediumSlotsPerLargeBeast = 4;
+const { showToast } = useToast();
+
+function isPending(action: string) {
+  return pendingAction.value === action;
+}
 
 interface DraftRequirement {
   maxLargeBeasts: number;
@@ -96,6 +115,80 @@ const visibleWagons = computed(() =>
     .filter((item) => matchesSearch(item.name, wagonsSearch.value))
 );
 
+const selectedWagonTravelers = computed(() =>
+  selectedWagon.value ? travelers.value.filter((traveler) => traveler.wagonId === selectedWagon.value?.id) : []
+);
+
+const selectedWagonTravelerBeasts = computed(() =>
+  selectedWagon.value
+    ? beasts.value.filter((beast) => beast.assignmentType === "TRAVELER" && beast.assignedWagonId === selectedWagon.value?.id)
+    : []
+);
+
+const selectedWagonDraftBeasts = computed(() =>
+  selectedWagon.value
+    ? beasts.value.filter((beast) => beast.assignmentType === "DRAFT" && beast.assignedWagonId === selectedWagon.value?.id)
+    : []
+);
+
+const unassignedTravelers = computed(() => travelers.value.filter((traveler) => !traveler.wagonId));
+
+const unassignedBeasts = computed(() => beasts.value.filter((beast) => beast.assignmentType === "NONE"));
+
+const selectedWagonOccupancy = computed(() => selectedWagonTravelers.value.length + selectedWagonTravelerBeasts.value.length);
+const selectedWagonCapacityRemaining = computed(() =>
+  selectedWagon.value ? Math.max(0, selectedWagon.value.travelerCapacity - selectedWagonOccupancy.value) : 0
+);
+const selectedWagonDraftRequirement = computed(() =>
+  selectedWagon.value ? parseDraftRequirement(selectedWagon.value.propulsion) : null,
+);
+const availableTravelersForSelectedWagon = computed(() =>
+  selectedWagonCapacityRemaining.value > 0 ? unassignedTravelers.value : []
+);
+const availableTravelerBeastsForSelectedWagon = computed(() =>
+  selectedWagonCapacityRemaining.value > 0 ? unassignedBeasts.value : []
+);
+const availableDraftBeastsForSelectedWagon = computed(() => {
+  const wagon = selectedWagon.value;
+  if (!wagon || !selectedWagonDraftRequirement.value) {
+    return [];
+  }
+
+  return unassignedBeasts.value.filter((beast) => canAssignBeastToDraft(wagon, beast));
+});
+
+const assignmentModalTitle = computed(() => {
+  if (assignmentModalMode.value === "traveler") {
+    return "Asignar viajeros sin carro";
+  }
+  if (assignmentModalMode.value === "beast-traveler") {
+    return "Asignar bestias como viajeras";
+  }
+  return "Asignar bestias al tiro";
+});
+
+const assignmentModalHint = computed(() => {
+  if (!selectedWagon.value) {
+    return "";
+  }
+
+  if (assignmentModalMode.value === "traveler") {
+    return selectedWagonCapacityRemaining.value === 0
+      ? "Este carro ya no tiene plazas libres para viajeros."
+      : `Se mostrarán solo viajeros sin asignar. Quedan ${selectedWagonCapacityRemaining.value} plazas libres en este carro.`;
+  }
+
+  if (assignmentModalMode.value === "beast-traveler") {
+    return selectedWagonCapacityRemaining.value === 0
+      ? "Este carro ya no tiene plazas libres para bestias viajeras."
+      : `Se mostrarán solo bestias sin asignar. Quedan ${selectedWagonCapacityRemaining.value} plazas libres en este carro.`;
+  }
+
+  return availableDraftBeastsForSelectedWagon.value.length === 0
+    ? "No hay bestias válidas para el tiro de este carro."
+    : "Se mostrarán solo bestias sin asignar que cumplan el requisito de tiro.";
+});
+
 const visibleImprovementItems = computed(() =>
   improvementCatalog.value
     .filter((item) => matchesSearch(item.name, improvementSearch.value))
@@ -103,6 +196,13 @@ const visibleImprovementItems = computed(() =>
 );
 
 async function refresh() {
+  const previousAction = pendingAction.value;
+  const trackRefresh = previousAction === null;
+
+  if (trackRefresh) {
+    pendingAction.value = "refresh";
+  }
+
   loading.value = true;
   error.value = null;
 
@@ -112,13 +212,17 @@ async function refresh() {
     activeCaravan.value = activeResponse.caravan;
 
     if (activeResponse.caravan) {
-      const [catalogResponse, wagonsResponse] = await Promise.all([
+      const [catalogResponse, wagonsResponse, travelerResponse, beastResponse] = await Promise.all([
         listWagonCatalog(activeResponse.caravan.id),
         listCaravanWagons(activeResponse.caravan.id),
+        listCaravanTravelers(activeResponse.caravan.id),
+        listCaravanBeasts(activeResponse.caravan.id),
       ]);
 
       catalog.value = catalogResponse;
       wagons.value = wagonsResponse;
+      travelers.value = travelerResponse;
+      beasts.value = beastResponse;
 
       if (
         catalogResponse.length > 0
@@ -126,15 +230,28 @@ async function refresh() {
       ) {
         selectedCatalogCode.value = catalogResponse[0].code;
       }
+
+      if (selectedWagon.value) {
+        const refreshedWagon = wagonsResponse.find((wagon) => wagon.id === selectedWagon.value?.id);
+        if (refreshedWagon) {
+          selectedWagon.value = await getCaravanWagon(activeResponse.caravan.id, refreshedWagon.id);
+        } else {
+          closeModal();
+        }
+      }
     } else {
       catalog.value = [];
       wagons.value = [];
+      travelers.value = [];
+      beasts.value = [];
       selectedCatalogCode.value = null;
+      closeModal();
     }
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to load wagons";
   } finally {
     loading.value = false;
+    pendingAction.value = trackRefresh ? null : previousAction;
   }
 }
 
@@ -144,6 +261,7 @@ async function handleAddSelected() {
   }
 
   submitting.value = true;
+  pendingAction.value = "add-wagon";
   error.value = null;
 
   try {
@@ -151,10 +269,12 @@ async function handleAddSelected() {
     await refresh();
     addModalOpen.value = false;
     selectedCatalogCode.value = selectedCatalogItem.value.code;
+    showToast(`Carro añadido: ${selectedCatalogItem.value.name}.`);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to add wagon";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -182,6 +302,49 @@ async function openWagonDetails(wagon: CaravanWagon) {
   }
 }
 
+function openAssignmentModal(mode: "traveler" | "beast-traveler" | "beast-draft") {
+  if (!selectedWagon.value) {
+    return;
+  }
+
+  if (
+    (mode === "traveler" && availableTravelersForSelectedWagon.value.length === 0)
+    || (mode === "beast-traveler" && availableTravelerBeastsForSelectedWagon.value.length === 0)
+    || (mode === "beast-draft" && availableDraftBeastsForSelectedWagon.value.length === 0)
+  ) {
+    return;
+  }
+
+  assignmentModalMode.value = mode;
+  assignmentModalError.value = null;
+  assignmentModalSuccess.value = null;
+  assignmentModalOpen.value = true;
+}
+
+function closeAssignmentModal() {
+  assignmentModalOpen.value = false;
+  assignmentModalError.value = null;
+  assignmentModalSuccess.value = null;
+  if (assignmentModalSuccessTimer !== null) {
+    window.clearTimeout(assignmentModalSuccessTimer);
+    assignmentModalSuccessTimer = null;
+  }
+}
+
+function showAssignmentSuccess(message: string) {
+  assignmentModalSuccessId += 1;
+  assignmentModalSuccess.value = { id: assignmentModalSuccessId, message };
+
+  if (assignmentModalSuccessTimer !== null) {
+    window.clearTimeout(assignmentModalSuccessTimer);
+  }
+
+  assignmentModalSuccessTimer = window.setTimeout(() => {
+    assignmentModalSuccess.value = null;
+    assignmentModalSuccessTimer = null;
+  }, 2200);
+}
+
 async function handleDeleteSelectedWagon() {
   if (!activeCaravan.value || !selectedWagon.value) {
     return;
@@ -196,21 +359,25 @@ async function handleDeleteSelectedWagon() {
   }
 
   submitting.value = true;
+  pendingAction.value = `delete-wagon:${selectedWagon.value.id}`;
   error.value = null;
 
   try {
     await deleteCaravanWagon(activeCaravan.value.id, selectedWagon.value.id);
     selectedWagon.value = null;
     await refresh();
+    showToast("Carro eliminado.");
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to delete wagon";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
 function closeModal() {
   selectedWagon.value = null;
+  closeAssignmentModal();
   improvementModalOpen.value = false;
   selectedImprovementCode.value = null;
   improvementCatalog.value = [];
@@ -231,10 +398,153 @@ function replaceWagonInList(updatedWagon: CaravanWagon) {
   }
 }
 
+async function assignTravelerToSelectedWagon(traveler: CaravanTraveler) {
+  if (!activeCaravan.value || !selectedWagon.value) {
+    return;
+  }
+
+  if (selectedWagonCapacityRemaining.value <= 0) {
+    assignmentModalError.value = "Este carro ya no tiene plazas libres para viajeros.";
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = `assign-traveler:${traveler.id}`;
+  assignmentModalError.value = null;
+  error.value = null;
+
+  try {
+    await updateCaravanTravelerWagon(activeCaravan.value.id, traveler.id, {
+      wagonId: selectedWagon.value.id,
+    });
+    showAssignmentSuccess(`Viajero añadido: ${traveler.fullName}.`);
+    showToast(`Viajero añadido al carro: ${traveler.fullName}.`);
+    await refresh();
+  } catch (cause) {
+    assignmentModalError.value = cause instanceof Error ? cause.message : "Failed to assign traveler";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+function canAssignBeastToDraft(wagon: CaravanWagon, beast: CaravanBeast): boolean {
+  const requirement = parseDraftRequirement(wagon.propulsion);
+  if (!requirement || beast.assignmentType !== "NONE") {
+    return false;
+  }
+
+  const size = beast.size.toUpperCase();
+  if (size !== "G" && size !== "M") {
+    return false;
+  }
+
+  const occupancy = draftOccupancyForWagon(wagon);
+  const additionalLarge = size === "G" ? 1 : 0;
+  const additionalMedium = size === "M" ? 1 : 0;
+  const totalLarge = occupancy.largeCount + additionalLarge;
+  const totalMediumSlots = occupancy.mediumCount + additionalMedium
+    + (totalLarge * draftMediumSlotsPerLargeBeast);
+
+  return totalLarge <= requirement.maxLargeBeasts && totalMediumSlots <= requirement.maxMediumBeasts;
+}
+
+async function assignBeastToSelectedWagon(beast: CaravanBeast, assignmentType: "TRAVELER" | "DRAFT") {
+  if (!activeCaravan.value || !selectedWagon.value) {
+    return;
+  }
+
+  if (assignmentType === "TRAVELER" && selectedWagonCapacityRemaining.value <= 0) {
+    assignmentModalError.value = "Este carro ya no tiene plazas libres para bestias viajeras.";
+    return;
+  }
+
+  if (assignmentType === "DRAFT" && !canAssignBeastToDraft(selectedWagon.value, beast)) {
+    assignmentModalError.value = "Solo las bestias medianas o grandes pueden ir al tiro.";
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = `assign-beast-${assignmentType.toLowerCase()}:${beast.id}`;
+  assignmentModalError.value = null;
+  error.value = null;
+
+  try {
+    await updateCaravanBeastAssignment(activeCaravan.value.id, beast.id, {
+      assignmentType,
+      wagonId: selectedWagon.value.id,
+    });
+    showAssignmentSuccess(
+      assignmentType === "DRAFT"
+        ? `Bestia al tiro añadida: ${beast.name}.`
+        : `Bestia viajera añadida: ${beast.name}.`,
+    );
+    showToast(
+      assignmentType === "DRAFT"
+        ? `Bestia añadida al tiro: ${beast.name}.`
+        : `Bestia añadida como viajera: ${beast.name}.`,
+    );
+    await refresh();
+  } catch (cause) {
+    assignmentModalError.value = cause instanceof Error ? cause.message : "Failed to assign beast";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+async function clearTravelerAssignment(traveler: CaravanTraveler) {
+  if (!activeCaravan.value || !selectedWagon.value) {
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = `clear-traveler:${traveler.id}`;
+  error.value = null;
+
+  try {
+    await updateCaravanTravelerWagon(activeCaravan.value.id, traveler.id, { wagonId: null });
+    showAssignmentSuccess(`Viajero quitado: ${traveler.fullName}.`);
+    showToast(`Viajero quitado del carro: ${traveler.fullName}.`);
+    await refresh();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Failed to clear traveler assignment";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+async function clearBeastAssignment(beast: CaravanBeast) {
+  if (!activeCaravan.value || !selectedWagon.value) {
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = `clear-beast:${beast.id}`;
+  error.value = null;
+
+  try {
+    await clearCaravanBeastAssignment(activeCaravan.value.id, beast.id);
+    showAssignmentSuccess(`Bestia quitada: ${beast.name}.`);
+    showToast(`Bestia quitada del carro: ${beast.name}.`);
+    await refresh();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Failed to clear beast assignment";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
 async function openImprovementModal() {
   if (!activeCaravan.value || !selectedWagon.value) {
     return;
   }
+
+  submitting.value = true;
+  pendingAction.value = "open-improvements";
+  error.value = null;
 
   try {
     improvementCatalog.value = await listWagonImprovementCatalog(activeCaravan.value.id, selectedWagon.value.id);
@@ -246,6 +556,9 @@ async function openImprovementModal() {
     improvementsExpanded.value = true;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to load improvement catalog";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -269,6 +582,7 @@ async function handleAddSelectedImprovement() {
   }
 
   submitting.value = true;
+  pendingAction.value = "add-improvement";
   error.value = null;
 
   try {
@@ -279,10 +593,12 @@ async function handleAddSelectedImprovement() {
     replaceWagonInList(updatedWagon);
     improvementCatalog.value = await listWagonImprovementCatalog(activeCaravan.value.id, selectedWagon.value.id);
     selectedImprovementCode.value = selectedImprovementItem.value.code;
+    showToast(`Mejora añadida: ${selectedImprovementItem.value.name}.`);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to add improvement";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -300,6 +616,7 @@ async function handleRemoveImprovement(improvement: CaravanWagonImprovement) {
   }
 
   submitting.value = true;
+  pendingAction.value = `delete-improvement:${improvement.id}`;
   error.value = null;
 
   try {
@@ -312,10 +629,12 @@ async function handleRemoveImprovement(improvement: CaravanWagonImprovement) {
     replaceWagonInList(updatedWagon);
     improvementCatalog.value = await listWagonImprovementCatalog(activeCaravan.value.id, selectedWagon.value.id);
     selectedImprovementCode.value = selectedImprovementItem.value?.code ?? null;
+    showToast(`Mejora eliminada: ${improvement.name}.`);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to delete improvement";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -526,7 +845,12 @@ onMounted(refresh);
           </p>
         </div>
 
-        <button class="ghost-button" type="button" @click="refresh">Refrescar</button>
+        <button class="ghost-button" type="button" :disabled="loading || submitting" @click="refresh">
+          <span class="button-with-spinner">
+            <span v-if="isPending('refresh')" class="button-spinner" aria-hidden="true"></span>
+            <span>{{ isPending('refresh') ? "Refrescando…" : "Refrescar" }}</span>
+          </span>
+        </button>
       </header>
 
       <p v-if="error" class="error">{{ error }}</p>
@@ -656,12 +980,15 @@ onMounted(refresh);
                 class="primary-button confirm-button"
                 :class="{ disabled: submitting || !selectedCatalogItem || selectedCatalogNeedsOverride, loading: submitting }"
                 type="button"
-                :disabled="submitting || !selectedCatalogItem || selectedCatalogNeedsOverride"
+                :disabled="loading || submitting || !selectedCatalogItem || selectedCatalogNeedsOverride"
+                :aria-busy="isPending('add-wagon')"
                 @click="handleAddSelected"
               >
-                <span v-if="submitting" class="spinner" aria-hidden="true"></span>
-                <span class="confirm-label">{{ submitting ? "Añadiendo…" : "Confirmar" }}</span>
-                <span v-if="!submitting" class="confirm-arrow" aria-hidden="true">→</span>
+                <span class="button-with-spinner">
+                  <span v-if="isPending('add-wagon')" class="button-spinner" aria-hidden="true"></span>
+                  <span class="confirm-label">{{ isPending('add-wagon') ? "Añadiendo…" : "Confirmar" }}</span>
+                  <span v-if="!isPending('add-wagon')" class="confirm-arrow" aria-hidden="true">→</span>
+                </span>
               </button>
             </div>
           </div>
@@ -752,11 +1079,17 @@ onMounted(refresh);
               <h2>{{ selectedWagon.name }}</h2>
             </div>
             <div class="detail-actions">
-              <button class="secondary-button" type="button" :disabled="submitting" @click="openImprovementModal">
-                Mejoras
+              <button class="secondary-button" type="button" :disabled="loading || submitting" @click="openImprovementModal">
+                <span class="button-with-spinner">
+                  <span v-if="isPending('open-improvements')" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ isPending('open-improvements') ? "Cargando…" : "Mejoras" }}</span>
+                </span>
               </button>
-              <button class="danger-button" type="button" :disabled="submitting" @click="handleDeleteSelectedWagon">
-                Eliminar
+              <button class="danger-button" type="button" :disabled="loading || submitting" @click="handleDeleteSelectedWagon">
+                <span class="button-with-spinner">
+                  <span v-if="isPending(`delete-wagon:${selectedWagon.id}`)" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ isPending(`delete-wagon:${selectedWagon.id}`) ? "Eliminando…" : "Eliminar" }}</span>
+                </span>
               </button>
               <button class="ghost-button" type="button" @click="closeModal">Cerrar</button>
             </div>
@@ -777,6 +1110,108 @@ onMounted(refresh);
           <section class="info-block">
             <div class="section-header">
               <div>
+                <h3>Tripulación asignada</h3>
+                <p class="muted">
+                  {{ selectedWagonOccupancy }}/{{ selectedWagon.travelerCapacity }} plazas ocupadas entre viajeros y bestias viajeras.
+                </p>
+              </div>
+              <div class="accordion-actions">
+                <button
+                  class="secondary-button"
+                  type="button"
+                  :disabled="loading || submitting || availableTravelersForSelectedWagon.length === 0"
+                  @click="openAssignmentModal('traveler')"
+                >
+                  Añadir viajeros
+                </button>
+                <button
+                  class="secondary-button"
+                  type="button"
+                  :disabled="loading || submitting || availableTravelerBeastsForSelectedWagon.length === 0"
+                  @click="openAssignmentModal('beast-traveler')"
+                >
+                  Añadir bestias viajeras
+                </button>
+              </div>
+            </div>
+
+            <div class="assigned-grid">
+              <article class="assigned-panel">
+                <div class="assigned-panel-header">
+                  <div>
+                    <h4>Viajeros</h4>
+                    <p class="muted">{{ selectedWagonTravelers.length }} viajeros asignados</p>
+                  </div>
+                  <span class="pill">{{ selectedWagonTravelers.length }}</span>
+                </div>
+
+                <div v-if="selectedWagonTravelers.length === 0" class="muted">
+                  No hay viajeros asignados a este carro.
+                </div>
+                <div v-else class="assignment-list">
+                  <article v-for="traveler in selectedWagonTravelers" :key="traveler.id" class="assignment-item">
+                    <div>
+                      <strong>{{ traveler.fullName }}</strong>
+                      <p class="muted">{{ traveler.activeRoleName }}</p>
+                    </div>
+                    <button
+                      class="trash-button"
+                      type="button"
+                      :disabled="loading || submitting"
+                      :aria-label="`Quitar a ${traveler.fullName} del carro`"
+                      @click="clearTravelerAssignment(traveler)"
+                    >
+                      <span class="button-with-spinner">
+                        <span v-if="isPending(`clear-traveler:${traveler.id}`)" class="button-spinner" aria-hidden="true"></span>
+                        <span>🗑</span>
+                      </span>
+                    </button>
+                  </article>
+                </div>
+              </article>
+
+              <article class="assigned-panel">
+                <div class="assigned-panel-header">
+                  <div>
+                    <h4>Bestias viajeras</h4>
+                    <p class="muted">{{ selectedWagonTravelerBeasts.length }} bestias asignadas como viajeras</p>
+                  </div>
+                  <span class="pill">{{ selectedWagonTravelerBeasts.length }}</span>
+                </div>
+
+                <div v-if="selectedWagonTravelerBeasts.length === 0" class="muted">
+                  No hay bestias asignadas como viajeras.
+                </div>
+                <div v-else class="assignment-list">
+                  <article v-for="beast in selectedWagonTravelerBeasts" :key="beast.id" class="assignment-item">
+                    <div>
+                      <strong>{{ beast.name }}</strong>
+                      <p class="muted">
+                        {{ beast.size }} · Fuerza {{ beast.strength }} ·
+                        {{ beast.sourceType === "CATALOG" ? "Catálogo" : "Personalizada" }}
+                      </p>
+                    </div>
+                    <button
+                      class="trash-button"
+                      type="button"
+                      :disabled="loading || submitting"
+                      :aria-label="`Quitar a ${beast.name} del carro`"
+                      @click="clearBeastAssignment(beast)"
+                    >
+                      <span class="button-with-spinner">
+                        <span v-if="isPending(`clear-beast:${beast.id}`)" class="button-spinner" aria-hidden="true"></span>
+                        <span>🗑</span>
+                      </span>
+                    </button>
+                  </article>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="info-block">
+            <div class="section-header">
+              <div>
                 <h3>Tiro actual</h3>
                 <p class="muted">Criaturas asignadas al tiro y fuerza efectiva del conjunto.</p>
               </div>
@@ -784,6 +1219,14 @@ onMounted(refresh);
                 <span class="draft-power-badge" :class="draftStrengthState(selectedWagon).className">
                   {{ draftStrengthState(selectedWagon).label }}
                 </span>
+                <button
+                  class="secondary-button draft-toggle-button"
+                  type="button"
+                  :disabled="loading || submitting || availableDraftBeastsForSelectedWagon.length === 0"
+                  @click="openAssignmentModal('beast-draft')"
+                >
+                  Añadir bestias al tiro
+                </button>
                 <button class="secondary-button draft-toggle-button" type="button" @click="toggleDraftPanel">
                   {{ draftPanelExpanded ? "Ocultar" : "Mostrar" }}
                 </button>
@@ -792,7 +1235,7 @@ onMounted(refresh);
 
             <template v-if="draftPanelExpanded">
               <div
-                v-if="selectedWagon.draftBeasts.length === 0"
+                v-if="selectedWagonDraftBeasts.length === 0"
                 class="warning-block"
               >
                 <strong>Alerta</strong>
@@ -882,8 +1325,11 @@ onMounted(refresh);
               </button>
 
               <div class="accordion-actions">
-                <button class="secondary-button" type="button" :disabled="submitting" @click="openImprovementModal">
-                  Añadir mejora
+                <button class="secondary-button" type="button" :disabled="loading || submitting" @click="openImprovementModal">
+                  <span class="button-with-spinner">
+                    <span v-if="isPending('open-improvements')" class="button-spinner" aria-hidden="true"></span>
+                    <span>{{ isPending('open-improvements') ? "Cargando…" : "Añadir mejora" }}</span>
+                  </span>
                 </button>
                 <button class="secondary-button" type="button" :class="{ active: improvementDeleteMode }" @click="toggleImprovementDeleteMode">
                   Eliminar
@@ -909,11 +1355,14 @@ onMounted(refresh);
                     <button
                       class="trash-button"
                       type="button"
-                      :disabled="submitting"
+                      :disabled="loading || submitting"
                       :aria-label="`Eliminar ${improvement.name}`"
                       @click="handleRemoveImprovement(improvement)"
                     >
-                      🗑
+                      <span class="button-with-spinner">
+                        <span v-if="isPending(`delete-improvement:${improvement.id}`)" class="button-spinner" aria-hidden="true"></span>
+                        <span>🗑</span>
+                      </span>
                     </button>
                   </div>
                 </article>
@@ -924,6 +1373,89 @@ onMounted(refresh);
           <p class="muted meta-line">
             Añadido el {{ new Date(selectedWagon.createdAt).toLocaleString() }}
           </p>
+        </div>
+      </div>
+    </teleport>
+
+    <teleport to="body">
+      <div v-if="assignmentModalOpen" class="modal-backdrop" @click.self="closeAssignmentModal">
+        <div class="modal modal-add">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">Asignar al carro</p>
+              <h2>{{ assignmentModalTitle }}</h2>
+              <p class="muted">{{ assignmentModalHint }}</p>
+            </div>
+            <button class="ghost-button" type="button" @click="closeAssignmentModal">Cerrar</button>
+          </div>
+
+          <p v-if="assignmentModalError" class="error">{{ assignmentModalError }}</p>
+          <Transition name="toast" mode="out-in">
+            <p
+              v-if="assignmentModalSuccess"
+              :key="assignmentModalSuccess.id"
+              class="success-banner"
+              role="status"
+              aria-live="polite"
+            >
+              {{ assignmentModalSuccess.message }}
+            </p>
+          </Transition>
+
+          <div v-if="assignmentModalMode === 'traveler'" class="assignment-list">
+            <div v-if="availableTravelersForSelectedWagon.length === 0" class="muted">
+              No hay viajeros sin asignar.
+            </div>
+            <article
+              v-for="traveler in availableTravelersForSelectedWagon"
+              :key="traveler.id"
+              class="assignment-item assignment-item--stacked"
+            >
+              <div>
+                <strong>{{ traveler.fullName }}</strong>
+                <p class="muted">{{ traveler.activeRoleName }}</p>
+              </div>
+              <button class="primary-button" type="button" :disabled="loading || submitting" @click="assignTravelerToSelectedWagon(traveler)">
+                <span class="button-with-spinner">
+                  <span v-if="isPending(`assign-traveler:${traveler.id}`)" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ isPending(`assign-traveler:${traveler.id}`) ? "Asignando…" : "Asignar al carro" }}</span>
+                </span>
+              </button>
+            </article>
+          </div>
+
+          <div v-else class="assignment-list">
+            <div v-if="assignmentModalMode === 'beast-traveler' && availableTravelerBeastsForSelectedWagon.length === 0" class="muted">
+              No hay bestias sin asignar.
+            </div>
+            <div v-if="assignmentModalMode === 'beast-draft' && availableDraftBeastsForSelectedWagon.length === 0" class="muted">
+              No hay bestias válidas para el tiro de este carro.
+            </div>
+            <article
+              v-for="beast in assignmentModalMode === 'beast-traveler' ? availableTravelerBeastsForSelectedWagon : availableDraftBeastsForSelectedWagon"
+              :key="beast.id"
+              class="assignment-item assignment-item--stacked"
+            >
+              <div>
+                <strong>{{ beast.name }}</strong>
+                <p class="muted">
+                  {{ beast.size }} · Fuerza {{ beast.strength }} ·
+                  {{ beast.sourceType === "CATALOG" ? "Catálogo" : "Personalizada" }}
+                </p>
+              </div>
+              <button
+                class="primary-button"
+                type="button"
+                :disabled="loading || submitting"
+                @click="assignBeastToSelectedWagon(beast, assignmentModalMode === 'beast-draft' ? 'DRAFT' : 'TRAVELER')"
+              >
+                <span class="button-with-spinner">
+                  <span v-if="isPending(`assign-beast-${assignmentModalMode === 'beast-draft' ? 'draft' : 'traveler'}:${beast.id}`)" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ assignmentModalMode === 'beast-draft' ? (isPending(`assign-beast-draft:${beast.id}`) ? "Asignando…" : "Asignar al tiro") : (isPending(`assign-beast-traveler:${beast.id}`) ? "Asignando…" : "Asignar como viajera") }}</span>
+                </span>
+              </button>
+            </article>
+          </div>
         </div>
       </div>
     </teleport>
@@ -949,12 +1481,14 @@ onMounted(refresh);
                 class="primary-button confirm-button"
                 :class="{ loading: submitting }"
                 type="button"
-                :disabled="submitting || !selectedImprovementItem || !selectedImprovementItem.available"
+                :disabled="loading || submitting || !selectedImprovementItem || !selectedImprovementItem.available"
                 @click="handleAddSelectedImprovement"
               >
-                <span v-if="submitting" class="spinner" aria-hidden="true"></span>
-                <span class="confirm-label">{{ submitting ? "Añadiendo…" : "Confirmar" }}</span>
-                <span v-if="!submitting" class="confirm-arrow" aria-hidden="true">→</span>
+                <span class="button-with-spinner">
+                  <span v-if="isPending('add-improvement')" class="button-spinner" aria-hidden="true"></span>
+                  <span class="confirm-label">{{ isPending('add-improvement') ? "Añadiendo…" : "Confirmar" }}</span>
+                  <span v-if="!isPending('add-improvement')" class="confirm-arrow" aria-hidden="true">→</span>
+                </span>
               </button>
             </div>
           </div>
@@ -1389,6 +1923,79 @@ dd {
   border: 1px solid #e5e7eb;
   display: grid;
   gap: 0.35rem;
+}
+
+.success-banner {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.9rem 1rem;
+  border-radius: 0.9rem;
+  background: #ecfdf5;
+  border: 1px solid #86efac;
+  color: #166534;
+  box-shadow: 0 10px 24px rgba(34, 197, 94, 0.14);
+}
+
+.toast-enter-active,
+.toast-leave-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateY(-0.4rem) scale(0.98);
+}
+
+.assigned-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.assigned-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border-radius: 0.85rem;
+  border: 1px solid #e5e7eb;
+  background: white;
+}
+
+.assigned-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.assignment-list {
+  display: grid;
+  gap: 0.65rem;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.assignment-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 0.85rem;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+}
+
+.assignment-item--stacked {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.assignment-item--stacked .primary-button {
+  align-self: flex-end;
 }
 
 .improvements-accordion {

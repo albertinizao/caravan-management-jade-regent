@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 
+import { useToast } from "@/composables/useToast";
 import { getActiveCaravan, listCaravans } from "@/services/caravans";
 import { listCaravanWagons } from "@/services/wagons";
 import {
@@ -24,6 +25,7 @@ const wagons = ref<CaravanWagon[]>([]);
 const roleCatalog = ref<TravelerRoleCatalogItem[]>([]);
 const loading = ref(true);
 const submitting = ref(false);
+const pendingAction = ref<string | null>(null);
 const error = ref<string | null>(null);
 const search = ref("");
 const roleFilter = ref("all");
@@ -52,10 +54,15 @@ const createSalary = ref("");
 const createContractConditions = ref("");
 const createConsumption = ref("1");
 const createServedTravelerId = ref("");
+const { showToast } = useToast();
 const gpFormatter = new Intl.NumberFormat("es-ES", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 2,
 });
+
+function isPending(action: string) {
+  return pendingAction.value === action;
+}
 
 const roleCatalogByCode = computed(() =>
   Object.fromEntries(roleCatalog.value.map((item) => [item.code, item] as const)),
@@ -94,6 +101,8 @@ const visibleTravelers = computed(() => {
     )
     .filter((traveler) => wagonFilter.value === "all" || traveler.wagonId === wagonFilter.value);
 });
+
+const travelersWithoutWagon = computed(() => travelers.value.filter((traveler) => !traveler.wagonId));
 
 const createRoleOptions = computed(() =>
   roleCatalog.value.filter((role) => createAvailableRoleCodes.value.includes(role.code)),
@@ -148,6 +157,13 @@ watch(selectedAvailableRoleCodes, () => {
 }, { deep: true });
 
 async function refresh() {
+  const previousAction = pendingAction.value;
+  const trackRefresh = previousAction === null;
+
+  if (trackRefresh) {
+    pendingAction.value = "refresh";
+  }
+
   loading.value = true;
   error.value = null;
 
@@ -196,6 +212,7 @@ async function refresh() {
     error.value = cause instanceof Error ? cause.message : "Failed to load travelers";
   } finally {
     loading.value = false;
+    pendingAction.value = trackRefresh ? null : previousAction;
   }
 }
 
@@ -223,6 +240,7 @@ async function handleCreateTraveler() {
     return;
   }
 
+  const travelerName = createFullName.value.trim();
   if (!createFullName.value.trim()) {
     error.value = "El nombre completo es obligatorio";
     return;
@@ -253,6 +271,7 @@ async function handleCreateTraveler() {
   }
 
   submitting.value = true;
+  pendingAction.value = "create";
   error.value = null;
 
   try {
@@ -272,7 +291,7 @@ async function handleCreateTraveler() {
     }
 
     await addCaravanTraveler(activeCaravan.value.id, {
-      fullName: createFullName.value.trim(),
+      fullName: travelerName,
       description: createDescription.value.trim() || undefined,
       availableRoleCodes: [passengerRoleCode, ...createAvailableRoleCodes.value.filter((code) => code !== passengerRoleCode)],
       activeRoleCodes: createActiveRoleCodes.value.length === 0
@@ -289,10 +308,12 @@ async function handleCreateTraveler() {
     });
     closeCreateModal();
     await refresh();
+    showToast(`Viajero añadido: ${travelerName}.`);
   } catch (cause) {
     createModalError.value = cause instanceof Error ? cause.message : "Failed to create traveler";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -357,6 +378,7 @@ async function handleAssignWagon() {
   }
 
   submitting.value = true;
+  pendingAction.value = "assign-wagon";
   error.value = null;
 
   try {
@@ -365,10 +387,12 @@ async function handleAssignWagon() {
     });
     selectedTraveler.value = updated;
     await refresh();
+    showToast(`Viajero asignado al carro: ${updated.fullName}.`);
   } catch (cause) {
     selectedModalError.value = cause instanceof Error ? cause.message : "Failed to update traveler wagon";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -411,6 +435,7 @@ async function handleSaveTravelerChanges() {
   }
 
   submitting.value = true;
+  pendingAction.value = "save";
   selectedModalError.value = null;
 
   try {
@@ -433,10 +458,12 @@ async function handleSaveTravelerChanges() {
     syncSelectedTravelerDraft(updated);
     travelerMode.value = "view";
     await refresh();
+    showToast(`Viajero actualizado: ${updated.fullName}.`);
   } catch (cause) {
     selectedModalError.value = cause instanceof Error ? cause.message : "Failed to update traveler";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -456,6 +483,7 @@ async function handleUpdateRole() {
   }
 
   submitting.value = true;
+  pendingAction.value = "update-role";
   error.value = null;
 
   try {
@@ -473,6 +501,7 @@ async function handleUpdateRole() {
     selectedModalError.value = cause instanceof Error ? cause.message : "Failed to update traveler role";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -601,6 +630,10 @@ function roleSummary(roleCodes: string[]) {
   return roleCodes.map((code) => roleName(code)).join(", ");
 }
 
+function travelerAssignmentLabel(traveler: CaravanTraveler): string {
+  return traveler.wagonName ?? "Sin carro";
+}
+
 function roleCountLabel(activeCount: number, maxCount: number) {
   return `${activeCount} / ${maxCount}`;
 }
@@ -635,8 +668,13 @@ onMounted(refresh);
         </div>
 
         <div class="hero-actions">
-          <button class="ghost-button" type="button" @click="refresh">Refrescar</button>
-          <button class="primary-button" type="button" :disabled="!activeCaravan" @click="openCreateModal">
+          <button class="ghost-button" type="button" :disabled="loading || submitting" @click="refresh">
+            <span class="button-with-spinner">
+              <span v-if="isPending('refresh')" class="button-spinner" aria-hidden="true"></span>
+              <span>{{ isPending('refresh') ? "Refrescando…" : "Refrescar" }}</span>
+            </span>
+          </button>
+          <button class="primary-button" type="button" :disabled="!activeCaravan || loading || submitting" @click="openCreateModal">
             Añadir
           </button>
         </div>
@@ -657,6 +695,13 @@ onMounted(refresh);
               <h2>Listado de viajeros</h2>
               <p class="muted">El listado se actualiza al cambiar filtros o al guardar modificaciones.</p>
             </div>
+          </div>
+
+          <div v-if="travelersWithoutWagon.length > 0" class="warning-banner" role="status" aria-live="polite">
+            <strong>{{ travelersWithoutWagon.length }} viajero{{ travelersWithoutWagon.length === 1 ? "" : "s" }} sin carro asignado.</strong>
+            <p>
+              Revísalos cuanto antes: cuanto más tiempo pasen sin asignación, más fácil es perder visibilidad sobre el reparto real de la caravana.
+            </p>
           </div>
 
           <div class="filters">
@@ -706,6 +751,7 @@ onMounted(refresh);
                   :key="traveler.id"
                   tabindex="0"
                   role="button"
+                  :class="{ 'is-unassigned': !traveler.wagonId }"
                   @click="openTraveler(traveler)"
                   @keyup.enter="openTraveler(traveler)"
                 >
@@ -714,7 +760,11 @@ onMounted(refresh);
                     <p class="muted">{{ traveler.description ?? "Sin descripción" }}</p>
                   </td>
                   <td>{{ roleSummary(traveler.activeRoleCodes) }}</td>
-                  <td>{{ traveler.wagonName ?? "Sin carro" }}</td>
+                  <td>
+                    <span class="assignment-badge" :class="{ 'assignment-badge--warning': !traveler.wagonId }">
+                      {{ travelerAssignmentLabel(traveler) }}
+                    </span>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -739,15 +789,15 @@ onMounted(refresh);
                 </label>
               </template>
             </div>
-            <div class="modal-header-actions">
-              <button
-                class="ghost-button"
-                type="button"
-                :disabled="submitting"
-                @click="travelerMode === 'view' ? enterEditMode() : cancelEditMode()"
-              >
-                {{ travelerMode === 'view' ? "Editar" : "Cancelar edición" }}
-              </button>
+              <div class="modal-header-actions">
+                <button
+                  class="ghost-button"
+                  type="button"
+                  :disabled="loading || submitting"
+                  @click="travelerMode === 'view' ? enterEditMode() : cancelEditMode()"
+                >
+                  {{ travelerMode === 'view' ? "Editar" : "Cancelar edición" }}
+                </button>
               <button class="ghost-button" type="button" @click="closeTraveler">Cerrar</button>
             </div>
           </div>
@@ -843,7 +893,7 @@ onMounted(refresh);
                       -
                     </button>
                     <strong>{{ roleCountLabel(selectedRoleCodes.length, selectedMaxActiveRoleCount) }}</strong>
-                    <button class="ghost-button" type="button" :disabled="submitting" @click="increaseRoleLimit">
+                    <button class="ghost-button" type="button" :disabled="loading || submitting" @click="increaseRoleLimit">
                       +
                     </button>
                   </div>
@@ -857,7 +907,7 @@ onMounted(refresh);
                     class="role-toggle"
                     :class="{ 'is-active': selectedRoleCodes.includes(role.code), 'is-primary': role.code === selectedPrimaryRoleCode }"
                     :aria-pressed="selectedRoleCodes.includes(role.code)"
-                    :disabled="submitting"
+                    :disabled="loading || submitting"
                     @click="handleRoleSelection(role.code)"
                   >
                     <span class="role-toggle-name">{{ role.name }}</span>
@@ -868,7 +918,7 @@ onMounted(refresh);
                 <div v-if="selectedTargetRole?.requiresTargetTraveler" class="editor-row">
                   <label>
                     <span>Viajero al que sirve</span>
-                    <select v-model="selectedRoleTargetTravelerId" :disabled="submitting">
+                    <select v-model="selectedRoleTargetTravelerId" :disabled="loading || submitting">
                       <option value="">Selecciona un viajero</option>
                       <option v-for="traveler in selectedTargetTravelerOptions" :key="traveler.id" :value="traveler.id">
                         {{ traveler.fullName }}
@@ -881,7 +931,7 @@ onMounted(refresh);
               <div class="two-columns">
                 <label>
                   <span>Carro</span>
-                  <select v-model="selectedWagonId" :disabled="submitting">
+                  <select v-model="selectedWagonId" :disabled="loading || submitting">
                     <option value="">Selecciona un carro</option>
                     <option v-for="wagon in wagons" :key="wagon.id" :value="wagon.id">
                       {{ wagon.name }}
@@ -920,9 +970,12 @@ onMounted(refresh);
               </label>
 
               <div class="modal-actions">
-                <button class="secondary-button" type="button" :disabled="submitting" @click="cancelEditMode">Cancelar</button>
-                <button class="primary-button" type="button" :disabled="submitting" @click="handleSaveTravelerChanges">
-                  {{ submitting ? "Guardando…" : "Guardar cambios" }}
+                <button class="secondary-button" type="button" :disabled="loading || submitting" @click="cancelEditMode">Cancelar</button>
+                <button class="primary-button" type="button" :disabled="loading || submitting" :aria-busy="isPending('save')" @click="handleSaveTravelerChanges">
+                  <span class="button-with-spinner">
+                    <span v-if="isPending('save')" class="button-spinner" aria-hidden="true"></span>
+                    <span>{{ isPending('save') ? "Guardando…" : "Guardar cambios" }}</span>
+                  </span>
                 </button>
               </div>
             </div>
@@ -1058,8 +1111,11 @@ onMounted(refresh);
 
             <div class="modal-actions">
               <button class="secondary-button" type="button" @click="closeCreateModal">Cancelar</button>
-              <button class="primary-button" type="button" :disabled="submitting" @click="handleCreateTraveler">
-                {{ submitting ? "Guardando…" : "Confirmar" }}
+              <button class="primary-button" type="button" :disabled="loading || submitting" :aria-busy="isPending('create')" @click="handleCreateTraveler">
+                <span class="button-with-spinner">
+                  <span v-if="isPending('create')" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ isPending('create') ? "Creando…" : "Confirmar" }}</span>
+                </span>
               </button>
             </div>
           </div>
@@ -1137,6 +1193,26 @@ p {
   margin: 1rem 0;
 }
 
+.warning-banner {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.95rem 1rem;
+  margin-top: 1rem;
+  border-radius: 0.9rem;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  color: #92400e;
+  box-shadow: 0 10px 24px rgba(245, 158, 11, 0.18);
+}
+
+.warning-banner strong {
+  font-size: 1rem;
+}
+
+.warning-banner p {
+  color: inherit;
+}
+
 .filters label,
 .create-form label,
 .editor-row label,
@@ -1192,8 +1268,32 @@ p {
   cursor: pointer;
 }
 
+.travelers-table tbody tr.is-unassigned {
+  background: #fff7ed;
+}
+
 .travelers-table tbody tr:hover {
   background: #f8fafc;
+}
+
+.travelers-table tbody tr.is-unassigned:hover {
+  background: #ffedd5;
+}
+
+.assignment-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.assignment-badge--warning {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .empty-state,

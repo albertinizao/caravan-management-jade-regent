@@ -8,19 +8,33 @@ import {
   listCaravans,
   selectActiveCaravan,
 } from "@/services/caravans";
+import { useToast } from "@/composables/useToast";
 import type { Caravan } from "@/types/caravan";
 
 const caravans = ref<Caravan[]>([]);
 const activeCaravan = ref<Caravan | null>(null);
 const loading = ref(true);
 const submitting = ref(false);
+const pendingAction = ref<string | null>(null);
 const error = ref<string | null>(null);
 const name = ref("");
 const description = ref("");
+const { showToast } = useToast();
 
 const selectedCaravan = computed(() => activeCaravan.value ?? caravans.value.find((caravan) => caravan.active) ?? null);
 
+function isPending(action: string) {
+  return pendingAction.value === action;
+}
+
 async function refresh() {
+  const previousAction = pendingAction.value;
+  const trackRefresh = previousAction === null;
+
+  if (trackRefresh) {
+    pendingAction.value = "refresh";
+  }
+
   loading.value = true;
   error.value = null;
 
@@ -32,6 +46,7 @@ async function refresh() {
     error.value = cause instanceof Error ? cause.message : "Failed to load caravans";
   } finally {
     loading.value = false;
+    pendingAction.value = trackRefresh ? null : previousAction;
   }
 }
 
@@ -41,12 +56,14 @@ async function handleCreate() {
     return;
   }
 
+  const caravanName = name.value.trim();
   submitting.value = true;
+  pendingAction.value = "create";
   error.value = null;
 
   try {
     const created = await createCaravan({
-      name: name.value.trim(),
+      name: caravanName,
       description: description.value.trim() || undefined,
     });
 
@@ -55,15 +72,18 @@ async function handleCreate() {
     activeCaravan.value = active.caravan;
     name.value = "";
     description.value = "";
+    showToast(`Caravana creada: ${caravanName}.`);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to create caravan";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
 async function handleSelect(caravanId: string) {
   submitting.value = true;
+  pendingAction.value = `select:${caravanId}`;
   error.value = null;
 
   try {
@@ -74,6 +94,7 @@ async function handleSelect(caravanId: string) {
     error.value = cause instanceof Error ? cause.message : "Failed to select caravan";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -87,15 +108,18 @@ async function handleDelete(caravan: Caravan) {
   }
 
   submitting.value = true;
+  pendingAction.value = `delete:${caravan.id}`;
   error.value = null;
 
   try {
     await deleteCaravan(caravan.id);
     await refresh();
+    showToast(`Caravana eliminada: ${caravan.name}.`);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to delete caravan";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -113,7 +137,12 @@ onMounted(refresh);
             Crea una campaña, selecciónala y trabaja siempre sobre la misma instancia.
           </p>
         </div>
-        <button class="ghost-button" type="button" @click="refresh">Refrescar</button>
+        <button class="ghost-button" type="button" :disabled="loading || submitting" @click="refresh">
+          <span class="button-with-spinner">
+            <span v-if="isPending('refresh')" class="button-spinner" aria-hidden="true"></span>
+            <span>{{ isPending('refresh') ? "Refrescando…" : "Refrescar" }}</span>
+          </span>
+        </button>
       </header>
 
       <p v-if="error" class="error">{{ error }}</p>
@@ -132,8 +161,11 @@ onMounted(refresh);
               <textarea v-model="description" rows="3" placeholder="Opcional"></textarea>
             </label>
 
-            <button class="primary-button" type="submit" :disabled="submitting">
-              Crear y seleccionar
+            <button class="primary-button" type="submit" :disabled="loading || submitting" :aria-busy="isPending('create')">
+              <span class="button-with-spinner">
+                <span v-if="isPending('create')" class="button-spinner" aria-hidden="true"></span>
+                <span>{{ isPending('create') ? "Creando…" : "Crear y seleccionar" }}</span>
+              </span>
             </button>
           </form>
         </article>
@@ -232,11 +264,17 @@ onMounted(refresh);
               <p v-if="caravan.description" class="muted">{{ caravan.description }}</p>
             </div>
             <div class="actions">
-              <button class="secondary-button" type="button" @click.stop="handleSelect(caravan.id)">
-                Seleccionar
+              <button class="secondary-button" type="button" :disabled="loading || submitting" @click.stop="handleSelect(caravan.id)">
+                <span class="button-with-spinner">
+                  <span v-if="isPending(`select:${caravan.id}`)" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ isPending(`select:${caravan.id}`) ? "Seleccionando…" : "Seleccionar" }}</span>
+                </span>
               </button>
-              <button class="danger-button" type="button" @click.stop="handleDelete(caravan)">
-                Eliminar
+              <button class="danger-button" type="button" :disabled="loading || submitting" @click.stop="handleDelete(caravan)">
+                <span class="button-with-spinner">
+                  <span v-if="isPending(`delete:${caravan.id}`)" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ isPending(`delete:${caravan.id}`) ? "Eliminando…" : "Eliminar" }}</span>
+                </span>
               </button>
               <span class="pill" :class="{ active: caravan.active }">
                 {{ caravan.active ? "Activa" : "Disponible" }}

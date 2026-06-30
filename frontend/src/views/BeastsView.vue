@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 
+import { useToast } from "@/composables/useToast";
 import { getActiveCaravan } from "@/services/caravans";
 import { listCaravanTravelers } from "@/services/travelers";
 import { listCaravanWagons } from "@/services/wagons";
@@ -37,6 +38,7 @@ const wagons = ref<CaravanWagon[]>([]);
 const travelers = ref<CaravanTraveler[]>([]);
 const loading = ref(true);
 const submitting = ref(false);
+const pendingAction = ref<string | null>(null);
 const error = ref<string | null>(null);
 const search = ref("");
 const sourceFilter = ref<"all" | "CATALOG" | "CUSTOM">("all");
@@ -62,6 +64,11 @@ const customFourLegged = ref(true);
 const customSpecialNote = ref("Ninguno");
 const customDescription = ref("");
 const customNotes = ref("");
+const { showToast } = useToast();
+
+function isPending(action: string) {
+  return pendingAction.value === action;
+}
 
 const catalogByCode = computed(() =>
   Object.fromEntries(catalog.value.map((item) => [item.code, item] as const)),
@@ -99,6 +106,8 @@ const visibleBeasts = computed(() => {
     .filter((beast) => assignmentFilter.value === "all" || beast.assignmentType === assignmentFilter.value)
     .filter((beast) => wagonFilter.value === "all" || beast.assignedWagonId === wagonFilter.value);
 });
+
+const unassignedBeasts = computed(() => beasts.value.filter((beast) => beast.assignmentType === "NONE"));
 
 const selectedBeastCatalogItem = computed(() =>
   selectedBeast.value?.catalogBeastCode ? catalogByCode.value[selectedBeast.value.catalogBeastCode] ?? null : null,
@@ -152,6 +161,13 @@ const availableTravelerWagons = computed(() =>
 );
 
 async function refresh() {
+  const previousAction = pendingAction.value;
+  const trackRefresh = previousAction === null;
+
+  if (trackRefresh) {
+    pendingAction.value = "refresh";
+  }
+
   loading.value = true;
   error.value = null;
 
@@ -194,6 +210,7 @@ async function refresh() {
     error.value = cause instanceof Error ? cause.message : "Failed to load beasts";
   } finally {
     loading.value = false;
+    pendingAction.value = trackRefresh ? null : previousAction;
   }
 }
 
@@ -238,6 +255,7 @@ async function handleAddCatalogBeast(beastCode: string) {
   }
 
   submitting.value = true;
+  pendingAction.value = `add-catalog:${beastCode}`;
   catalogModalError.value = null;
 
   try {
@@ -248,10 +266,12 @@ async function handleAddCatalogBeast(beastCode: string) {
     selectedTravelerWagonId.value = pickDefaultTravelerWagonId(created);
     closeCatalogModal();
     await refresh();
+    showToast(`Bestia añadida: ${created.name}.`);
   } catch (cause) {
     catalogModalError.value = cause instanceof Error ? cause.message : "Failed to add beast";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -301,6 +321,7 @@ async function handleCreateCustomBeast() {
   }
 
   submitting.value = true;
+  pendingAction.value = "create-custom";
   customModalError.value = null;
 
   const payload: AddCaravanBeastPayload = {
@@ -326,10 +347,12 @@ async function handleCreateCustomBeast() {
     selectedTravelerWagonId.value = pickDefaultTravelerWagonId(created);
     closeCustomModal();
     await refresh();
+    showToast(`Bestia añadida: ${created.name}.`);
   } catch (cause) {
     customModalError.value = cause instanceof Error ? cause.message : "Failed to create beast";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -364,6 +387,7 @@ async function assignAsDraft() {
   }
 
   submitting.value = true;
+  pendingAction.value = "assign-draft";
   selectedBeastError.value = null;
 
   try {
@@ -375,11 +399,13 @@ async function assignAsDraft() {
     assignmentMode.value = "DRAFT";
     syncAssignmentWagonSelection("DRAFT", updated);
     await refresh();
+    showToast(`Bestia asignada al tiro: ${updated.name}.`);
     closeBeastDetails();
   } catch (cause) {
     selectedBeastError.value = cause instanceof Error ? cause.message : "Failed to assign beast as draft";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -389,6 +415,7 @@ async function assignAsTraveler() {
   }
 
   submitting.value = true;
+  pendingAction.value = "assign-traveler";
   selectedBeastError.value = null;
 
   try {
@@ -400,11 +427,13 @@ async function assignAsTraveler() {
     assignmentMode.value = "TRAVELER";
     syncAssignmentWagonSelection("TRAVELER", updated);
     await refresh();
+    showToast(`Bestia asignada como viajera: ${updated.name}.`);
     closeBeastDetails();
   } catch (cause) {
     selectedBeastError.value = cause instanceof Error ? cause.message : "Failed to assign beast as traveler";
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -414,18 +443,21 @@ async function clearAssignment(): Promise<CaravanBeast | null> {
   }
 
   submitting.value = true;
+  pendingAction.value = "clear-assignment";
   selectedBeastError.value = null;
 
   try {
     const updated = await clearCaravanBeastAssignment(activeCaravan.value.id, selectedBeast.value.id);
     selectedBeast.value = updated;
     await refresh();
+    showToast(`Asignación quitada: ${updated.name}.`);
     return updated;
   } catch (cause) {
     selectedBeastError.value = cause instanceof Error ? cause.message : "Failed to clear assignment";
     return null;
   } finally {
     submitting.value = false;
+    pendingAction.value = null;
   }
 }
 
@@ -689,11 +721,16 @@ onMounted(refresh);
           <p class="subtitle">Gestiona bestias de catálogo, bestias personalizadas y su asignación a los carros.</p>
         </div>
         <div class="hero-actions">
-          <button class="ghost-button" type="button" @click="refresh">Refrescar</button>
-          <button class="primary-button" type="button" :disabled="!activeCaravan || submitting" @click="openCatalogModal">
+          <button class="ghost-button" type="button" :disabled="loading || submitting" @click="refresh">
+            <span class="button-with-spinner">
+              <span v-if="isPending('refresh')" class="button-spinner" aria-hidden="true"></span>
+              <span>{{ isPending('refresh') ? "Refrescando…" : "Refrescar" }}</span>
+            </span>
+          </button>
+          <button class="primary-button" type="button" :disabled="!activeCaravan || loading || submitting" @click="openCatalogModal">
             Añadir del catálogo
           </button>
-          <button class="secondary-button" type="button" :disabled="!activeCaravan || submitting" @click="openCustomModal">
+          <button class="secondary-button" type="button" :disabled="!activeCaravan || loading || submitting" @click="openCustomModal">
             Crear personalizada
           </button>
         </div>
@@ -719,6 +756,11 @@ onMounted(refresh);
               <div><span>Carros</span><strong>{{ wagons.length }}</strong></div>
               <div><span>Viajeros</span><strong>{{ travelers.length }}</strong></div>
             </div>
+          </div>
+
+          <div v-if="unassignedBeasts.length > 0" class="warning-banner" role="status" aria-live="polite">
+            <strong>{{ unassignedBeasts.length }} bestia{{ unassignedBeasts.length === 1 ? "" : "s" }} sin asignar.</strong>
+            <p>Estas bestias están sin carro y deben destacarse claramente para evitar descuidos operativos.</p>
           </div>
 
           <div class="filters">
@@ -778,6 +820,7 @@ onMounted(refresh);
                   v-for="beast in visibleBeasts"
                   :key="beast.id"
                   tabindex="0"
+                  :class="{ 'is-unassigned': beast.assignmentType === 'NONE' }"
                   @click="openBeastDetails(beast)"
                   @keyup.enter="openBeastDetails(beast)"
                 >
@@ -789,7 +832,11 @@ onMounted(refresh);
                   <td>{{ beastSizeLabel(beast.size) }}</td>
                   <td>{{ beast.strength }}</td>
                   <td>{{ beast.speed }}</td>
-                  <td>{{ currentAssignmentLabel(beast) }}</td>
+                  <td>
+                    <span class="assignment-badge" :class="{ 'assignment-badge--warning': beast.assignmentType === 'NONE' }">
+                      {{ currentAssignmentLabel(beast) }}
+                    </span>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -818,8 +865,11 @@ onMounted(refresh);
                   <h3>{{ item.name }}</h3>
                   <p class="muted">{{ item.code }}</p>
                 </div>
-                <button class="primary-button" type="button" :disabled="submitting" @click="handleAddCatalogBeast(item.code)">
-                  Añadir
+                <button class="primary-button" type="button" :disabled="loading || submitting" :aria-busy="isPending(`add-catalog:${item.code}`)" @click="handleAddCatalogBeast(item.code)">
+                  <span class="button-with-spinner">
+                    <span v-if="isPending(`add-catalog:${item.code}`)" class="button-spinner" aria-hidden="true"></span>
+                    <span>{{ isPending(`add-catalog:${item.code}`) ? "Añadiendo…" : "Añadir" }}</span>
+                  </span>
                 </button>
               </div>
 
@@ -919,8 +969,11 @@ onMounted(refresh);
 
             <div class="modal-actions">
               <button class="secondary-button" type="button" @click="closeCustomModal">Cancelar</button>
-              <button class="primary-button" type="button" :disabled="submitting" @click="handleCreateCustomBeast">
-                {{ submitting ? "Guardando…" : "Confirmar" }}
+              <button class="primary-button" type="button" :disabled="loading || submitting" :aria-busy="isPending('create-custom')" @click="handleCreateCustomBeast">
+                <span class="button-with-spinner">
+                  <span v-if="isPending('create-custom')" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ isPending('create-custom') ? "Creando…" : "Confirmar" }}</span>
+                </span>
               </button>
             </div>
           </div>
@@ -987,16 +1040,19 @@ onMounted(refresh);
                   class="secondary-button"
                   :class="{ active: assignmentMode === 'DRAFT' }"
                   type="button"
-                  :disabled="submitting"
+                  :disabled="loading || submitting"
                   @click="changeAssignmentMode('DRAFT')"
                 >
-                  Asignar como tiro
+                  <span class="button-with-spinner">
+                    <span v-if="isPending('assign-draft')" class="button-spinner" aria-hidden="true"></span>
+                    <span>{{ isPending('assign-draft') ? "Asignando…" : "Asignar como tiro" }}</span>
+                  </span>
                 </button>
                 <button
                   class="secondary-button"
                   :class="{ active: assignmentMode === 'TRAVELER' }"
                   type="button"
-                  :disabled="submitting"
+                  :disabled="loading || submitting"
                   @click="changeAssignmentMode('TRAVELER')"
                 >
                   Asignar como viajero
@@ -1008,7 +1064,7 @@ onMounted(refresh);
               <div class="two-columns">
                 <label>
                   <span>Carro</span>
-                  <select v-model="activeAssignmentWagonId" :disabled="submitting">
+                  <select v-model="activeAssignmentWagonId" :disabled="loading || submitting">
                     <option value="">Selecciona un carro</option>
                     <option v-for="wagon in activeAssignmentWagons" :key="wagon.id" :value="wagon.id">
                       {{ wagon.name }} · {{ draftLabel(wagon) }}
@@ -1027,11 +1083,17 @@ onMounted(refresh);
               </div>
 
               <div class="inline-actions assignment-actions">
-                <button class="secondary-button" type="button" :disabled="submitting || selectedBeast.assignmentType === 'NONE'" @click="clearAssignment">
-                  Quitar asignación
+                <button class="secondary-button" type="button" :disabled="loading || submitting || selectedBeast.assignmentType === 'NONE'" @click="clearAssignment">
+                  <span class="button-with-spinner">
+                    <span v-if="isPending('clear-assignment')" class="button-spinner" aria-hidden="true"></span>
+                    <span>{{ isPending('clear-assignment') ? "Quitando…" : "Quitar asignación" }}</span>
+                  </span>
                 </button>
-                <button class="primary-button" type="button" :disabled="submitting || !activeAssignmentWagonId || activeAssignmentWagons.length === 0" @click="assignAsDraft">
-                  Asignar como tiro
+                <button class="primary-button" type="button" :disabled="loading || submitting || !activeAssignmentWagonId || activeAssignmentWagons.length === 0" :aria-busy="submitting" @click="assignAsDraft">
+                  <span class="button-with-spinner">
+                    <span v-if="isPending('assign-draft')" class="button-spinner" aria-hidden="true"></span>
+                    <span>{{ isPending('assign-draft') ? "Asignando…" : "Asignar como tiro" }}</span>
+                  </span>
                 </button>
               </div>
             </div>
@@ -1040,7 +1102,7 @@ onMounted(refresh);
               <div class="two-columns">
                 <label>
                   <span>Carro</span>
-                  <select v-model="activeAssignmentWagonId" :disabled="submitting">
+                  <select v-model="activeAssignmentWagonId" :disabled="loading || submitting">
                     <option value="">Selecciona un carro</option>
                     <option v-for="wagon in activeAssignmentWagons" :key="wagon.id" :value="wagon.id">
                       {{ wagon.name }} · {{ travelerOccupancyForWagon(wagon.id) }}/{{ wagon.travelerCapacity }} viajeros
@@ -1059,11 +1121,17 @@ onMounted(refresh);
               </div>
 
               <div class="inline-actions assignment-actions">
-                <button class="secondary-button" type="button" :disabled="submitting || selectedBeast.assignmentType === 'NONE'" @click="clearAssignment">
-                  Quitar asignación
+                <button class="secondary-button" type="button" :disabled="loading || submitting || selectedBeast.assignmentType === 'NONE'" @click="clearAssignment">
+                  <span class="button-with-spinner">
+                    <span v-if="isPending('clear-assignment')" class="button-spinner" aria-hidden="true"></span>
+                    <span>{{ isPending('clear-assignment') ? "Quitando…" : "Quitar asignación" }}</span>
+                  </span>
                 </button>
-                <button class="primary-button" type="button" :disabled="submitting || !activeAssignmentWagonId || activeAssignmentWagons.length === 0" @click="assignAsTraveler">
-                  Asignar como viajero
+                <button class="primary-button" type="button" :disabled="loading || submitting || !activeAssignmentWagonId || activeAssignmentWagons.length === 0" :aria-busy="submitting" @click="assignAsTraveler">
+                  <span class="button-with-spinner">
+                    <span v-if="isPending('assign-traveler')" class="button-spinner" aria-hidden="true"></span>
+                    <span>{{ isPending('assign-traveler') ? "Asignando…" : "Asignar como viajero" }}</span>
+                  </span>
                 </button>
               </div>
             </div>
@@ -1192,6 +1260,26 @@ p {
   margin-top: 1rem;
 }
 
+.warning-banner {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.95rem 1rem;
+  margin-top: 1rem;
+  border-radius: 0.9rem;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  color: #92400e;
+  box-shadow: 0 10px 24px rgba(245, 158, 11, 0.18);
+}
+
+.warning-banner strong {
+  font-size: 1rem;
+}
+
+.warning-banner p {
+  color: inherit;
+}
+
 .filters label,
 .create-form label,
 .two-columns label,
@@ -1269,8 +1357,32 @@ p {
   cursor: pointer;
 }
 
+.beast-table tbody tr.is-unassigned {
+  background: #fff7ed;
+}
+
 .beast-table tbody tr:hover {
   background: #f8fafc;
+}
+
+.beast-table tbody tr.is-unassigned:hover {
+  background: #ffedd5;
+}
+
+.assignment-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.assignment-badge--warning {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .modal-backdrop {

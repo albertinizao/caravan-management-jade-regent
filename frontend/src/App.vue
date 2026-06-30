@@ -15,8 +15,29 @@
     </header>
 
     <RouterView />
+
+    <teleport to="body">
+      <Transition name="toast" mode="out-in">
+        <div
+          v-if="toast"
+          :key="toast.id"
+          class="global-toast"
+          :class="`global-toast--${toast.variant}`"
+          role="status"
+          aria-live="polite"
+        >
+          {{ toast.message }}
+        </div>
+      </Transition>
+    </teleport>
   </div>
 </template>
+
+<script setup lang="ts">
+import { useToast } from "@/composables/useToast";
+
+const { toast } = useToast();
+</script>
 
 <style scoped>
 .app-shell {
@@ -56,5 +77,49 @@
 .nav a.router-link-active {
   background: #dbeafe;
   color: #1d4ed8;
+}
+
+.global-toast {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 1000;
+  max-width: min(420px, calc(100vw - 2.5rem));
+  padding: 0.95rem 1rem;
+  border-radius: 0.95rem;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+  border: 1px solid transparent;
+  font-weight: 600;
+}
+
+.global-toast--success {
+  background: #ecfdf5;
+  border-color: #86efac;
+  color: #166534;
+}
+
+.global-toast--error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+.global-toast--info {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.toast-enter-active,
+.toast-leave-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateY(0.4rem) scale(0.98);
 }
 </style>

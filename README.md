@@ -1,63 +1,91 @@
 # GestionCaravana
 
-Monorepo skeleton for a hexagonal backend and a lightweight frontend.
+GestionCaravana is a local, self-contained caravan campaign manager.
 
-## Stack
+It provides a Spring Boot backend and a Vue 3 frontend for working with the
+active caravan context: create a caravan instance, select it as active, and
+manage its travelers, wagons, beasts, and wagon improvements.
 
-- Backend: Java 25, Spring Boot 4.1.0, Maven
-- Frontend: Node 22, Vue 3, Vite, TypeScript
-- Persistence: self-contained H2 database stored locally under `data/`
+## Tech Stack
 
-## Architecture
+- Backend: Java 25, Spring Boot 4.1.0, Maven, Spring Web, Spring Data JPA, H2
+- Frontend: Vue 3, Vite, TypeScript, Vue Router
+- Persistence: embedded H2 database stored under `data/`
 
-- Domain logic stays inside `src/main/java/com/gestioncaravana/domain`
-- Use cases live in `src/main/java/com/gestioncaravana/application`
-- Inbound adapters live in `src/main/java/com/gestioncaravana/adapter/in`
-- Outbound adapters live in `src/main/java/com/gestioncaravana/adapter/out`
-- Frontend app shell lives in `frontend/src`
+## Current Scope
+
+The current implementation focuses on these gameplay areas:
+
+- caravan instance creation, selection, listing, and deletion
+- active caravan dashboard with summary stats
+- wagon catalog browsing and wagon management
+- traveler management with role and wagon assignment
+- beast management with catalog-based and custom entries
+- wagon improvements and derived wagon details
+
+## Frontend Routes
+
+- `/` — caravan dashboard
+- `/travelers` — traveler management
+- `/wagons` — wagon management
+- `/beasts` — beast management
+
+## Backend Architecture
+
+The backend follows hexagonal architecture:
+
+- `domain` — pure model and business rules
+- `application/port/in` — inbound ports
+- `application/port/out` — outbound ports
+- `application/usecase` — use-case implementations
+- `adapter/in/web` — HTTP adapters
+- `adapter/out/persistence` — persistence adapters and wiring
+
+Keep the domain free from Spring, web, JPA, and filesystem concerns.
 
 ## Repository Layout
 
-```text
-.
-├─ AGENTS.md
-├─ README.md
-├─ docs/
-│  └─ architecture.md
-├─ src/
-│  ├─ main/java/com/gestioncaravana/
-│  │  ├─ domain/
-│  │  ├─ application/
-│  │  │  ├─ port/in/
-│  │  │  ├─ port/out/
-│  │  │  └─ usecase/
-│  │  └─ adapter/
-│  │     ├─ in/web/
-│  │     └─ out/
-│  └─ main/resources/application.yml
-└─ frontend/
-   ├─ index.html
-   ├─ package.json
-   ├─ src/
-   └─ vite.config.ts
-```
+- `src/main/java` — backend application code
+- `src/test/java` — backend tests and architecture boundaries
+- `frontend/` — Vue application
+- `docs/` — architecture notes and supporting documentation
+- `openspec/` — feature specifications
+- `data/` — local H2 database files
 
-## Commands
+## Run the Project
 
 ### Backend
 
-- `.\mvnw.cmd test`
-- `.\mvnw.cmd spring-boot:run`
-
-The backend uses a local H2 file database, so no external database service is required.
+```powershell
+.\mvnw.cmd test
+.\mvnw.cmd spring-boot:run
+```
 
 ### Frontend
 
-- `cd frontend && npm install`
-- `cd frontend && npm run dev`
-- `cd frontend && npm run build`
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+### Frontend checks
+
+```powershell
+cd frontend
+npm run build
+npm run typecheck
+```
+
+## Quality Checks
+
+- `.\mvnw.cmd -Dtest=ArchitectureBoundariesTest test`
+- `.\mvnw.cmd -Dtest=GestionCaravanaApplicationTests test`
 - `cd frontend && npm run typecheck`
 
-## Architectural Choice
+## Reference Documentation
 
-Spring Boot 4.1.0 is selected to keep Java 25 as the target runtime.
+- `AGENTS.md`
+- `docs/architecture.md`
+- `openspec/README.md`
+

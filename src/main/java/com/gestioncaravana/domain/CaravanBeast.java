@@ -1,0 +1,214 @@
+package com.gestioncaravana.domain;
+
+import java.time.Instant;
+import java.util.UUID;
+
+public record CaravanBeast(
+    UUID id,
+    UUID caravanId,
+    CaravanBeastSourceType sourceType,
+    String catalogBeastCode,
+    String name,
+    String size,
+    int strength,
+    int speed,
+    Integer thermalAdaptation,
+    Integer basePrice,
+    Integer trainedPrice,
+    boolean fourLegged,
+    String specialNote,
+    String description,
+    String customNotes,
+    CaravanBeastAssignmentType assignmentType,
+    UUID assignedWagonId,
+    Instant createdAt,
+    Instant updatedAt) {
+
+  public CaravanBeast {
+    if (id == null) {
+      throw new IllegalArgumentException("id is required");
+    }
+    if (caravanId == null) {
+      throw new IllegalArgumentException("caravanId is required");
+    }
+    if (sourceType == null) {
+      throw new IllegalArgumentException("sourceType is required");
+    }
+    if (name == null || name.isBlank()) {
+      throw new IllegalArgumentException("name is required");
+    }
+    if (size == null || size.isBlank()) {
+      throw new IllegalArgumentException("size is required");
+    }
+    if (strength < 0) {
+      throw new IllegalArgumentException("strength must be greater than or equal to 0");
+    }
+    if (speed < 0) {
+      throw new IllegalArgumentException("speed must be greater than or equal to 0");
+    }
+    if (specialNote == null || specialNote.isBlank()) {
+      throw new IllegalArgumentException("specialNote is required");
+    }
+    if (description == null || description.isBlank()) {
+      throw new IllegalArgumentException("description is required");
+    }
+    if (assignmentType == null) {
+      throw new IllegalArgumentException("assignmentType is required");
+    }
+    if (assignmentType == CaravanBeastAssignmentType.NONE && assignedWagonId != null) {
+      throw new IllegalArgumentException("assignedWagonId must be null when assignmentType is NONE");
+    }
+    if (assignmentType != CaravanBeastAssignmentType.NONE && assignedWagonId == null) {
+      throw new IllegalArgumentException("assignedWagonId is required when assignmentType is not NONE");
+    }
+    if (createdAt == null || updatedAt == null) {
+      throw new IllegalArgumentException("timestamps are required");
+    }
+    if (sourceType == CaravanBeastSourceType.CATALOG && (catalogBeastCode == null || catalogBeastCode.isBlank())) {
+      throw new IllegalArgumentException("catalogBeastCode is required for catalog beasts");
+    }
+    if (sourceType == CaravanBeastSourceType.CUSTOM && catalogBeastCode != null && !catalogBeastCode.isBlank()) {
+      throw new IllegalArgumentException("catalogBeastCode must be empty for custom beasts");
+    }
+  }
+
+  public static CaravanBeast createFromCatalog(
+      UUID id,
+      UUID caravanId,
+      CaravanBeastCatalogItem catalogItem,
+      Instant now) {
+    return new CaravanBeast(
+        id,
+        caravanId,
+        CaravanBeastSourceType.CATALOG,
+        catalogItem.code(),
+        catalogItem.name(),
+        catalogItem.size(),
+        catalogItem.strength(),
+        catalogItem.speed(),
+        catalogItem.thermalAdaptation(),
+        catalogItem.basePrice(),
+        catalogItem.trainedPrice(),
+        catalogItem.fourLegged(),
+        catalogItem.specialNote(),
+        catalogItem.description(),
+        catalogItem.notes(),
+        CaravanBeastAssignmentType.NONE,
+        null,
+        now,
+        now);
+  }
+
+  public static CaravanBeast createCustom(
+      UUID id,
+      UUID caravanId,
+      String name,
+      String size,
+      int strength,
+      int speed,
+      Integer thermalAdaptation,
+      Integer basePrice,
+      Integer trainedPrice,
+      boolean fourLegged,
+      String specialNote,
+      String description,
+      String customNotes,
+      Instant now) {
+    return new CaravanBeast(
+        id,
+        caravanId,
+        CaravanBeastSourceType.CUSTOM,
+        null,
+        name,
+        size,
+        strength,
+        speed,
+        thermalAdaptation,
+        basePrice,
+        trainedPrice,
+        fourLegged,
+        specialNote,
+        description,
+        normalize(customNotes),
+        CaravanBeastAssignmentType.NONE,
+        null,
+        now,
+        now);
+  }
+
+  public CaravanBeast assignDraft(UUID wagonId, Instant now) {
+    return new CaravanBeast(
+        id,
+        caravanId,
+        sourceType,
+        catalogBeastCode,
+        name,
+        size,
+        strength,
+        speed,
+        thermalAdaptation,
+        basePrice,
+        trainedPrice,
+        fourLegged,
+        specialNote,
+        description,
+        customNotes,
+        CaravanBeastAssignmentType.DRAFT,
+        wagonId,
+        createdAt,
+        now);
+  }
+
+  public CaravanBeast assignTraveler(UUID wagonId, Instant now) {
+    return new CaravanBeast(
+        id,
+        caravanId,
+        sourceType,
+        catalogBeastCode,
+        name,
+        size,
+        strength,
+        speed,
+        thermalAdaptation,
+        basePrice,
+        trainedPrice,
+        fourLegged,
+        specialNote,
+        description,
+        customNotes,
+        CaravanBeastAssignmentType.TRAVELER,
+        wagonId,
+        createdAt,
+        now);
+  }
+
+  public CaravanBeast clearAssignment(Instant now) {
+    return new CaravanBeast(
+        id,
+        caravanId,
+        sourceType,
+        catalogBeastCode,
+        name,
+        size,
+        strength,
+        speed,
+        thermalAdaptation,
+        basePrice,
+        trainedPrice,
+        fourLegged,
+        specialNote,
+        description,
+        customNotes,
+        CaravanBeastAssignmentType.NONE,
+        null,
+        createdAt,
+        now);
+  }
+
+  private static String normalize(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    return value.trim();
+  }
+}

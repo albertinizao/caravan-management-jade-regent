@@ -1,0 +1,87 @@
+package com.gestioncaravana.domain;
+
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.Optional;
+
+public record WagonDraftConstraint(
+    int maxLargeBeasts,
+    int maxMediumBeasts,
+    int minimumStrength) {
+
+  public static final int MEDIUM_SLOTS_PER_LARGE_BEAST = 4;
+
+  private static final Pattern DRAFT_PATTERN = Pattern.compile(
+      "(?i)\\s*(?:\\+?(\\d+)\\s+criatura[s]?\\s+grande[s]?\\s*/\\s*)?\\+?(\\d+)\\s+mediana[s]?\\s*\\(\\+?(\\d+)\\s+fuerza\\)\\s*");
+
+  public WagonDraftConstraint {
+    if (maxLargeBeasts < 0) {
+      throw new IllegalArgumentException("maxLargeBeasts must be greater than or equal to 0");
+    }
+    if (maxMediumBeasts < 0) {
+      throw new IllegalArgumentException("maxMediumBeasts must be greater than or equal to 0");
+    }
+    if (minimumStrength < 0) {
+      throw new IllegalArgumentException("minimumStrength must be greater than or equal to 0");
+    }
+  }
+
+  public static WagonDraftConstraint parse(String propulsion) {
+    if (propulsion == null || propulsion.isBlank()) {
+      throw new IllegalArgumentException("propulsion is required");
+    }
+
+    var matcher = DRAFT_PATTERN.matcher(propulsion);
+    if (!matcher.matches()) {
+      throw new IllegalArgumentException("Unsupported wagon propulsion format: " + propulsion);
+    }
+
+    var largeBeasts = matcher.group(1) == null ? 0 : Integer.parseInt(matcher.group(1));
+    return new WagonDraftConstraint(
+        largeBeasts,
+        Integer.parseInt(matcher.group(2)),
+        Integer.parseInt(matcher.group(3)));
+  }
+
+  public static Optional<WagonDraftConstraint> tryParse(String propulsion) {
+    try {
+      return Optional.of(parse(propulsion));
+    } catch (IllegalArgumentException ex) {
+      return Optional.empty();
+    }
+  }
+
+  public WagonDraftConstraint plus(WagonDraftConstraint other) {
+    if (other == null) {
+      throw new IllegalArgumentException("other is required");
+    }
+    return new WagonDraftConstraint(
+        maxLargeBeasts + other.maxLargeBeasts,
+        maxMediumBeasts + other.maxMediumBeasts,
+        minimumStrength + other.minimumStrength);
+  }
+
+  public String format() {
+    if (maxLargeBeasts == 0) {
+      return "%d medianas (+%d Fuerza)".formatted(
+          maxMediumBeasts,
+          minimumStrength);
+    }
+    return "%d Criatura grande / %d medianas (+%d Fuerza)".formatted(
+        maxLargeBeasts,
+        maxMediumBeasts,
+        minimumStrength);
+  }
+
+  public int mediumSlotCapacity() {
+    return maxMediumBeasts;
+  }
+
+  public int largeSlotCapacity() {
+    return maxLargeBeasts;
+  }
+
+  public int mediumSlotsConsumedByLargeBeast() {
+    return MEDIUM_SLOTS_PER_LARGE_BEAST;
+  }
+}

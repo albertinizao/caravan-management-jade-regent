@@ -198,6 +198,7 @@ onMounted(refresh);
               <section>
                 <h3>Bestias</h3>
                 <p class="muted">{{ selectedCaravan.beasts.length }} elementos</p>
+                <RouterLink class="section-link" to="/beasts">Abrir vista de bestias</RouterLink>
               </section>
               <section>
                 <h3>Dotes</h3>

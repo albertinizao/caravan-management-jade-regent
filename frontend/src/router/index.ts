@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 
 import HomeView from "@/views/HomeView.vue";
+import BeastsView from "@/views/BeastsView.vue";
 import TravelersView from "@/views/TravelersView.vue";
 import WagonsView from "@/views/WagonsView.vue";
 
@@ -21,6 +22,11 @@ export const router = createRouter({
       path: "/travelers",
       name: "travelers",
       component: TravelersView,
+    },
+    {
+      path: "/beasts",
+      name: "beasts",
+      component: BeastsView,
     },
   ],
 });

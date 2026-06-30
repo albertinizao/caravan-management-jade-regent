@@ -5,10 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.gestioncaravana.application.port.in.CreateCaravanUseCase.CreateCaravanCommand;
 import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
+import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
+import com.gestioncaravana.domain.CaravanBeast;
+import com.gestioncaravana.domain.CaravanBeastAssignmentType;
 import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
 import java.time.Clock;
@@ -35,6 +38,7 @@ class CaravanManagementServiceTest {
         repository,
         new InMemoryCaravanWagonRepository(),
         new InMemoryTravelerRepository(),
+        new InMemoryBeastRepository(),
         activeSelection,
         Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
   }
@@ -176,6 +180,51 @@ class CaravanManagementServiceTest {
     @Override
     public void deleteByCaravanId(UUID caravanId) {
       travelers.removeIf(traveler -> traveler.caravanId().equals(caravanId));
+    }
+  }
+
+  private static final class InMemoryBeastRepository implements CaravanBeastRepositoryPort {
+    private final List<CaravanBeast> beasts = new ArrayList<>();
+
+    @Override
+    public CaravanBeast save(CaravanBeast beast) {
+      beasts.removeIf(existing -> existing.id().equals(beast.id()));
+      beasts.add(beast);
+      return beast;
+    }
+
+    @Override
+    public List<CaravanBeast> findAllByCaravanId(UUID caravanId) {
+      return beasts.stream().filter(beast -> beast.caravanId().equals(caravanId)).toList();
+    }
+
+    @Override
+    public List<CaravanBeast> findAllByCaravanIdAndAssignmentType(UUID caravanId, CaravanBeastAssignmentType assignmentType) {
+      return beasts.stream()
+          .filter(beast -> beast.caravanId().equals(caravanId) && beast.assignmentType() == assignmentType)
+          .toList();
+    }
+
+    @Override
+    public List<CaravanBeast> findAllByCaravanIdAndWagonIdAndAssignmentType(
+        UUID caravanId, UUID wagonId, CaravanBeastAssignmentType assignmentType) {
+      return beasts.stream()
+          .filter(beast -> beast.caravanId().equals(caravanId)
+              && beast.assignmentType() == assignmentType
+              && wagonId.equals(beast.assignedWagonId()))
+          .toList();
+    }
+
+    @Override
+    public Optional<CaravanBeast> findById(UUID caravanId, UUID beastId) {
+      return beasts.stream()
+          .filter(beast -> beast.caravanId().equals(caravanId) && beast.id().equals(beastId))
+          .findFirst();
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      beasts.removeIf(beast -> beast.caravanId().equals(caravanId));
     }
   }
 

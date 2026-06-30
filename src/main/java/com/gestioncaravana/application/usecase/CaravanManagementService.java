@@ -9,10 +9,12 @@ import com.gestioncaravana.application.port.in.ListCaravansUseCase;
 import com.gestioncaravana.application.port.in.DeleteCaravanUseCase;
 import com.gestioncaravana.application.port.in.SelectActiveCaravanUseCase;
 import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
+import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
+import com.gestioncaravana.domain.CaravanBeastAssignmentType;
 import com.gestioncaravana.domain.TravelerRoleCatalog;
 import com.gestioncaravana.domain.TravelerRoleCatalogItem;
 import com.gestioncaravana.domain.WagonCatalog;
@@ -36,6 +38,7 @@ public class CaravanManagementService
   private final CaravanCampaignRepositoryPort campaignRepository;
   private final CaravanWagonRepositoryPort wagonRepository;
   private final CaravanTravelerRepositoryPort travelerRepository;
+  private final CaravanBeastRepositoryPort beastRepository;
   private final ActiveCaravanSelectionPort activeSelectionPort;
   private final Clock clock;
 
@@ -43,11 +46,13 @@ public class CaravanManagementService
       CaravanCampaignRepositoryPort campaignRepository,
       CaravanWagonRepositoryPort wagonRepository,
       CaravanTravelerRepositoryPort travelerRepository,
+      CaravanBeastRepositoryPort beastRepository,
       ActiveCaravanSelectionPort activeSelectionPort,
       Clock clock) {
     this.campaignRepository = campaignRepository;
     this.wagonRepository = wagonRepository;
     this.travelerRepository = travelerRepository;
+    this.beastRepository = beastRepository;
     this.activeSelectionPort = activeSelectionPort;
     this.clock = clock;
   }
@@ -94,6 +99,7 @@ public class CaravanManagementService
         .orElseThrow(() -> new IllegalArgumentException("Caravan not found: " + id));
     campaignRepository.deleteById(exists.id());
     travelerRepository.deleteByCaravanId(exists.id());
+    beastRepository.deleteByCaravanId(exists.id());
 
     activeSelectionPort.getActiveCaravanId()
         .filter(activeId -> activeId.equals(id))
@@ -120,6 +126,9 @@ public class CaravanManagementService
                 .map(TravelerRoleCatalogItem::name)
                 .orElse(traveler.activeRoleCode()))
         .toList();
+    var beasts = beastRepository.findAllByCaravanId(campaign.id()).stream()
+        .map(beast -> beast.name() + " · " + beast.assignmentType().name().toLowerCase())
+        .toList();
     return new CaravanCampaignView(
         campaign.id(),
         campaign.name(),
@@ -138,7 +147,7 @@ public class CaravanManagementService
         campaign.updatedAt(),
         wagons,
         travelers,
-        List.of(),
+        beasts,
         List.of());
   }
 }

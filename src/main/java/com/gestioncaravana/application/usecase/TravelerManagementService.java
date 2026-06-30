@@ -9,6 +9,7 @@ import com.gestioncaravana.application.port.in.ListTravelerRoleCatalogUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerRoleUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerWagonUseCase;
+import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
@@ -43,6 +44,7 @@ public class TravelerManagementService
   private final CaravanTravelerRepositoryPort travelerRepository;
   private final CaravanWagonRepositoryPort wagonRepository;
   private final CaravanWagonImprovementRepositoryPort improvementRepository;
+  private final CaravanBeastRepositoryPort beastRepository;
   private final Clock clock;
 
   public TravelerManagementService(
@@ -50,11 +52,13 @@ public class TravelerManagementService
       CaravanTravelerRepositoryPort travelerRepository,
       CaravanWagonRepositoryPort wagonRepository,
       CaravanWagonImprovementRepositoryPort improvementRepository,
+      CaravanBeastRepositoryPort beastRepository,
       Clock clock) {
     this.caravanRepository = caravanRepository;
     this.travelerRepository = travelerRepository;
     this.wagonRepository = wagonRepository;
     this.improvementRepository = improvementRepository;
+    this.beastRepository = beastRepository;
     this.clock = clock;
   }
 
@@ -164,14 +168,16 @@ public class TravelerManagementService
 
     var wagonId = command.wagonId();
     if (wagonId != null) {
-      var wagon = wagonRepository.findById(caravanId, wagonId)
-          .orElseThrow(() -> new IllegalArgumentException("Wagon not found: " + wagonId));
-      var currentCount = travelerRepository.countByCaravanIdAndWagonId(caravanId, wagonId);
-      if (traveler.wagonId() == null || !traveler.wagonId().equals(wagonId)) {
-        if (currentCount >= currentWagonCapacity(caravanId, wagon.id())) {
-          throw new IllegalArgumentException("Wagon capacity reached");
-        }
+    var wagon = wagonRepository.findById(caravanId, wagonId)
+        .orElseThrow(() -> new IllegalArgumentException("Wagon not found: " + wagonId));
+    var currentCount = travelerRepository.countByCaravanIdAndWagonId(caravanId, wagonId);
+    var beastCount = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
+        caravanId, wagonId, com.gestioncaravana.domain.CaravanBeastAssignmentType.TRAVELER).size();
+    if (traveler.wagonId() == null || !traveler.wagonId().equals(wagonId)) {
+      if (currentCount + beastCount >= currentWagonCapacity(caravanId, wagon.id())) {
+        throw new IllegalArgumentException("Wagon capacity reached");
       }
+    }
     }
 
     var updated = traveler.updateDetails(
@@ -200,8 +206,10 @@ public class TravelerManagementService
     var wagon = wagonRepository.findById(caravanId, command.wagonId())
         .orElseThrow(() -> new IllegalArgumentException("Wagon not found: " + command.wagonId()));
     var currentCount = travelerRepository.countByCaravanIdAndWagonId(caravanId, command.wagonId());
+    var beastCount = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
+        caravanId, command.wagonId(), com.gestioncaravana.domain.CaravanBeastAssignmentType.TRAVELER).size();
     if (traveler.wagonId() == null || !traveler.wagonId().equals(command.wagonId())) {
-      if (currentCount >= currentWagonCapacity(caravanId, wagon.id())) {
+      if (currentCount + beastCount >= currentWagonCapacity(caravanId, wagon.id())) {
         throw new IllegalArgumentException("Wagon capacity reached");
       }
     }

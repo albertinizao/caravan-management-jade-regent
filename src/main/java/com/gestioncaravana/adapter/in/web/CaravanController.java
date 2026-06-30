@@ -3,9 +3,14 @@ package com.gestioncaravana.adapter.in.web;
 import com.gestioncaravana.application.port.in.CreateCaravanUseCase;
 import com.gestioncaravana.application.port.in.DeleteCaravanUseCase;
 import com.gestioncaravana.application.port.in.DeleteCaravanWagonUseCase;
+import com.gestioncaravana.application.port.in.AddCaravanBeastUseCase;
+import com.gestioncaravana.application.port.in.ClearCaravanBeastAssignmentUseCase;
 import com.gestioncaravana.application.port.in.GetActiveCaravanUseCase;
+import com.gestioncaravana.application.port.in.GetCaravanBeastUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanUseCase;
 import com.gestioncaravana.application.port.in.ListCaravansUseCase;
+import com.gestioncaravana.application.port.in.ListBeastCatalogUseCase;
+import com.gestioncaravana.application.port.in.ListCaravanBeastsUseCase;
 import com.gestioncaravana.application.port.in.ListCaravanWagonsUseCase;
 import com.gestioncaravana.application.port.in.ListWagonCatalogUseCase;
 import com.gestioncaravana.application.port.in.AddCaravanWagonUseCase;
@@ -22,6 +27,7 @@ import com.gestioncaravana.application.port.in.ListTravelerRoleCatalogUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerRoleUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerWagonUseCase;
+import com.gestioncaravana.application.port.in.UpdateCaravanBeastAssignmentUseCase;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -46,10 +52,16 @@ public class CaravanController {
   private final SelectActiveCaravanUseCase selectActiveCaravanUseCase;
   private final GetActiveCaravanUseCase getActiveCaravanUseCase;
   private final ListWagonCatalogUseCase listWagonCatalogUseCase;
+  private final ListBeastCatalogUseCase listBeastCatalogUseCase;
   private final ListWagonImprovementCatalogUseCase listWagonImprovementCatalogUseCase;
   private final ListTravelerRoleCatalogUseCase listTravelerRoleCatalogUseCase;
+  private final ListCaravanBeastsUseCase listCaravanBeastsUseCase;
+  private final GetCaravanBeastUseCase getCaravanBeastUseCase;
   private final ListCaravanTravelersUseCase listCaravanTravelersUseCase;
   private final GetCaravanTravelerUseCase getCaravanTravelerUseCase;
+  private final AddCaravanBeastUseCase addCaravanBeastUseCase;
+  private final UpdateCaravanBeastAssignmentUseCase updateCaravanBeastAssignmentUseCase;
+  private final ClearCaravanBeastAssignmentUseCase clearCaravanBeastAssignmentUseCase;
   private final AddCaravanTravelerUseCase addCaravanTravelerUseCase;
   private final UpdateCaravanTravelerUseCase updateCaravanTravelerUseCase;
   private final UpdateCaravanTravelerWagonUseCase updateCaravanTravelerWagonUseCase;
@@ -70,10 +82,16 @@ public class CaravanController {
       SelectActiveCaravanUseCase selectActiveCaravanUseCase,
       GetActiveCaravanUseCase getActiveCaravanUseCase,
       ListWagonCatalogUseCase listWagonCatalogUseCase,
+      ListBeastCatalogUseCase listBeastCatalogUseCase,
       ListWagonImprovementCatalogUseCase listWagonImprovementCatalogUseCase,
       ListTravelerRoleCatalogUseCase listTravelerRoleCatalogUseCase,
+      ListCaravanBeastsUseCase listCaravanBeastsUseCase,
+      GetCaravanBeastUseCase getCaravanBeastUseCase,
       ListCaravanTravelersUseCase listCaravanTravelersUseCase,
       GetCaravanTravelerUseCase getCaravanTravelerUseCase,
+      AddCaravanBeastUseCase addCaravanBeastUseCase,
+      UpdateCaravanBeastAssignmentUseCase updateCaravanBeastAssignmentUseCase,
+      ClearCaravanBeastAssignmentUseCase clearCaravanBeastAssignmentUseCase,
       AddCaravanTravelerUseCase addCaravanTravelerUseCase,
       UpdateCaravanTravelerUseCase updateCaravanTravelerUseCase,
       UpdateCaravanTravelerWagonUseCase updateCaravanTravelerWagonUseCase,
@@ -92,10 +110,16 @@ public class CaravanController {
     this.selectActiveCaravanUseCase = selectActiveCaravanUseCase;
     this.getActiveCaravanUseCase = getActiveCaravanUseCase;
     this.listWagonCatalogUseCase = listWagonCatalogUseCase;
+    this.listBeastCatalogUseCase = listBeastCatalogUseCase;
     this.listWagonImprovementCatalogUseCase = listWagonImprovementCatalogUseCase;
     this.listTravelerRoleCatalogUseCase = listTravelerRoleCatalogUseCase;
+    this.listCaravanBeastsUseCase = listCaravanBeastsUseCase;
+    this.getCaravanBeastUseCase = getCaravanBeastUseCase;
     this.listCaravanTravelersUseCase = listCaravanTravelersUseCase;
     this.getCaravanTravelerUseCase = getCaravanTravelerUseCase;
+    this.addCaravanBeastUseCase = addCaravanBeastUseCase;
+    this.updateCaravanBeastAssignmentUseCase = updateCaravanBeastAssignmentUseCase;
+    this.clearCaravanBeastAssignmentUseCase = clearCaravanBeastAssignmentUseCase;
     this.addCaravanTravelerUseCase = addCaravanTravelerUseCase;
     this.updateCaravanTravelerUseCase = updateCaravanTravelerUseCase;
     this.updateCaravanTravelerWagonUseCase = updateCaravanTravelerWagonUseCase;
@@ -148,6 +172,92 @@ public class CaravanController {
   List<WagonCatalogItemResponse> listWagonCatalog(@PathVariable UUID caravanId) {
     getCaravanUseCase.getById(caravanId);
     return listWagonCatalogUseCase.list().stream().map(CaravanWagonResponseMapper::toResponse).toList();
+  }
+
+  @GetMapping("/caravans/{caravanId}/beasts/catalog")
+  List<CaravanBeastCatalogItemResponse> listBeastCatalog(@PathVariable UUID caravanId) {
+    getCaravanUseCase.getById(caravanId);
+    return listBeastCatalogUseCase.list().stream().map(CaravanBeastResponseMapper::toResponse).toList();
+  }
+
+  @GetMapping("/caravans/{caravanId}/beasts")
+  List<CaravanBeastResponse> listCaravanBeasts(
+      @PathVariable UUID caravanId,
+      @org.springframework.web.bind.annotation.RequestParam(required = false) String query,
+      @org.springframework.web.bind.annotation.RequestParam(required = false) String sourceType,
+      @org.springframework.web.bind.annotation.RequestParam(required = false) String assignmentType,
+      @org.springframework.web.bind.annotation.RequestParam(required = false) UUID wagonId) {
+    return listCaravanBeastsUseCase.list(caravanId, query, sourceType, assignmentType, wagonId).stream()
+        .map(CaravanBeastResponseMapper::toResponse)
+        .toList();
+  }
+
+  @GetMapping("/caravans/{caravanId}/beasts/{beastId}")
+  CaravanBeastResponse getCaravanBeast(@PathVariable UUID caravanId, @PathVariable UUID beastId) {
+    return CaravanBeastResponseMapper.toResponse(getCaravanBeastUseCase.getById(caravanId, beastId));
+  }
+
+  @PostMapping("/caravans/{caravanId}/beasts/catalog/{beastCode}")
+  ResponseEntity<CaravanBeastResponse> addCaravanBeastFromCatalog(
+      @PathVariable UUID caravanId,
+      @PathVariable String beastCode) {
+    var created = addCaravanBeastUseCase.execute(
+        caravanId,
+        new AddCaravanBeastUseCase.AddCaravanBeastCommand(
+            com.gestioncaravana.domain.CaravanBeastSourceType.CATALOG,
+            beastCode,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null));
+    return ResponseEntity.status(HttpStatus.CREATED).body(CaravanBeastResponseMapper.toResponse(created));
+  }
+
+  @PostMapping("/caravans/{caravanId}/beasts")
+  ResponseEntity<CaravanBeastResponse> addCaravanBeast(
+      @PathVariable UUID caravanId,
+      @Valid @RequestBody AddCaravanBeastRequest request) {
+    var created = addCaravanBeastUseCase.execute(
+        caravanId,
+        new AddCaravanBeastUseCase.AddCaravanBeastCommand(
+            request.sourceType(),
+            request.catalogBeastCode(),
+            request.name(),
+            request.size(),
+            request.strength(),
+            request.speed(),
+            request.thermalAdaptation(),
+            request.basePrice(),
+            request.trainedPrice(),
+            request.fourLegged(),
+            request.specialNote(),
+            request.description(),
+            request.customNotes()));
+    return ResponseEntity.status(HttpStatus.CREATED).body(CaravanBeastResponseMapper.toResponse(created));
+  }
+
+  @PutMapping("/caravans/{caravanId}/beasts/{beastId}/assignment")
+  CaravanBeastResponse updateCaravanBeastAssignment(
+      @PathVariable UUID caravanId,
+      @PathVariable UUID beastId,
+      @Valid @RequestBody UpdateCaravanBeastAssignmentRequest request) {
+    return CaravanBeastResponseMapper.toResponse(
+        updateCaravanBeastAssignmentUseCase.execute(
+            caravanId,
+            beastId,
+            new UpdateCaravanBeastAssignmentUseCase.UpdateCaravanBeastAssignmentCommand(request.assignmentType(), request.wagonId())));
+  }
+
+  @org.springframework.web.bind.annotation.DeleteMapping("/caravans/{caravanId}/beasts/{beastId}/assignment")
+  CaravanBeastResponse clearCaravanBeastAssignment(@PathVariable UUID caravanId, @PathVariable UUID beastId) {
+    return CaravanBeastResponseMapper.toResponse(clearCaravanBeastAssignmentUseCase.execute(caravanId, beastId));
   }
 
   @GetMapping("/caravans/{caravanId}/travelers/roles/catalog")

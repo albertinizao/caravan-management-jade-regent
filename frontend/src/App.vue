@@ -3,13 +3,14 @@
     <header class="topbar">
       <div>
         <strong>GestionCaravana</strong>
-        <p>Caravana activa y carros</p>
+        <p>Caravana activa y carga</p>
       </div>
 
       <nav class="nav">
         <RouterLink to="/">Caravanas</RouterLink>
         <RouterLink to="/travelers">Viajeros</RouterLink>
         <RouterLink to="/wagons">Carros</RouterLink>
+        <RouterLink to="/cargo">Carga</RouterLink>
         <RouterLink to="/beasts">Bestias</RouterLink>
       </nav>
     </header>

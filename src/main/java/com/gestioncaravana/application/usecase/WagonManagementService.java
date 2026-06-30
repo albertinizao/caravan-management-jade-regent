@@ -15,6 +15,7 @@ import com.gestioncaravana.application.port.in.ListCaravanWagonsUseCase;
 import com.gestioncaravana.application.port.in.ListWagonImprovementCatalogUseCase;
 import com.gestioncaravana.application.port.in.ListWagonCatalogUseCase;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
@@ -33,6 +34,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -53,22 +55,43 @@ public class WagonManagementService
   private final CaravanWagonRepositoryPort wagonRepository;
   private final CaravanWagonImprovementRepositoryPort improvementRepository;
   private final CaravanBeastRepositoryPort beastRepository;
+  private final CaravanCargoRepositoryPort cargoRepository;
   private final CaravanTravelerRepositoryPort travelerRepository;
   private final Clock clock;
 
+  @Autowired
   public WagonManagementService(
       CaravanCampaignRepositoryPort caravanRepository,
       CaravanWagonRepositoryPort wagonRepository,
       CaravanWagonImprovementRepositoryPort improvementRepository,
       CaravanBeastRepositoryPort beastRepository,
+      CaravanCargoRepositoryPort cargoRepository,
       CaravanTravelerRepositoryPort travelerRepository,
       Clock clock) {
     this.caravanRepository = caravanRepository;
     this.wagonRepository = wagonRepository;
     this.improvementRepository = improvementRepository;
     this.beastRepository = beastRepository;
+    this.cargoRepository = cargoRepository;
     this.travelerRepository = travelerRepository;
     this.clock = clock;
+  }
+
+  WagonManagementService(
+      CaravanCampaignRepositoryPort caravanRepository,
+      CaravanWagonRepositoryPort wagonRepository,
+      CaravanWagonImprovementRepositoryPort improvementRepository,
+      CaravanBeastRepositoryPort beastRepository,
+      CaravanTravelerRepositoryPort travelerRepository,
+      Clock clock) {
+    this(
+        caravanRepository,
+        wagonRepository,
+        improvementRepository,
+        beastRepository,
+        new NoopCaravanCargoRepositoryPort(),
+        travelerRepository,
+        clock);
   }
 
   @Override
@@ -174,6 +197,10 @@ public class WagonManagementService
     requireCaravan(caravanId);
     wagonRepository.findById(caravanId, wagonId)
         .orElseThrow(() -> new IllegalArgumentException("Wagon not found: " + wagonId));
+
+    if (cargoRepository.countByCaravanIdAndWagonId(caravanId, wagonId) > 0) {
+      throw new IllegalArgumentException("Wagon has cargo assigned");
+    }
 
     beastRepository.findAllByCaravanId(caravanId).stream()
         .filter(beast -> wagonId.equals(beast.assignedWagonId()))
@@ -507,4 +534,33 @@ public class WagonManagementService
       int travelerCapacity,
       int cargoCapacity,
       int consumption) {}
+
+  private static final class NoopCaravanCargoRepositoryPort implements CaravanCargoRepositoryPort {
+
+    @Override
+    public com.gestioncaravana.domain.CaravanCargo save(com.gestioncaravana.domain.CaravanCargo cargo) {
+      return cargo;
+    }
+
+    @Override
+    public List<com.gestioncaravana.domain.CaravanCargo> findAllByCaravanId(UUID caravanId) {
+      return List.of();
+    }
+
+    @Override
+    public java.util.Optional<com.gestioncaravana.domain.CaravanCargo> findById(UUID caravanId, UUID cargoId) {
+      return java.util.Optional.empty();
+    }
+
+    @Override
+    public void deleteById(UUID caravanId, UUID cargoId) {}
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {}
+
+    @Override
+    public long countByCaravanIdAndWagonId(UUID caravanId, UUID wagonId) {
+      return 0;
+    }
+  }
 }

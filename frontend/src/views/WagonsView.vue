@@ -1,8 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 import { useToast } from "@/composables/useToast";
 import { getActiveCaravan, listCaravans } from "@/services/caravans";
+import {
+  addCargoFromCatalog,
+  addCustomCargo,
+  deleteCaravanCargo,
+  listCaravanCargo,
+  listCargoCatalog,
+} from "@/services/cargo";
 import { listCaravanBeasts, updateCaravanBeastAssignment, clearCaravanBeastAssignment } from "@/services/beasts";
 import {
   addCaravanWagon,
@@ -17,6 +24,7 @@ import {
 import { listCaravanTravelers, updateCaravanTravelerWagon } from "@/services/travelers";
 import type { Caravan } from "@/types/caravan";
 import type { CaravanBeast } from "@/types/beast";
+import type { CaravanCargo, CargoCatalogItem } from "@/types/cargo";
 import type { CaravanTraveler } from "@/types/traveler";
 import type {
   CaravanWagon,
@@ -38,6 +46,8 @@ const error = ref<string | null>(null);
 const addModalOpen = ref(false);
 const selectedCatalogCode = ref<string | null>(null);
 const selectedWagon = ref<CaravanWagon | null>(null);
+const selectedWagonCargo = ref<CaravanCargo[]>([]);
+const wagonCargoCatalog = ref<CargoCatalogItem[]>([]);
 const assignmentModalOpen = ref(false);
 const assignmentModalMode = ref<"traveler" | "beast-traveler" | "beast-draft">("traveler");
 const assignmentModalError = ref<string | null>(null);
@@ -50,6 +60,18 @@ const selectedImprovementCode = ref<string | null>(null);
 const improvementsExpanded = ref(false);
 const improvementDeleteMode = ref(false);
 const draftPanelExpanded = ref(true);
+const cargoModalOpen = ref(false);
+const cargoModalMode = ref<"catalog" | "custom">("catalog");
+const cargoModalError = ref<string | null>(null);
+const cargoCatalogCode = ref("");
+const cargoQuantity = ref("1");
+const cargoUnits = ref("1");
+const cargoDisplayName = ref("");
+const cargoCategory = ref("");
+const cargoOrigin = ref("");
+const cargoSpecificCommodity = ref("");
+const cargoDeity = ref("");
+const cargoNotes = ref("");
 const addTypeFilter = ref<"all" | "viajeros" | "mercancias" | "especiales">("all");
 const addSearch = ref("");
 const improvementSearch = ref("");
@@ -131,6 +153,31 @@ const selectedWagonDraftBeasts = computed(() =>
     : []
 );
 
+const selectedWagonCargoLoad = computed(() =>
+  selectedWagonCargo.value.reduce((total, entry) => total + entry.quantity * entry.cargoUnits, 0),
+);
+
+const selectedWagonCargoRemaining = computed(() =>
+  selectedWagon.value ? Math.max(0, selectedWagon.value.cargoCapacity - selectedWagonCargoLoad.value) : 0,
+);
+
+const cargoCatalogByCode = computed(() =>
+  Object.fromEntries(wagonCargoCatalog.value.map((item) => [item.code, item] as const)),
+);
+
+const selectedCargoCatalogItem = computed(() =>
+  cargoCatalogCode.value ? cargoCatalogByCode.value[cargoCatalogCode.value] ?? null : null,
+);
+
+const cargoQuantityValue = computed(() => parsePositiveInteger(cargoQuantity.value, selectedCargoCatalogItem.value?.defaultQuantity ?? 1));
+const cargoUnitsValue = computed(() => parsePositiveInteger(cargoUnits.value, selectedCargoCatalogItem.value?.defaultCargoUnits ?? 1));
+const cargoQuantityMax = computed(() => maxQuantityForCargo(cargoUnitsValue.value));
+const addableCargoCatalogItems = computed(() =>
+  wagonCargoCatalog.value.filter((item) =>
+    selectedWagon.value ? isWagonCompatibleWithCatalogItem(selectedWagon.value, item) : false
+  ),
+);
+
 const unassignedTravelers = computed(() => travelers.value.filter((traveler) => !traveler.wagonId));
 
 const unassignedBeasts = computed(() => beasts.value.filter((beast) => beast.assignmentType === "NONE"));
@@ -195,6 +242,19 @@ const visibleImprovementItems = computed(() =>
     .sort((left, right) => Number(right.available) - Number(left.available))
 );
 
+watch(selectedCargoCatalogItem, (item) => {
+  if (!cargoModalOpen.value || cargoModalMode.value !== "catalog" || !item) {
+    return;
+  }
+
+  cargoUnits.value = String(item.defaultCargoUnits ?? 1);
+  cargoQuantity.value = String(item.defaultQuantity ?? 1);
+});
+
+watch([addableCargoCatalogItems, cargoModalOpen, cargoModalMode], () => {
+  syncCargoFormSelection();
+});
+
 async function refresh() {
   const previousAction = pendingAction.value;
   const trackRefresh = previousAction === null;
@@ -212,17 +272,19 @@ async function refresh() {
     activeCaravan.value = activeResponse.caravan;
 
     if (activeResponse.caravan) {
-      const [catalogResponse, wagonsResponse, travelerResponse, beastResponse] = await Promise.all([
+      const [catalogResponse, wagonsResponse, travelerResponse, beastResponse, cargoCatalogResponse] = await Promise.all([
         listWagonCatalog(activeResponse.caravan.id),
         listCaravanWagons(activeResponse.caravan.id),
         listCaravanTravelers(activeResponse.caravan.id),
         listCaravanBeasts(activeResponse.caravan.id),
+        listCargoCatalog(activeResponse.caravan.id),
       ]);
 
       catalog.value = catalogResponse;
       wagons.value = wagonsResponse;
       travelers.value = travelerResponse;
       beasts.value = beastResponse;
+      wagonCargoCatalog.value = cargoCatalogResponse;
 
       if (
         catalogResponse.length > 0
@@ -235,6 +297,7 @@ async function refresh() {
         const refreshedWagon = wagonsResponse.find((wagon) => wagon.id === selectedWagon.value?.id);
         if (refreshedWagon) {
           selectedWagon.value = await getCaravanWagon(activeResponse.caravan.id, refreshedWagon.id);
+          await loadSelectedWagonCargo(activeResponse.caravan.id, refreshedWagon.id);
         } else {
           closeModal();
         }
@@ -244,6 +307,8 @@ async function refresh() {
       wagons.value = [];
       travelers.value = [];
       beasts.value = [];
+      wagonCargoCatalog.value = [];
+      selectedWagonCargo.value = [];
       selectedCatalogCode.value = null;
       closeModal();
     }
@@ -294,6 +359,7 @@ async function openWagonDetails(wagon: CaravanWagon) {
 
   try {
     selectedWagon.value = await getCaravanWagon(activeCaravan.value.id, wagon.id);
+    await loadSelectedWagonCargo(activeCaravan.value.id, wagon.id);
     improvementModalOpen.value = false;
     selectedImprovementCode.value = null;
     improvementSearch.value = "";
@@ -377,6 +443,8 @@ async function handleDeleteSelectedWagon() {
 
 function closeModal() {
   selectedWagon.value = null;
+  selectedWagonCargo.value = [];
+  closeCargoModal();
   closeAssignmentModal();
   improvementModalOpen.value = false;
   selectedImprovementCode.value = null;
@@ -389,6 +457,248 @@ function closeModal() {
 function closeAddModal() {
   addModalOpen.value = false;
   selectedCatalogCode.value = null;
+}
+
+function closeCargoModal() {
+  cargoModalOpen.value = false;
+  cargoModalError.value = null;
+}
+
+async function loadSelectedWagonCargo(caravanId: string, wagonId: string) {
+  selectedWagonCargo.value = await listCaravanCargo(caravanId, { wagonId });
+}
+
+function parsePositiveInteger(value: string, fallback: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+
+  return Math.floor(parsed);
+}
+
+function totalCargoUnits(quantity: number, cargoUnits: number) {
+  return quantity * cargoUnits;
+}
+
+function selectedWagonRemainingCargoUnits(wagon: CaravanWagon | null) {
+  if (!wagon) {
+    return 0;
+  }
+
+  return Math.max(0, wagon.cargoCapacity - selectedWagonCargoLoad.value);
+}
+
+function maxQuantityForCargo(cargoUnits: number) {
+  if (!selectedWagon.value || cargoUnits < 1) {
+    return 1;
+  }
+
+  return Math.max(1, Math.floor(selectedWagonRemainingCargoUnits(selectedWagon.value) / cargoUnits));
+}
+
+function isWagonCompatibleWithCatalogItem(wagon: CaravanWagon, item: CargoCatalogItem | null) {
+  if (!item) {
+    return false;
+  }
+
+  if (item.allowedWagonCodes.length > 0) {
+    return item.allowedWagonCodes.includes(wagon.wagonTypeCode);
+  }
+
+  return wagon.wagonTypeCode !== "carro-de-suministros"
+    && wagon.wagonTypeCode !== "carro-de-mercancias-especificas";
+}
+
+function isWagonCompatibleForCustomCargo(wagon: CaravanWagon) {
+  return wagon.wagonTypeCode !== "carro-de-suministros"
+    && wagon.wagonTypeCode !== "carro-de-mercancias-especificas";
+}
+
+function openCargoModal(mode: "catalog" | "custom") {
+  if (!selectedWagon.value || !activeCaravan.value) {
+    return;
+  }
+
+  cargoModalMode.value = mode;
+  cargoModalError.value = null;
+  resetCargoForm();
+  cargoModalOpen.value = true;
+}
+
+function resetCargoForm() {
+  const wagon = selectedWagon.value;
+  if (!wagon) {
+    cargoCatalogCode.value = "";
+    cargoQuantity.value = "1";
+    cargoUnits.value = "1";
+    cargoDisplayName.value = "";
+    cargoCategory.value = "";
+    cargoOrigin.value = "";
+    cargoSpecificCommodity.value = "";
+    cargoDeity.value = "";
+    cargoNotes.value = "";
+    return;
+  }
+
+  cargoQuantity.value = "1";
+  cargoOrigin.value = "";
+  cargoSpecificCommodity.value = "";
+  cargoDeity.value = "";
+  cargoNotes.value = "";
+
+  if (cargoModalMode.value === "custom") {
+    cargoCatalogCode.value = "";
+    cargoUnits.value = "1";
+    cargoDisplayName.value = "";
+    cargoCategory.value = "";
+    return;
+  }
+
+  const compatibleCatalogItems = wagonCargoCatalog.value.filter((item) => isWagonCompatibleWithCatalogItem(wagon, item));
+  cargoCatalogCode.value = compatibleCatalogItems[0]?.code ?? "";
+  cargoUnits.value = String(compatibleCatalogItems[0]?.defaultCargoUnits ?? 1);
+  cargoDisplayName.value = "";
+  cargoCategory.value = "";
+}
+
+function syncCargoFormSelection() {
+  if (!cargoModalOpen.value || cargoModalMode.value !== "catalog") {
+    return;
+  }
+
+  const available = addableCargoCatalogItems.value;
+  if (available.length === 0) {
+    cargoCatalogCode.value = "";
+    return;
+  }
+
+  if (!available.some((item) => item.code === cargoCatalogCode.value)) {
+    cargoCatalogCode.value = available[0].code;
+  }
+}
+
+async function handleAddCatalogCargoToSelectedWagon() {
+  if (!activeCaravan.value || !selectedWagon.value || !selectedCargoCatalogItem.value) {
+    return;
+  }
+
+  const quantity = cargoQuantityValue.value;
+  const cargoUnitsPerEntry = cargoUnitsValue.value;
+
+  if (totalCargoUnits(quantity, cargoUnitsPerEntry) > selectedWagonRemainingCargoUnits(selectedWagon.value)) {
+    cargoModalError.value = "La cantidad supera la capacidad disponible del carro";
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = "add-cargo";
+  cargoModalError.value = null;
+
+  try {
+    await addCargoFromCatalog(activeCaravan.value.id, {
+      catalogCode: selectedCargoCatalogItem.value.code,
+      quantity,
+      cargoUnits: cargoUnitsPerEntry,
+      wagonId: selectedWagon.value.id,
+      origin: cargoOrigin.value.trim() || null,
+      specificCommodity: cargoSpecificCommodity.value.trim() || null,
+      deity: cargoDeity.value.trim() || null,
+      notes: cargoNotes.value.trim() || null,
+    });
+    closeCargoModal();
+    await refresh();
+    showToast(`Mercancía añadida a ${selectedWagon.value.name}.`);
+  } catch (cause) {
+    cargoModalError.value = cause instanceof Error ? cause.message : "Failed to add cargo";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+async function handleAddCustomCargoToSelectedWagon() {
+  if (!activeCaravan.value || !selectedWagon.value) {
+    return;
+  }
+
+  const displayName = cargoDisplayName.value.trim();
+  const category = cargoCategory.value.trim();
+  const quantity = cargoQuantityValue.value;
+  const cargoUnitsPerEntry = cargoUnitsValue.value;
+
+  if (!displayName) {
+    cargoModalError.value = "El nombre es obligatorio";
+    return;
+  }
+  if (!category) {
+    cargoModalError.value = "La categoría es obligatoria";
+    return;
+  }
+  if (!isWagonCompatibleForCustomCargo(selectedWagon.value)) {
+    cargoModalError.value = "Solo se muestran carros válidos para esta carga";
+    return;
+  }
+  if (totalCargoUnits(quantity, cargoUnitsPerEntry) > selectedWagonRemainingCargoUnits(selectedWagon.value)) {
+    cargoModalError.value = "La cantidad supera la capacidad disponible del carro";
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = "add-custom-cargo";
+  cargoModalError.value = null;
+
+  try {
+    await addCustomCargo(activeCaravan.value.id, {
+      displayName,
+      category,
+      quantity,
+      cargoUnits: cargoUnitsPerEntry,
+      wagonId: selectedWagon.value.id,
+      origin: cargoOrigin.value.trim() || null,
+      specificCommodity: cargoSpecificCommodity.value.trim() || null,
+      deity: cargoDeity.value.trim() || null,
+      notes: cargoNotes.value.trim() || null,
+    });
+    closeCargoModal();
+    await refresh();
+    showToast(`Mercancía añadida a ${selectedWagon.value.name}.`);
+  } catch (cause) {
+    cargoModalError.value = cause instanceof Error ? cause.message : "Failed to add cargo";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+async function handleDeleteSelectedWagonCargo(entry: CaravanCargo) {
+  if (!activeCaravan.value || !selectedWagon.value) {
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `¿Seguro que quieres eliminar "${entry.displayName}" de este carro? Esta acción no se puede deshacer.`
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = `delete-cargo:${entry.id}`;
+  error.value = null;
+
+  try {
+    await deleteCaravanCargo(activeCaravan.value.id, entry.id);
+    await loadSelectedWagonCargo(activeCaravan.value.id, selectedWagon.value.id);
+    await refresh();
+    showToast(`Mercancía eliminada: ${entry.displayName}.`);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Failed to delete cargo";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
 }
 
 function replaceWagonInList(updatedWagon: CaravanWagon) {
@@ -1212,6 +1522,82 @@ onMounted(refresh);
           <section class="info-block">
             <div class="section-header">
               <div>
+                <h3>Mercancías transportadas</h3>
+                <p class="muted">
+                  {{ selectedWagonCargo.length }} entradas · {{ selectedWagonCargoLoad }} / {{ selectedWagon.cargoCapacity }}
+                  usadas · quedan {{ selectedWagonCargoRemaining }}.
+                </p>
+              </div>
+              <div class="accordion-actions">
+                <button
+                  class="secondary-button"
+                  type="button"
+                  :disabled="loading || submitting || selectedWagonCargoRemaining === 0"
+                  @click="openCargoModal('catalog')"
+                >
+                  Añadir de catálogo
+                </button>
+                <button
+                  class="secondary-button"
+                  type="button"
+                  :disabled="loading || submitting || selectedWagonCargoRemaining === 0"
+                  @click="openCargoModal('custom')"
+                >
+                  Añadir personalizada
+                </button>
+              </div>
+            </div>
+
+            <div v-if="selectedWagonCargo.length === 0" class="muted">
+              No hay mercancías asignadas a este carro.
+            </div>
+            <div v-else>
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Origen</th>
+                    <th>Categoría</th>
+                    <th>Cantidad</th>
+                    <th>Carga total</th>
+                    <th>Notas</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="entry in selectedWagonCargo" :key="entry.id">
+                    <td>
+                      <strong>{{ entry.displayName }}</strong>
+                      <p class="muted">{{ entry.sourceTypeLabel }}</p>
+                    </td>
+                    <td>{{ entry.origin ?? "—" }}</td>
+                    <td>{{ entry.category }}</td>
+                    <td>{{ entry.quantity }}</td>
+                    <td>{{ entry.quantity * entry.cargoUnits }}</td>
+                    <td>{{ entry.notes ?? "—" }}</td>
+                    <td>
+                      <button
+                        class="trash-button"
+                        type="button"
+                        :disabled="loading || submitting"
+                        :aria-label="`Eliminar ${entry.displayName}`"
+                        @click="handleDeleteSelectedWagonCargo(entry)"
+                      >
+                        <span class="button-with-spinner">
+                          <span v-if="isPending(`delete-cargo:${entry.id}`)" class="button-spinner" aria-hidden="true"></span>
+                          <span>🗑</span>
+                        </span>
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="info-block">
+            <div class="section-header">
+              <div>
                 <h3>Tiro actual</h3>
                 <p class="muted">Criaturas asignadas al tiro y fuerza efectiva del conjunto.</p>
               </div>
@@ -1378,6 +1764,138 @@ onMounted(refresh);
     </teleport>
 
     <teleport to="body">
+      <div v-if="cargoModalOpen" class="modal-backdrop" @click.self="closeCargoModal">
+        <div class="modal modal-add">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">Añadir mercancía</p>
+              <h2>{{ cargoModalMode === 'catalog' ? 'Añadir de catálogo' : 'Añadir personalizada' }}</h2>
+              <p class="muted">Se añadirá directamente a {{ selectedWagon?.name }}</p>
+            </div>
+            <button class="ghost-button" type="button" @click="closeCargoModal">Cerrar</button>
+          </div>
+
+          <p v-if="cargoModalError" class="error">{{ cargoModalError }}</p>
+
+          <div v-if="cargoModalMode === 'catalog'" class="modal-form">
+            <label>
+              <span>Mercancía de catálogo</span>
+              <select v-model="cargoCatalogCode">
+                <option value="">Selecciona una mercancía</option>
+                <option v-for="item in addableCargoCatalogItems" :key="item.code" :value="item.code">
+                  {{ item.name }} · {{ item.category }}
+                </option>
+              </select>
+            </label>
+
+            <div v-if="selectedCargoCatalogItem" class="two-columns">
+              <label>
+                <span>Cantidad</span>
+                <input v-model="cargoQuantity" type="number" min="1" :max="cargoQuantityMax" />
+              </label>
+              <label>
+                <span>Unidades de carga</span>
+                <input
+                  v-model="cargoUnits"
+                  type="number"
+                  min="1"
+                  :disabled="!selectedCargoCatalogItem.cargoUnitsEditable"
+                />
+              </label>
+            </div>
+
+            <template v-if="selectedCargoCatalogItem">
+              <div class="two-columns">
+                <label>
+                  <span>Origen</span>
+                  <input v-model="cargoOrigin" type="text" />
+                </label>
+                <label>
+                  <span>Mercancía específica</span>
+                  <input v-model="cargoSpecificCommodity" type="text" />
+                </label>
+              </div>
+
+              <div class="two-columns">
+                <label>
+                  <span>Deidad</span>
+                  <input v-model="cargoDeity" type="text" />
+                </label>
+                <label>
+                  <span>Notas</span>
+                  <input v-model="cargoNotes" type="text" />
+                </label>
+              </div>
+            </template>
+          </div>
+
+          <div v-else class="modal-form">
+            <label>
+              <span>Nombre</span>
+              <input v-model="cargoDisplayName" type="text" />
+            </label>
+
+            <label>
+              <span>Categoría</span>
+              <input v-model="cargoCategory" type="text" />
+            </label>
+
+            <div class="two-columns">
+              <label>
+                <span>Cantidad</span>
+                <input v-model="cargoQuantity" type="number" min="1" :max="cargoQuantityMax" />
+              </label>
+              <label>
+                <span>Unidades de carga</span>
+                <input v-model="cargoUnits" type="number" min="1" />
+              </label>
+            </div>
+
+            <div class="two-columns">
+              <label>
+                <span>Origen</span>
+                <input v-model="cargoOrigin" type="text" />
+              </label>
+              <label>
+                <span>Mercancía específica</span>
+                <input v-model="cargoSpecificCommodity" type="text" />
+              </label>
+            </div>
+
+            <div class="two-columns">
+              <label>
+                <span>Deidad</span>
+                <input v-model="cargoDeity" type="text" />
+              </label>
+              <label>
+                <span>Notas</span>
+                <input v-model="cargoNotes" type="text" />
+              </label>
+            </div>
+          </div>
+
+          <div class="modal-actions">
+            <button
+              class="primary-button confirm-button"
+              type="button"
+              :disabled="loading || submitting || !selectedWagon || (cargoModalMode === 'catalog' && !selectedCargoCatalogItem)"
+              :aria-busy="submitting"
+              @click="cargoModalMode === 'catalog' ? handleAddCatalogCargoToSelectedWagon() : handleAddCustomCargoToSelectedWagon()"
+            >
+              <span class="button-with-spinner">
+                <span
+                  v-if="isPending(cargoModalMode === 'catalog' ? 'add-cargo' : 'add-custom-cargo')"
+                  class="button-spinner"
+                  aria-hidden="true"
+                ></span>
+                <span>{{ isPending(cargoModalMode === 'catalog' ? 'add-cargo' : 'add-custom-cargo') ? 'Guardando…' : 'Guardar' }}</span>
+              </span>
+            </button>
+            <button class="ghost-button" type="button" @click="closeCargoModal">Cancelar</button>
+          </div>
+        </div>
+      </div>
+
       <div v-if="assignmentModalOpen" class="modal-backdrop" @click.self="closeAssignmentModal">
         <div class="modal modal-add">
           <div class="modal-header">

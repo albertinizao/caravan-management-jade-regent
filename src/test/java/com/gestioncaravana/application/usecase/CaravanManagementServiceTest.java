@@ -45,7 +45,7 @@ class CaravanManagementServiceTest {
 
   @Test
   void createsAndListsCaravans() {
-    var created = service.execute(new CreateCaravanCommand("Campaign", null));
+    var created = service.execute(new CreateCaravanCommand("Campaign", null, null, null, null, null));
 
     assertThat(created.name()).isEqualTo("Campaign");
     assertThat(created.level()).isEqualTo(1);
@@ -55,7 +55,7 @@ class CaravanManagementServiceTest {
 
   @Test
   void selectsAndReturnsTheActiveCaravan() {
-    var created = service.execute(new CreateCaravanCommand("Campaign", null));
+    var created = service.execute(new CreateCaravanCommand("Campaign", null, null, null, null, null));
 
     var selected = service.select(created.id());
 
@@ -66,7 +66,7 @@ class CaravanManagementServiceTest {
 
   @Test
   void deletesCaravansAndClearsTheActiveSelectionWhenNeeded() {
-    var created = service.execute(new CreateCaravanCommand("Campaign", null));
+    var created = service.execute(new CreateCaravanCommand("Campaign", null, null, null, null, null));
     service.select(created.id());
 
     service.delete(created.id());
@@ -175,6 +175,11 @@ class CaravanManagementServiceTest {
       return travelers.stream()
           .filter(traveler -> traveler.caravanId().equals(caravanId) && wagonId.equals(traveler.wagonId()))
           .count();
+    }
+
+    @Override
+    public void deleteByCaravanIdAndId(UUID caravanId, UUID travelerId) {
+      travelers.removeIf(traveler -> traveler.caravanId().equals(caravanId) && traveler.id().equals(travelerId));
     }
 
     @Override

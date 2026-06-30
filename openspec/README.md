@@ -10,3 +10,4 @@ This directory contains feature specifications written before implementation.
 - `specs/caravan-load-beasts/spec.md` — Browse, add, inspect, and assign load beasts as draft animals or travelers.
 - `specs/caravan-cargo/spec.md` — Browse, add, inspect, delete, and assign caravan cargo to specific wagons.
 - `specs/caravan-wagon-improvements/spec.md` — Manage improvements applied to a selected wagon and refresh derived stats.
+- `specs/caravan-statistics/spec.md` — Configure initial caravan stats and inspect the full rule-driven statistics sheet.

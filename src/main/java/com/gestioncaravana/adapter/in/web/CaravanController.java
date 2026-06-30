@@ -6,6 +6,7 @@ import com.gestioncaravana.application.port.in.DeleteCaravanWagonUseCase;
 import com.gestioncaravana.application.port.in.AddCaravanBeastUseCase;
 import com.gestioncaravana.application.port.in.ClearCaravanBeastAssignmentUseCase;
 import com.gestioncaravana.application.port.in.GetActiveCaravanUseCase;
+import com.gestioncaravana.application.port.in.GetCaravanStatisticsUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanBeastUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanUseCase;
 import com.gestioncaravana.application.port.in.ListCaravansUseCase;
@@ -16,6 +17,7 @@ import com.gestioncaravana.application.port.in.ListWagonCatalogUseCase;
 import com.gestioncaravana.application.port.in.AddCaravanWagonUseCase;
 import com.gestioncaravana.application.port.in.AddCaravanWagonImprovementUseCase;
 import com.gestioncaravana.application.port.in.AddCaravanTravelerUseCase;
+import com.gestioncaravana.application.port.in.DeleteCaravanTravelerUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanWagonUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanTravelerUseCase;
 import com.gestioncaravana.application.port.in.DeleteCaravanWagonImprovementUseCase;
@@ -49,6 +51,7 @@ public class CaravanController {
   private final DeleteCaravanUseCase deleteCaravanUseCase;
   private final ListCaravansUseCase listCaravansUseCase;
   private final GetCaravanUseCase getCaravanUseCase;
+  private final GetCaravanStatisticsUseCase getCaravanStatisticsUseCase;
   private final SelectActiveCaravanUseCase selectActiveCaravanUseCase;
   private final GetActiveCaravanUseCase getActiveCaravanUseCase;
   private final ListWagonCatalogUseCase listWagonCatalogUseCase;
@@ -63,6 +66,7 @@ public class CaravanController {
   private final UpdateCaravanBeastAssignmentUseCase updateCaravanBeastAssignmentUseCase;
   private final ClearCaravanBeastAssignmentUseCase clearCaravanBeastAssignmentUseCase;
   private final AddCaravanTravelerUseCase addCaravanTravelerUseCase;
+  private final DeleteCaravanTravelerUseCase deleteCaravanTravelerUseCase;
   private final UpdateCaravanTravelerUseCase updateCaravanTravelerUseCase;
   private final UpdateCaravanTravelerWagonUseCase updateCaravanTravelerWagonUseCase;
   private final UpdateCaravanTravelerRoleUseCase updateCaravanTravelerRoleUseCase;
@@ -79,6 +83,7 @@ public class CaravanController {
       DeleteCaravanUseCase deleteCaravanUseCase,
       ListCaravansUseCase listCaravansUseCase,
       GetCaravanUseCase getCaravanUseCase,
+      GetCaravanStatisticsUseCase getCaravanStatisticsUseCase,
       SelectActiveCaravanUseCase selectActiveCaravanUseCase,
       GetActiveCaravanUseCase getActiveCaravanUseCase,
       ListWagonCatalogUseCase listWagonCatalogUseCase,
@@ -93,6 +98,7 @@ public class CaravanController {
       UpdateCaravanBeastAssignmentUseCase updateCaravanBeastAssignmentUseCase,
       ClearCaravanBeastAssignmentUseCase clearCaravanBeastAssignmentUseCase,
       AddCaravanTravelerUseCase addCaravanTravelerUseCase,
+      DeleteCaravanTravelerUseCase deleteCaravanTravelerUseCase,
       UpdateCaravanTravelerUseCase updateCaravanTravelerUseCase,
       UpdateCaravanTravelerWagonUseCase updateCaravanTravelerWagonUseCase,
       UpdateCaravanTravelerRoleUseCase updateCaravanTravelerRoleUseCase,
@@ -107,6 +113,7 @@ public class CaravanController {
     this.deleteCaravanUseCase = deleteCaravanUseCase;
     this.listCaravansUseCase = listCaravansUseCase;
     this.getCaravanUseCase = getCaravanUseCase;
+    this.getCaravanStatisticsUseCase = getCaravanStatisticsUseCase;
     this.selectActiveCaravanUseCase = selectActiveCaravanUseCase;
     this.getActiveCaravanUseCase = getActiveCaravanUseCase;
     this.listWagonCatalogUseCase = listWagonCatalogUseCase;
@@ -121,6 +128,7 @@ public class CaravanController {
     this.updateCaravanBeastAssignmentUseCase = updateCaravanBeastAssignmentUseCase;
     this.clearCaravanBeastAssignmentUseCase = clearCaravanBeastAssignmentUseCase;
     this.addCaravanTravelerUseCase = addCaravanTravelerUseCase;
+    this.deleteCaravanTravelerUseCase = deleteCaravanTravelerUseCase;
     this.updateCaravanTravelerUseCase = updateCaravanTravelerUseCase;
     this.updateCaravanTravelerWagonUseCase = updateCaravanTravelerWagonUseCase;
     this.updateCaravanTravelerRoleUseCase = updateCaravanTravelerRoleUseCase;
@@ -136,7 +144,13 @@ public class CaravanController {
   @PostMapping("/caravans")
   ResponseEntity<CaravanResponse> create(@Valid @RequestBody CaravanRequest request) {
     var created = createCaravanUseCase.execute(
-        new CreateCaravanUseCase.CreateCaravanCommand(request.name(), request.description()));
+        new CreateCaravanUseCase.CreateCaravanCommand(
+            request.name(),
+            request.description(),
+            request.offense(),
+            request.defense(),
+            request.mobility(),
+            request.morale()));
     return ResponseEntity.status(HttpStatus.CREATED).body(CaravanResponseMapper.toResponse(created));
   }
 
@@ -148,6 +162,11 @@ public class CaravanController {
   @GetMapping("/caravans/{id}")
   CaravanResponse getById(@PathVariable UUID id) {
     return CaravanResponseMapper.toResponse(getCaravanUseCase.getById(id));
+  }
+
+  @GetMapping("/caravans/{id}/statistics")
+  CaravanStatisticsResponse getStatistics(@PathVariable UUID id) {
+    return CaravanStatisticsResponseMapper.toResponse(getCaravanStatisticsUseCase.getById(id));
   }
 
   @org.springframework.web.bind.annotation.DeleteMapping("/caravans/{id}")
@@ -299,6 +318,12 @@ public class CaravanController {
             request.consumption(),
             request.servedTravelerId()));
     return ResponseEntity.status(HttpStatus.CREATED).body(CaravanTravelerResponseMapper.toResponse(created));
+  }
+
+  @org.springframework.web.bind.annotation.DeleteMapping("/caravans/{caravanId}/travelers/{travelerId}")
+  ResponseEntity<Void> deleteCaravanTraveler(@PathVariable UUID caravanId, @PathVariable UUID travelerId) {
+    deleteCaravanTravelerUseCase.delete(caravanId, travelerId);
+    return ResponseEntity.noContent().build();
   }
 
   @PutMapping("/caravans/{caravanId}/travelers/{travelerId}")

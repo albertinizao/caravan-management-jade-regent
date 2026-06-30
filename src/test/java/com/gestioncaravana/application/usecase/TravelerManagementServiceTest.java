@@ -17,6 +17,7 @@ import com.gestioncaravana.domain.CaravanCampaign;
 import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
 import com.gestioncaravana.domain.CaravanWagonImprovement;
+import com.gestioncaravana.domain.TravelerRoleData;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -134,6 +135,37 @@ class TravelerManagementServiceTest {
         .hasMessageContaining("known traveler role codes");
   }
 
+  @Test
+  void deletesTravelerAndClearsDependentRoleReferences() {
+    var caravan = createCaravan();
+    var target = service.execute(
+        caravan.id(),
+        new AddCaravanTravelerCommand("Objetivo", null, List.of("pasajero"), List.of("pasajero"), null, 1, null, null, 1, null));
+    var dependent = service.execute(
+        caravan.id(),
+        new AddCaravanTravelerCommand("Dependiente", null, List.of("pasajero"), List.of("pasajero"), null, 1, null, null, 1, null));
+    travelerRepository.save(new CaravanTraveler(
+        dependent.id(),
+        caravan.id(),
+        dependent.fullName(),
+        dependent.description(),
+        dependent.availableRoleCodes(),
+        dependent.activeRoleCodes(),
+        dependent.activeRoleCode(),
+        dependent.maxActiveRoleCount(),
+        new TravelerRoleData(target.id()),
+        dependent.wagonId(),
+        null,
+        dependent.consumption(),
+        Instant.parse("2026-01-01T00:00:00Z"),
+        Instant.parse("2026-01-01T00:00:00Z")));
+
+    service.delete(caravan.id(), target.id());
+
+    assertThat(travelerRepository.findById(caravan.id(), target.id())).isEmpty();
+    assertThat(service.getById(caravan.id(), dependent.id()).servedTravelerId()).isNull();
+  }
+
   private CaravanCampaign createCaravan() {
     var caravan = CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z"));
     caravanRepository.save(caravan);
@@ -199,6 +231,11 @@ class TravelerManagementServiceTest {
       return travelers.stream()
           .filter(traveler -> traveler.caravanId().equals(caravanId) && wagonId.equals(traveler.wagonId()))
           .count();
+    }
+
+    @Override
+    public void deleteByCaravanIdAndId(UUID caravanId, UUID travelerId) {
+      travelers.removeIf(traveler -> traveler.caravanId().equals(caravanId) && traveler.id().equals(travelerId));
     }
 
     @Override

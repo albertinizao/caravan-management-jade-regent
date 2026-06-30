@@ -14,5 +14,7 @@ public interface CaravanTravelerRepositoryPort {
 
   long countByCaravanIdAndWagonId(UUID caravanId, UUID wagonId);
 
+  void deleteByCaravanIdAndId(UUID caravanId, UUID travelerId);
+
   void deleteByCaravanId(UUID caravanId);
 }

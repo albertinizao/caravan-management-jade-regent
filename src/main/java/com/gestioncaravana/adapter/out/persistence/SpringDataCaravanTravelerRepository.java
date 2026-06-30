@@ -9,4 +9,6 @@ public interface SpringDataCaravanTravelerRepository extends JpaRepository<Carav
   java.util.Optional<CaravanTravelerJpaEntity> findByCaravanIdAndId(String caravanId, String id);
 
   long countByCaravanIdAndWagonId(String caravanId, String wagonId);
+
+  void deleteByCaravanIdAndId(String caravanId, String id);
 }

@@ -3,6 +3,7 @@ package com.gestioncaravana.application.usecase;
 import com.gestioncaravana.application.model.CaravanTravelerView;
 import com.gestioncaravana.application.model.TravelerRoleCatalogItemView;
 import com.gestioncaravana.application.port.in.AddCaravanTravelerUseCase;
+import com.gestioncaravana.application.port.in.DeleteCaravanTravelerUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanTravelerUseCase;
 import com.gestioncaravana.application.port.in.ListCaravanTravelersUseCase;
 import com.gestioncaravana.application.port.in.ListTravelerRoleCatalogUseCase;
@@ -36,6 +37,7 @@ public class TravelerManagementService
         ListCaravanTravelersUseCase,
         GetCaravanTravelerUseCase,
         AddCaravanTravelerUseCase,
+        DeleteCaravanTravelerUseCase,
         UpdateCaravanTravelerUseCase,
         UpdateCaravanTravelerWagonUseCase,
         UpdateCaravanTravelerRoleUseCase {
@@ -131,6 +133,35 @@ public class TravelerManagementService
         command.consumption() == null ? 1 : command.consumption(),
         now);
     return toView(travelerRepository.save(traveler));
+  }
+
+  @Override
+  public void delete(UUID caravanId, UUID travelerId) {
+    requireCaravan(caravanId);
+    requireTraveler(caravanId, travelerId);
+
+    var dependentTravelers = travelerRepository.findAllByCaravanId(caravanId).stream()
+        .filter(other -> travelerId.equals(other.roleSpecificData() == null ? null : other.roleSpecificData().servedTravelerId()))
+        .toList();
+
+    var blockingDependents = dependentTravelers.stream()
+        .filter(other -> other.activeRoleCodes().stream().anyMatch(TravelerRoleCatalog::requiresTargetTraveler))
+        .map(CaravanTraveler::fullName)
+        .toList();
+    if (!blockingDependents.isEmpty()) {
+      throw new IllegalArgumentException("No se puede eliminar este viajero porque es objetivo de: " + String.join(", ", blockingDependents));
+    }
+
+    dependentTravelers.stream()
+        .map(other -> other.changeRoles(
+            other.activeRoleCodes(),
+            other.activeRoleCode(),
+            other.maxActiveRoleCount(),
+            com.gestioncaravana.domain.TravelerRoleData.empty(),
+            clock.instant()))
+        .forEach(travelerRepository::save);
+
+    travelerRepository.deleteByCaravanIdAndId(caravanId, travelerId);
   }
 
   @Override

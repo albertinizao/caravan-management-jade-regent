@@ -63,6 +63,11 @@ public class CaravanManagementService
         UUID.randomUUID(),
         command.name(),
         command.description(),
+        com.gestioncaravana.domain.CaravanMainStats.withInitialAllocation(
+            command.offense(),
+            command.defense(),
+            command.mobility(),
+            command.morale()),
         clock.instant());
     return toView(campaignRepository.save(campaign), false);
   }

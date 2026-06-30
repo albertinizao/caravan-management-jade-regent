@@ -23,5 +23,19 @@ class CaravanCampaignTest {
     assertThat(campaign.createdAt()).isEqualTo(now);
     assertThat(campaign.updatedAt()).isEqualTo(now);
   }
+
+  @Test
+  void createAllowsAnExplicitInitialMainStatAllocation() {
+    var now = Instant.parse("2026-01-01T00:00:00Z");
+
+    var campaign = CaravanCampaign.create(
+        UUID.randomUUID(),
+        "Northern Run",
+        null,
+        CaravanMainStats.withInitialAllocation(2, 1, 1, 3),
+        now);
+
+    assertThat(campaign.mainStats()).isEqualTo(new CaravanMainStats(2, 1, 1, 3, 0));
+  }
 }
 

@@ -47,6 +47,12 @@ export function addCaravanTraveler(caravanId: string, payload: AddCaravanTravele
   });
 }
 
+export function deleteCaravanTraveler(caravanId: string, travelerId: string) {
+  return fetchJson<void>(`/caravans/${caravanId}/travelers/${travelerId}`, {
+    method: "DELETE",
+  });
+}
+
 export function updateCaravanTraveler(
   caravanId: string,
   travelerId: string,

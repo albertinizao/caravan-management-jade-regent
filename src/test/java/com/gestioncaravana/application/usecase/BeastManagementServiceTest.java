@@ -431,6 +431,11 @@ class BeastManagementServiceTest {
     }
 
     @Override
+    public void deleteByCaravanIdAndId(UUID caravanId, UUID travelerId) {
+      travelers.removeIf(traveler -> traveler.caravanId().equals(caravanId) && traveler.id().equals(travelerId));
+    }
+
+    @Override
     public void deleteByCaravanId(UUID caravanId) {
       travelers.removeIf(traveler -> traveler.caravanId().equals(caravanId));
     }

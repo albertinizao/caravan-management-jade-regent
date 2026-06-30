@@ -39,12 +39,21 @@ public record CaravanCampaign(
   }
 
   public static CaravanCampaign create(UUID id, String name, String description, Instant now) {
+    return create(id, name, description, CaravanMainStats.initial(), now);
+  }
+
+  public static CaravanCampaign create(
+      UUID id,
+      String name,
+      String description,
+      CaravanMainStats mainStats,
+      Instant now) {
     return new CaravanCampaign(
         id,
         name.trim(),
         normalizeDescription(description),
         1,
-        CaravanMainStats.initial(),
+        mainStats,
         0,
         CaravanCampaignStatus.ACTIVE,
         now,

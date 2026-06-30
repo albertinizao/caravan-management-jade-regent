@@ -39,6 +39,11 @@ public class CaravanTravelerRepositoryAdapter implements CaravanTravelerReposito
   }
 
   @Override
+  public void deleteByCaravanIdAndId(UUID caravanId, UUID travelerId) {
+    repository.deleteByCaravanIdAndId(caravanId.toString(), travelerId.toString());
+  }
+
+  @Override
   public void deleteByCaravanId(UUID caravanId) {
     repository.deleteAll(repository.findAllByCaravanId(caravanId.toString()));
   }

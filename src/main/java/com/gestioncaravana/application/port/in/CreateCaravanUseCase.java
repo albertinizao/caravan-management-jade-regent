@@ -6,6 +6,12 @@ public interface CreateCaravanUseCase {
 
   CaravanCampaignView execute(CreateCaravanCommand command);
 
-  record CreateCaravanCommand(String name, String description) {}
+  record CreateCaravanCommand(
+      String name,
+      String description,
+      Integer offense,
+      Integer defense,
+      Integer mobility,
+      Integer morale) {}
 }
 

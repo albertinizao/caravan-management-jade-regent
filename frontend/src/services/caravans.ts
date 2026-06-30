@@ -1,9 +1,13 @@
 import { fetchJson } from "@/services/http";
-import type { Caravan } from "@/types/caravan";
+import type { Caravan, CaravanStatistics } from "@/types/caravan";
 
 export interface CreateCaravanPayload {
   name: string;
   description?: string;
+  offense?: number;
+  defense?: number;
+  mobility?: number;
+  morale?: number;
 }
 
 export interface SelectActiveCaravanPayload {
@@ -38,6 +42,10 @@ export function getActiveCaravan() {
 
 export function getCaravan(id: string) {
   return fetchJson<Caravan>(`/caravans/${id}`);
+}
+
+export function getCaravanStatistics(id: string) {
+  return fetchJson<CaravanStatistics>(`/caravans/${id}/statistics`);
 }
 
 export function deleteCaravan(id: string) {

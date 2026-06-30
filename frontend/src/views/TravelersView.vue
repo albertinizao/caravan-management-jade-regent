@@ -7,6 +7,7 @@ import { getActiveCaravan, listCaravans } from "@/services/caravans";
 import { listCaravanWagons } from "@/services/wagons";
 import {
   addCaravanTraveler,
+  deleteCaravanTraveler,
   getCaravanTraveler,
   listCaravanTravelers,
   listTravelerRoleCatalog,
@@ -390,6 +391,36 @@ async function handleAssignWagon() {
     showToast(`Viajero asignado al carro: ${updated.fullName}.`);
   } catch (cause) {
     selectedModalError.value = cause instanceof Error ? cause.message : "Failed to update traveler wagon";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+async function handleDeleteTraveler() {
+  if (!activeCaravan.value || !selectedTraveler.value) {
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `¿Seguro que quieres eliminar a ${selectedTraveler.value.fullName}? Esta acción no se puede deshacer.`,
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = "delete";
+  selectedModalError.value = null;
+
+  try {
+    await deleteCaravanTraveler(activeCaravan.value.id, selectedTraveler.value.id);
+    const deletedName = selectedTraveler.value.fullName;
+    closeTraveler();
+    await refresh();
+    showToast(`Viajero eliminado: ${deletedName}.`);
+  } catch (cause) {
+    selectedModalError.value = cause instanceof Error ? cause.message : "Failed to delete traveler";
   } finally {
     submitting.value = false;
     pendingAction.value = null;
@@ -789,10 +820,23 @@ onMounted(refresh);
                 </label>
               </template>
             </div>
-              <div class="modal-header-actions">
-                <button
-                  class="ghost-button"
-                  type="button"
+            <div class="modal-header-actions">
+              <button
+                v-if="travelerMode === 'view'"
+                class="danger-button"
+                type="button"
+                :disabled="loading || submitting"
+                :aria-busy="isPending('delete')"
+                @click="handleDeleteTraveler"
+              >
+                <span class="button-with-spinner">
+                  <span v-if="isPending('delete')" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ isPending('delete') ? "Eliminando…" : "Eliminar" }}</span>
+                </span>
+              </button>
+              <button
+                class="ghost-button"
+                type="button"
                   :disabled="loading || submitting"
                   @click="travelerMode === 'view' ? enterEditMode() : cancelEditMode()"
                 >

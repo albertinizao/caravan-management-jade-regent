@@ -7,6 +7,10 @@ public record CaravanMainStats(
     int morale,
     int unassignedPoints) {
 
+  private static final int INITIAL_MAIN_STAT_VALUE = 1;
+  private static final int MAX_INITIAL_UNASSIGNED_POINTS = 3;
+  private static final int MAX_STAT_VALUE = 10;
+
   public CaravanMainStats {
     validateBoundedStat("offense", offense);
     validateBoundedStat("defense", defense);
@@ -18,12 +22,42 @@ public record CaravanMainStats(
   }
 
   public static CaravanMainStats initial() {
-    return new CaravanMainStats(1, 1, 1, 1, 3);
+    return new CaravanMainStats(INITIAL_MAIN_STAT_VALUE, INITIAL_MAIN_STAT_VALUE, INITIAL_MAIN_STAT_VALUE, INITIAL_MAIN_STAT_VALUE, MAX_INITIAL_UNASSIGNED_POINTS);
+  }
+
+  public static CaravanMainStats withInitialAllocation(
+      Integer offense,
+      Integer defense,
+      Integer mobility,
+      Integer morale) {
+    var resolvedOffense = offense == null ? INITIAL_MAIN_STAT_VALUE : offense;
+    var resolvedDefense = defense == null ? INITIAL_MAIN_STAT_VALUE : defense;
+    var resolvedMobility = mobility == null ? INITIAL_MAIN_STAT_VALUE : mobility;
+    var resolvedMorale = morale == null ? INITIAL_MAIN_STAT_VALUE : morale;
+
+    validateInitialAllocation("offense", resolvedOffense);
+    validateInitialAllocation("defense", resolvedDefense);
+    validateInitialAllocation("mobility", resolvedMobility);
+    validateInitialAllocation("morale", resolvedMorale);
+
+    var unassignedPoints = INITIAL_MAIN_STAT_VALUE * 4 + MAX_INITIAL_UNASSIGNED_POINTS
+        - (resolvedOffense + resolvedDefense + resolvedMobility + resolvedMorale);
+    if (unassignedPoints < 0 || unassignedPoints > MAX_INITIAL_UNASSIGNED_POINTS) {
+      throw new IllegalArgumentException("initial allocation must spend at most 3 points");
+    }
+
+    return new CaravanMainStats(resolvedOffense, resolvedDefense, resolvedMobility, resolvedMorale, unassignedPoints);
   }
 
   private static void validateBoundedStat(String name, int value) {
-    if (value < 0 || value > 10) {
+    if (value < 0 || value > MAX_STAT_VALUE) {
       throw new IllegalArgumentException(name + " must be between 0 and 10");
+    }
+  }
+
+  private static void validateInitialAllocation(String name, int value) {
+    if (value < INITIAL_MAIN_STAT_VALUE || value > MAX_STAT_VALUE) {
+      throw new IllegalArgumentException(name + " must be between 1 and 10");
     }
   }
 }

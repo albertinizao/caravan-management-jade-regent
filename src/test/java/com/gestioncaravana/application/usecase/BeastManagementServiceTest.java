@@ -140,6 +140,61 @@ class BeastManagementServiceTest {
   }
 
   @Test
+  void rejectsDraftAssignmentsWhenAMediumBeastWouldExceedTheRealSlotCapacityAfterALargeBeast() {
+    var caravan = createCaravan();
+    var draftWagon = createWagon(caravan.id(), "carro-cubierto");
+
+    var largeBeast = addCatalogBeast(caravan.id(), "caballo-ligero");
+    var mediumBeast = addCatalogBeast(caravan.id(), "perro-de-monta");
+
+    service.execute(caravan.id(), largeBeast.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id()));
+
+    assertThatThrownBy(() -> service.execute(
+        caravan.id(),
+        mediumBeast.id(),
+        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id())))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("medium-beast limit");
+  }
+
+  @Test
+  void rejectsChangingABeastFromDraftToTravelerWithoutClearingItFirst() {
+    var caravan = createCaravan();
+    var draftWagon = createWagon(caravan.id(), "carro-cubierto");
+    var travelerWagon = createWagon(caravan.id(), "carro-escuela");
+
+    var beast = addCatalogBeast(caravan.id(), "caballo-ligero");
+    service.execute(caravan.id(), beast.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id()));
+
+    assertThatThrownBy(() -> service.execute(
+        caravan.id(),
+        beast.id(),
+        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.TRAVELER, travelerWagon.id())))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("unassigned");
+  }
+
+  @Test
+  void allowsDraftAssignmentsEvenWhenTheWagonDoesNotReachMinimumStrength() {
+    var caravan = createCaravan();
+    var draftWagon = createWagon(caravan.id(), "carro-de-prisioneros");
+    improvementRepository.save(CaravanWagonImprovement.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        draftWagon.id(),
+        "tiro-de-dos-caballos",
+        NOW));
+
+    var first = addCatalogBeast(caravan.id(), "caballo-pesado");
+    var second = addCatalogBeast(caravan.id(), "bisonte");
+
+    service.execute(caravan.id(), first.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id()));
+    service.execute(caravan.id(), second.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id()));
+
+    assertThat(service.list(caravan.id(), null, "catalog", "draft", draftWagon.id())).hasSize(2);
+  }
+
+  @Test
   void rejectsTravelerAssignmentsWhenTheWagonIsFull() {
     var caravan = createCaravan();
     var wagon = createWagon(caravan.id(), "carro-cubierto");
@@ -161,38 +216,6 @@ class BeastManagementServiceTest {
     }
 
     var beast = addCatalogBeast(caravan.id(), "poni");
-
-    assertThatThrownBy(() -> service.execute(
-        caravan.id(),
-        beast.id(),
-        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.TRAVELER, wagon.id())))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Wagon capacity reached");
-  }
-
-  @Test
-  void rejectsPromotingDraftBeastToTravelerWhenTheWagonIsAlreadyFull() {
-    var caravan = createCaravan();
-    var wagon = createWagon(caravan.id(), "carro-cubierto");
-    for (var index = 0; index < 8; index++) {
-      travelerRepository.save(CaravanTraveler.create(
-          UUID.randomUUID(),
-          caravan.id(),
-          "Traveler " + index,
-          null,
-          List.of("pasajero"),
-          List.of("pasajero"),
-          null,
-          1,
-          TravelerRoleData.empty(),
-          wagon.id(),
-          null,
-          1,
-          NOW));
-    }
-
-    var beast = addCatalogBeast(caravan.id(), "poni");
-    service.execute(caravan.id(), beast.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, wagon.id()));
 
     assertThatThrownBy(() -> service.execute(
         caravan.id(),

@@ -43,6 +43,7 @@ const sourceFilter = ref<"all" | "CATALOG" | "CUSTOM">("all");
 const assignmentFilter = ref<"all" | BeastAssignmentType>("all");
 const wagonFilter = ref("all");
 const selectedBeast = ref<CaravanBeast | null>(null);
+const assignmentMode = ref<"DRAFT" | "TRAVELER">("DRAFT");
 const selectedDraftWagonId = ref("");
 const selectedTravelerWagonId = ref("");
 const selectedBeastError = ref<string | null>(null);
@@ -111,6 +112,45 @@ const selectedTravelerWagon = computed(() =>
   selectedTravelerWagonId.value ? wagonById.value[selectedTravelerWagonId.value] ?? null : null,
 );
 
+const activeAssignmentWagons = computed(() =>
+  assignmentMode.value === "DRAFT" ? availableDraftWagons.value : availableTravelerWagons.value,
+);
+
+const activeAssignmentWagonId = computed({
+  get: () => (assignmentMode.value === "DRAFT" ? selectedDraftWagonId.value : selectedTravelerWagonId.value),
+  set: (value: string) => {
+    if (assignmentMode.value === "DRAFT") {
+      selectedDraftWagonId.value = value;
+    } else {
+      selectedTravelerWagonId.value = value;
+    }
+  },
+});
+
+const activeAssignmentTitle = computed(() =>
+  assignmentMode.value === "DRAFT" ? "Asignar como tiro" : "Asignar como viajero",
+);
+
+const activeAssignmentHelp = computed(() =>
+  assignmentMode.value === "DRAFT"
+    ? "La validación respeta el límite de tiro del carro y la fuerza requerida."
+    : "La bestia ocupará una plaza de viajero en el carro seleccionado.",
+);
+
+const availableDraftWagons = computed(() =>
+  (() => {
+    const beast = selectedBeast.value;
+    return beast ? wagons.value.filter((wagon) => isValidDraftWagonForBeast(wagon, beast)) : [];
+  })(),
+);
+
+const availableTravelerWagons = computed(() =>
+  (() => {
+    const beast = selectedBeast.value;
+    return beast ? wagons.value.filter((wagon) => isValidTravelerWagonForBeast(wagon, beast)) : [];
+  })(),
+);
+
 async function refresh() {
   loading.value = true;
   error.value = null;
@@ -136,8 +176,9 @@ async function refresh() {
         const refreshed = beastList.find((beast) => beast.id === selectedBeast.value?.id);
         if (refreshed) {
           selectedBeast.value = refreshed;
-          selectedDraftWagonId.value = refreshed.assignedWagonId ?? wagonList[0]?.id ?? "";
-          selectedTravelerWagonId.value = refreshed.assignedWagonId ?? wagonList[0]?.id ?? "";
+          syncAssignmentModeWithBeast(refreshed);
+          selectedDraftWagonId.value = pickDefaultDraftWagonId(refreshed);
+          selectedTravelerWagonId.value = pickDefaultTravelerWagonId(refreshed);
         }
       }
     } else {
@@ -202,8 +243,9 @@ async function handleAddCatalogBeast(beastCode: string) {
   try {
     const created = await addCaravanBeastFromCatalog(activeCaravan.value.id, beastCode);
     selectedBeast.value = created;
-    selectedDraftWagonId.value = created.assignedWagonId ?? wagons.value[0]?.id ?? "";
-    selectedTravelerWagonId.value = created.assignedWagonId ?? wagons.value[0]?.id ?? "";
+    syncAssignmentModeWithBeast(created);
+    selectedDraftWagonId.value = pickDefaultDraftWagonId(created);
+    selectedTravelerWagonId.value = pickDefaultTravelerWagonId(created);
     closeCatalogModal();
     await refresh();
   } catch (cause) {
@@ -279,8 +321,9 @@ async function handleCreateCustomBeast() {
   try {
     const created = await addCaravanBeast(activeCaravan.value.id, payload);
     selectedBeast.value = created;
-    selectedDraftWagonId.value = created.assignedWagonId ?? wagons.value[0]?.id ?? "";
-    selectedTravelerWagonId.value = created.assignedWagonId ?? wagons.value[0]?.id ?? "";
+    syncAssignmentModeWithBeast(created);
+    selectedDraftWagonId.value = pickDefaultDraftWagonId(created);
+    selectedTravelerWagonId.value = pickDefaultTravelerWagonId(created);
     closeCustomModal();
     await refresh();
   } catch (cause) {
@@ -298,8 +341,9 @@ async function openBeastDetails(beast: CaravanBeast) {
   try {
     const detailed = await getCaravanBeast(activeCaravan.value.id, beast.id);
     selectedBeast.value = detailed;
-    selectedDraftWagonId.value = detailed.assignedWagonId ?? wagons.value[0]?.id ?? "";
-    selectedTravelerWagonId.value = detailed.assignedWagonId ?? wagons.value[0]?.id ?? "";
+    syncAssignmentModeWithBeast(detailed);
+    selectedDraftWagonId.value = pickDefaultDraftWagonId(detailed);
+    selectedTravelerWagonId.value = pickDefaultTravelerWagonId(detailed);
     selectedBeastError.value = null;
   } catch (cause) {
     selectedBeastError.value = cause instanceof Error ? cause.message : "Failed to load beast details";
@@ -308,6 +352,7 @@ async function openBeastDetails(beast: CaravanBeast) {
 
 function closeBeastDetails() {
   selectedBeast.value = null;
+  assignmentMode.value = "DRAFT";
   selectedDraftWagonId.value = "";
   selectedTravelerWagonId.value = "";
   selectedBeastError.value = null;
@@ -327,6 +372,8 @@ async function assignAsDraft() {
       wagonId: selectedDraftWagonId.value,
     });
     selectedBeast.value = updated;
+    assignmentMode.value = "DRAFT";
+    syncAssignmentWagonSelection("DRAFT", updated);
     await refresh();
     closeBeastDetails();
   } catch (cause) {
@@ -350,6 +397,8 @@ async function assignAsTraveler() {
       wagonId: selectedTravelerWagonId.value,
     });
     selectedBeast.value = updated;
+    assignmentMode.value = "TRAVELER";
+    syncAssignmentWagonSelection("TRAVELER", updated);
     await refresh();
     closeBeastDetails();
   } catch (cause) {
@@ -359,9 +408,9 @@ async function assignAsTraveler() {
   }
 }
 
-async function clearAssignment() {
+async function clearAssignment(): Promise<CaravanBeast | null> {
   if (!activeCaravan.value || !selectedBeast.value) {
-    return;
+    return null;
   }
 
   submitting.value = true;
@@ -371,22 +420,165 @@ async function clearAssignment() {
     const updated = await clearCaravanBeastAssignment(activeCaravan.value.id, selectedBeast.value.id);
     selectedBeast.value = updated;
     await refresh();
+    return updated;
   } catch (cause) {
     selectedBeastError.value = cause instanceof Error ? cause.message : "Failed to clear assignment";
+    return null;
   } finally {
     submitting.value = false;
   }
 }
 
+async function changeAssignmentMode(mode: "DRAFT" | "TRAVELER") {
+  if (!selectedBeast.value) {
+    assignmentMode.value = mode;
+    return;
+  }
+
+  if (assignmentMode.value === mode) {
+    return;
+  }
+
+  if (selectedBeast.value.assignmentType !== "NONE" && selectedBeast.value.assignmentType !== mode) {
+    const currentLabel = selectedBeast.value.assignmentType === "DRAFT" ? "tiro" : "viajero";
+    const nextLabel = mode === "DRAFT" ? "tiro" : "viajero";
+    const confirmed = window.confirm(
+      `Esta bestia ya está asignada como ${currentLabel}. Si cambias a ${nextLabel}, se quitará la asignación actual. ¿Quieres continuar?`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const cleared = await clearAssignment();
+    if (!cleared) {
+      return;
+    }
+  }
+
+  assignmentMode.value = mode;
+  syncAssignmentWagonSelection(mode, selectedBeast.value);
+}
+
+function syncAssignmentModeWithBeast(beast: CaravanBeast) {
+  if (beast.assignmentType === "TRAVELER") {
+    assignmentMode.value = "TRAVELER";
+  } else if (beast.assignmentType === "DRAFT") {
+    assignmentMode.value = "DRAFT";
+  }
+}
+
+function syncAssignmentWagonSelection(mode: "DRAFT" | "TRAVELER", beast: CaravanBeast | null) {
+  if (mode === "DRAFT") {
+    selectedDraftWagonId.value = pickDefaultDraftWagonId(beast);
+  } else {
+    selectedTravelerWagonId.value = pickDefaultTravelerWagonId(beast);
+  }
+}
+
 function draftLabel(wagon: CaravanWagon): string {
+  return draftLabelForSize(wagon, selectedBeast.value?.size ?? null);
+}
+
+function draftLabelForSize(wagon: CaravanWagon, beastSize: string | null): string {
   const requirement = parseDraftRequirement(wagon.propulsion);
   if (!requirement) {
     return wagon.propulsion;
   }
 
   const used = draftOccupancyForWagon(wagon.id);
-  const remaining = Math.max(0, requirement.maxMediumBeasts - used.mediumSlots);
-  return `${used.mediumSlots}/${requirement.maxMediumBeasts} slots, ${remaining} libres`;
+  return draftOccupancyLabel(requirement, used, beastSize);
+}
+
+function draftRequirementLabel(requirement: DraftRequirement, beastSize: string | null): string {
+  const useMediumLabel = beastSize?.toUpperCase() === "M";
+  const unitLabel = useMediumLabel ? "medianas" : "grandes";
+  const capacity = useMediumLabel ? requirement.maxMediumBeasts : requirement.maxLargeBeasts;
+  return `${capacity} ${unitLabel} · fuerza ${requirement.minimumStrength}`;
+}
+
+function draftOccupancyLabel(requirement: DraftRequirement, used: { largeCount: number; mediumCount: number; mediumSlots: number }, beastSize: string | null): string {
+  const useMediumLabel = beastSize?.toUpperCase() === "M";
+  if (useMediumLabel) {
+    const remaining = Math.max(0, requirement.maxMediumBeasts - used.mediumSlots);
+    return `${used.mediumSlots}/${requirement.maxMediumBeasts} medianas, ${remaining} libres`;
+  }
+
+  const remaining = Math.max(0, requirement.maxLargeBeasts - used.largeCount);
+  return `${used.largeCount}/${requirement.maxLargeBeasts} grandes, ${remaining} libres`;
+}
+
+function pickDefaultDraftWagonId(beast: CaravanBeast | null): string {
+  if (!beast) {
+    return "";
+  }
+
+  if (beast.assignmentType !== "NONE" && beast.assignmentType !== "DRAFT") {
+    return "";
+  }
+
+  if (beast.assignedWagonId && wagons.value.some((wagon) => wagon.id === beast.assignedWagonId && isValidDraftWagonForBeast(wagon, beast))) {
+    return beast.assignedWagonId;
+  }
+
+  return availableDraftWagons.value[0]?.id ?? "";
+}
+
+function pickDefaultTravelerWagonId(beast: CaravanBeast | null): string {
+  if (!beast) {
+    return "";
+  }
+
+  if (beast.assignmentType !== "NONE" && beast.assignmentType !== "TRAVELER") {
+    return "";
+  }
+
+  if (beast.assignedWagonId && wagons.value.some((wagon) => wagon.id === beast.assignedWagonId && isValidTravelerWagonForBeast(wagon, beast))) {
+    return beast.assignedWagonId;
+  }
+
+  return availableTravelerWagons.value[0]?.id ?? "";
+}
+
+function isValidDraftWagonForBeast(wagon: CaravanWagon, beast: CaravanBeast): boolean {
+  if (beast.assignmentType !== "NONE" && beast.assignmentType !== "DRAFT") {
+    return false;
+  }
+
+  const requirement = parseDraftRequirement(wagon.propulsion);
+  if (!requirement) {
+    return false;
+  }
+
+  const beastSize = beast.size.toUpperCase();
+  if (beastSize !== "G" && beastSize !== "M") {
+    return false;
+  }
+
+  const assignedDraftBeasts = draftBeastsByWagonId.value.get(wagon.id) ?? [];
+  const replacementSet =
+    beast.assignmentType === "DRAFT" && beast.assignedWagonId === wagon.id
+      ? assignedDraftBeasts.filter((item) => item.id !== beast.id)
+      : assignedDraftBeasts;
+  const largeCount = replacementSet.filter((item) => item.size.toUpperCase() === "G").length;
+  const mediumCount = replacementSet.filter((item) => item.size.toUpperCase() === "M").length;
+  const additionalLarge = beastSize === "G" ? 1 : 0;
+  const additionalMedium = beastSize === "M" ? 1 : 0;
+  const totalLarge = largeCount + additionalLarge;
+  const totalMediumSlots = mediumCount + additionalMedium + totalLarge * 4;
+
+  return totalLarge <= requirement.maxLargeBeasts && totalMediumSlots <= requirement.maxMediumBeasts;
+}
+
+function isValidTravelerWagonForBeast(wagon: CaravanWagon, beast: CaravanBeast): boolean {
+  if (beast.assignmentType !== "NONE" && beast.assignmentType !== "TRAVELER") {
+    return false;
+  }
+
+  if (beast.assignmentType === "TRAVELER" && beast.assignedWagonId === wagon.id) {
+    return true;
+  }
+
+  return travelerOccupancyForWagon(wagon.id) < wagon.travelerCapacity;
 }
 
 function draftOccupancyForWagon(wagonId: string) {
@@ -447,6 +639,34 @@ function beastThermalLabel(value: number | null) {
 
 function beastSizeLabel(size: string) {
   return size === "G" ? "Grande" : size === "M" ? "Mediana" : size === "E" ? "Enorme" : size;
+}
+
+function draftAssignmentHint(beast: CaravanBeast | null): string {
+  if (!beast) {
+    return "Selecciona una bestia para ver carros válidos.";
+  }
+
+  if (beast.assignmentType !== "NONE" && beast.assignmentType !== "DRAFT") {
+    return "Esta bestia ya está asignada como viajero. Debe quedar sin asignación antes de pasar a tiro.";
+  }
+
+  return availableDraftWagons.value.length === 0
+    ? "No hay carros válidos para esta bestia como tiro."
+    : "Solo se muestran carros válidos para esta bestia como tiro.";
+}
+
+function travelerAssignmentHint(beast: CaravanBeast | null): string {
+  if (!beast) {
+    return "Selecciona una bestia para ver carros válidos.";
+  }
+
+  if (beast.assignmentType !== "NONE" && beast.assignmentType !== "TRAVELER") {
+    return "Esta bestia ya está asignada como tiro. Debe quedar sin asignación antes de pasar a viajero.";
+  }
+
+  return availableTravelerWagons.value.length === 0
+    ? "No hay carros válidos para esta bestia como viajero."
+    : "Solo se muestran carros válidos para esta bestia como viajero.";
 }
 
 function normalizeInputValue(value: string | number | null | undefined): string {
@@ -759,69 +979,92 @@ onMounted(refresh);
           <section class="info-block">
             <div class="section-header">
               <div>
-                <h3>Asignar como tiro</h3>
-                <p class="muted">La validación respeta el límite de tiro del carro y la fuerza requerida.</p>
+                <h3>Asignación a carro</h3>
+                <p class="muted">Elige si quieres usar la bestia como tiro o como viajero.</p>
               </div>
-              <div class="inline-actions">
+              <div class="assignment-mode-toggle" role="tablist" aria-label="Modo de asignación">
+                <button
+                  class="secondary-button"
+                  :class="{ active: assignmentMode === 'DRAFT' }"
+                  type="button"
+                  :disabled="submitting"
+                  @click="changeAssignmentMode('DRAFT')"
+                >
+                  Asignar como tiro
+                </button>
+                <button
+                  class="secondary-button"
+                  :class="{ active: assignmentMode === 'TRAVELER' }"
+                  type="button"
+                  :disabled="submitting"
+                  @click="changeAssignmentMode('TRAVELER')"
+                >
+                  Asignar como viajero
+                </button>
+              </div>
+            </div>
+
+            <div v-if="assignmentMode === 'DRAFT'" class="assignment-panel">
+              <div class="two-columns">
+                <label>
+                  <span>Carro</span>
+                  <select v-model="activeAssignmentWagonId" :disabled="submitting">
+                    <option value="">Selecciona un carro</option>
+                    <option v-for="wagon in activeAssignmentWagons" :key="wagon.id" :value="wagon.id">
+                      {{ wagon.name }} · {{ draftLabel(wagon) }}
+                    </option>
+                  </select>
+                </label>
+
+                <div class="draft-summary">
+                  <span>Requisito de tiro</span>
+                  <strong v-if="selectedDraftRequirement">
+                    {{ draftRequirementLabel(selectedDraftRequirement, selectedBeast?.size ?? null) }}
+                  </strong>
+                  <strong v-else>—</strong>
+                  <p class="muted">{{ draftAssignmentHint(selectedBeast) }}</p>
+                </div>
+              </div>
+
+              <div class="inline-actions assignment-actions">
                 <button class="secondary-button" type="button" :disabled="submitting || selectedBeast.assignmentType === 'NONE'" @click="clearAssignment">
                   Quitar asignación
                 </button>
-                <button class="primary-button" type="button" :disabled="submitting || !selectedDraftWagonId" @click="assignAsDraft">
+                <button class="primary-button" type="button" :disabled="submitting || !activeAssignmentWagonId || activeAssignmentWagons.length === 0" @click="assignAsDraft">
                   Asignar como tiro
                 </button>
               </div>
             </div>
 
-            <div class="two-columns">
-              <label>
-                <span>Carro</span>
-                <select v-model="selectedDraftWagonId" :disabled="submitting">
-                  <option value="">Selecciona un carro</option>
-                  <option v-for="wagon in wagons" :key="wagon.id" :value="wagon.id">
-                    {{ wagon.name }} · {{ draftLabel(wagon) }}
-                  </option>
-                </select>
-              </label>
+            <div v-else class="assignment-panel">
+              <div class="two-columns">
+                <label>
+                  <span>Carro</span>
+                  <select v-model="activeAssignmentWagonId" :disabled="submitting">
+                    <option value="">Selecciona un carro</option>
+                    <option v-for="wagon in activeAssignmentWagons" :key="wagon.id" :value="wagon.id">
+                      {{ wagon.name }} · {{ travelerOccupancyForWagon(wagon.id) }}/{{ wagon.travelerCapacity }} viajeros
+                    </option>
+                  </select>
+                </label>
 
-              <div class="draft-summary">
-                <span>Requisito de tiro</span>
-                <strong v-if="selectedDraftRequirement">
-                  {{ selectedDraftRequirement.maxLargeBeasts }} grandes / {{ selectedDraftRequirement.maxMediumBeasts }} medianas
-                  · fuerza {{ selectedDraftRequirement.minimumStrength }}
-                </strong>
-                <strong v-else>—</strong>
+                <div class="draft-summary">
+                  <span>Viajeros y bestias viajando</span>
+                  <strong v-if="selectedTravelerWagon">
+                    {{ travelerOccupancyForWagon(selectedTravelerWagon.id) }}/{{ selectedTravelerWagon.travelerCapacity }}
+                  </strong>
+                  <strong v-else>—</strong>
+                  <p class="muted">{{ travelerAssignmentHint(selectedBeast) }}</p>
+                </div>
               </div>
-            </div>
-          </section>
 
-          <section class="info-block">
-            <div class="section-header">
-              <div>
-                <h3>Asignar como viajero</h3>
-                <p class="muted">La bestia ocupará una plaza de viajero en el carro seleccionado.</p>
-              </div>
-              <button class="primary-button" type="button" :disabled="submitting || !selectedTravelerWagonId" @click="assignAsTraveler">
-                Asignar como viajero
-              </button>
-            </div>
-
-            <div class="two-columns">
-              <label>
-                <span>Carro</span>
-                <select v-model="selectedTravelerWagonId" :disabled="submitting">
-                  <option value="">Selecciona un carro</option>
-                  <option v-for="wagon in wagons" :key="wagon.id" :value="wagon.id">
-                    {{ wagon.name }} · {{ travelerOccupancyForWagon(wagon.id) }}/{{ wagon.travelerCapacity }} viajeros
-                  </option>
-                </select>
-              </label>
-
-              <div class="draft-summary">
-                <span>Viajeros y bestias viajando</span>
-                <strong v-if="selectedTravelerWagon">
-                  {{ travelerOccupancyForWagon(selectedTravelerWagon.id) }}/{{ selectedTravelerWagon.travelerCapacity }}
-                </strong>
-                <strong v-else>—</strong>
+              <div class="inline-actions assignment-actions">
+                <button class="secondary-button" type="button" :disabled="submitting || selectedBeast.assignmentType === 'NONE'" @click="clearAssignment">
+                  Quitar asignación
+                </button>
+                <button class="primary-button" type="button" :disabled="submitting || !activeAssignmentWagonId || activeAssignmentWagons.length === 0" @click="assignAsTraveler">
+                  Asignar como viajero
+                </button>
               </div>
             </div>
           </section>
@@ -1137,6 +1380,28 @@ dd {
   display: grid;
   gap: 0.35rem;
   align-content: start;
+}
+
+.assignment-mode-toggle {
+  display: inline-flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.assignment-mode-toggle .active {
+  background: #dbeafe;
+  border-color: #60a5fa;
+  color: #1d4ed8;
+}
+
+.assignment-panel {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.assignment-actions {
+  justify-content: space-between;
 }
 
 .modal-actions {

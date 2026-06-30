@@ -133,6 +133,11 @@ public class BeastManagementService
       return toView(beastRepository.save(beast.clearAssignment(clock.instant())));
     }
 
+    if (beast.assignmentType() != CaravanBeastAssignmentType.NONE
+        && beast.assignmentType() != command.assignmentType()) {
+      throw new IllegalArgumentException("Beast must be unassigned before changing assignment type");
+    }
+
     var wagonId = command.wagonId();
     if (wagonId == null) {
       throw new IllegalArgumentException("wagonId is required");
@@ -199,7 +204,7 @@ public class BeastManagementService
       throw new IllegalArgumentException("Beast size is not eligible for draft duty");
     }
 
-    var constraint = draftConstraint(wagon);
+    var constraint = draftConstraint(caravanId, wagon);
     var currentDraftBeasts = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
         caravanId, wagon.id(), CaravanBeastAssignmentType.DRAFT);
     var replacementSet = currentDraftBeasts.stream()
@@ -210,20 +215,14 @@ public class BeastManagementService
     var additionalLarge = isLarge(beast.size()) ? 1 : 0;
     var additionalMedium = isMedium(beast.size()) ? 1 : 0;
     var totalLarge = largeCount + additionalLarge;
-    var totalMediumSlots = mediumCount + additionalMedium + ((largeCount + additionalLarge) * 3);
+    var totalMediumSlots = mediumCount + additionalMedium
+        + ((largeCount + additionalLarge) * constraint.mediumSlotsConsumedByLargeBeast());
 
     if (totalLarge > constraint.maxLargeBeasts()) {
       throw new IllegalArgumentException("Wagon draft large-beast limit reached");
     }
     if (totalMediumSlots > constraint.maxMediumBeasts()) {
       throw new IllegalArgumentException("Wagon draft medium-beast limit reached");
-    }
-
-    var totalStrength = replacementSet.stream()
-        .mapToInt(existing -> effectiveDraftStrength(existing))
-        .sum() + effectiveDraftStrength(beast);
-    if (totalStrength < constraint.minimumStrength()) {
-      throw new IllegalArgumentException("Wagon draft strength requirement not met");
     }
   }
 
@@ -271,10 +270,22 @@ public class BeastManagementService
     return Math.max(0, capacity);
   }
 
-  private WagonDraftConstraint draftConstraint(CaravanWagon wagon) {
+  private WagonDraftConstraint draftConstraint(UUID caravanId, CaravanWagon wagon) {
     var type = WagonCatalog.findByCode(wagon.wagonTypeCode())
         .orElseThrow(() -> new IllegalStateException("Unknown wagon catalog entry: " + wagon.wagonTypeCode()));
-    return WagonDraftConstraint.parse(type.propulsion());
+    var constraint = WagonDraftConstraint.parse(type.propulsion());
+    var improvements = improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagon.id());
+    for (var improvement : improvements) {
+      var improvementType = WagonImprovementCatalog.findByCode(improvement.improvementTypeCode())
+          .orElseThrow(() -> new IllegalStateException("Unknown improvement catalog entry: " + improvement.improvementTypeCode()));
+      if (improvementType.propulsionEffect() != null && !improvementType.propulsionEffect().isBlank()) {
+        var draftEffect = WagonDraftConstraint.tryParse(improvementType.propulsionEffect());
+        if (draftEffect.isPresent()) {
+          constraint = constraint.plus(draftEffect.get());
+        }
+      }
+    }
+    return constraint;
   }
 
   private CaravanBeastCatalogItemView toView(CaravanBeastCatalogItem item) {
@@ -332,9 +343,5 @@ public class BeastManagementService
 
   private boolean isMedium(String size) {
     return "M".equalsIgnoreCase(size);
-  }
-
-  private int effectiveDraftStrength(CaravanBeast beast) {
-    return beast.strength() * (beast.fourLegged() ? 2 : 1);
   }
 }

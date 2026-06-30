@@ -1,6 +1,7 @@
 package com.gestioncaravana.application.usecase;
 
 import com.gestioncaravana.application.model.CaravanWagonView;
+import com.gestioncaravana.application.model.CaravanBeastView;
 import com.gestioncaravana.application.model.CaravanWagonImprovementView;
 import com.gestioncaravana.application.model.WagonImprovementCatalogItemView;
 import com.gestioncaravana.application.model.WagonCatalogItemView;
@@ -13,14 +14,19 @@ import com.gestioncaravana.application.port.in.ListCaravanWagonImprovementsUseCa
 import com.gestioncaravana.application.port.in.ListCaravanWagonsUseCase;
 import com.gestioncaravana.application.port.in.ListWagonImprovementCatalogUseCase;
 import com.gestioncaravana.application.port.in.ListWagonCatalogUseCase;
+import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
+import com.gestioncaravana.domain.CaravanBeast;
+import com.gestioncaravana.domain.CaravanBeastAssignmentType;
 import com.gestioncaravana.domain.CaravanWagon;
 import com.gestioncaravana.domain.CaravanWagonImprovement;
 import com.gestioncaravana.domain.WagonImprovementCatalog;
 import com.gestioncaravana.domain.WagonImprovementType;
 import com.gestioncaravana.domain.WagonCatalog;
+import com.gestioncaravana.domain.WagonDraftConstraint;
 import com.gestioncaravana.domain.WagonType;
 import java.time.Clock;
 import java.util.Comparator;
@@ -46,16 +52,22 @@ public class WagonManagementService
   private final CaravanCampaignRepositoryPort caravanRepository;
   private final CaravanWagonRepositoryPort wagonRepository;
   private final CaravanWagonImprovementRepositoryPort improvementRepository;
+  private final CaravanBeastRepositoryPort beastRepository;
+  private final CaravanTravelerRepositoryPort travelerRepository;
   private final Clock clock;
 
   public WagonManagementService(
       CaravanCampaignRepositoryPort caravanRepository,
       CaravanWagonRepositoryPort wagonRepository,
       CaravanWagonImprovementRepositoryPort improvementRepository,
+      CaravanBeastRepositoryPort beastRepository,
+      CaravanTravelerRepositoryPort travelerRepository,
       Clock clock) {
     this.caravanRepository = caravanRepository;
     this.wagonRepository = wagonRepository;
     this.improvementRepository = improvementRepository;
+    this.beastRepository = beastRepository;
+    this.travelerRepository = travelerRepository;
     this.clock = clock;
   }
 
@@ -162,6 +174,15 @@ public class WagonManagementService
     requireCaravan(caravanId);
     wagonRepository.findById(caravanId, wagonId)
         .orElseThrow(() -> new IllegalArgumentException("Wagon not found: " + wagonId));
+
+    beastRepository.findAllByCaravanId(caravanId).stream()
+        .filter(beast -> wagonId.equals(beast.assignedWagonId()))
+        .forEach(beast -> beastRepository.save(beast.clearAssignment(clock.instant())));
+
+    travelerRepository.findAllByCaravanId(caravanId).stream()
+        .filter(traveler -> wagonId.equals(traveler.wagonId()))
+        .forEach(traveler -> travelerRepository.save(traveler.assignWagon(null, clock.instant())));
+
     wagonRepository.deleteById(caravanId, wagonId);
   }
 
@@ -238,6 +259,8 @@ public class WagonManagementService
     var wagonType = WagonCatalog.findByCode(wagon.wagonTypeCode())
         .orElseThrow(() -> new IllegalStateException("Unknown wagon catalog entry: " + wagon.wagonTypeCode()));
     var derived = deriveWagonStats(wagonType, improvements);
+    var draftBeasts = draftBeasts(wagon.caravanId(), wagon.id());
+    var draftStrength = draftBeasts.stream().mapToInt(this::effectiveDraftStrength).sum();
     return new CaravanWagonView(
         wagon.id(),
         wagon.caravanId(),
@@ -258,6 +281,9 @@ public class WagonManagementService
         wagonType.specialBenefit(),
         wagonType.description(),
         wagonType.notes(),
+        draftBeasts,
+        draftStrength,
+        derivedDraftStrength(wagonType, improvements),
         improvements.stream().map(this::toView).sorted(Comparator.comparing(CaravanWagonImprovementView::createdAt)).toList(),
         wagon.createdAt(),
         wagon.updatedAt());
@@ -281,12 +307,42 @@ public class WagonManagementService
         improvement.updatedAt());
   }
 
+  private CaravanBeastView toView(CaravanBeast beast) {
+    var assignedWagonName = beast.assignedWagonId() == null
+        ? null
+        : wagonRepository.findById(beast.caravanId(), beast.assignedWagonId())
+            .flatMap(wagon -> WagonCatalog.findByCode(wagon.wagonTypeCode()).map(WagonType::name))
+            .orElse(null);
+    return new CaravanBeastView(
+        beast.id(),
+        beast.caravanId(),
+        beast.sourceType(),
+        beast.catalogBeastCode(),
+        beast.name(),
+        beast.size(),
+        beast.strength(),
+        beast.speed(),
+        beast.thermalAdaptation(),
+        beast.basePrice(),
+        beast.trainedPrice(),
+        beast.fourLegged(),
+        beast.specialNote(),
+        beast.description(),
+        beast.customNotes(),
+        beast.assignmentType(),
+        beast.assignedWagonId(),
+        assignedWagonName,
+        beast.createdAt(),
+        beast.updatedAt());
+  }
+
   private DerivedWagonStats deriveWagonStats(WagonType wagonType, List<CaravanWagonImprovement> improvements) {
     var currentHitPoints = wagonType.hitPoints();
     var currentHardness = wagonType.hardness();
     var currentTravelerCapacity = wagonType.travelerCapacity();
     var currentCargoCapacity = wagonType.cargoCapacity();
     var currentConsumption = wagonType.consumption();
+    var currentDraftConstraint = WagonDraftConstraint.parse(wagonType.propulsion());
 
     for (var improvement : improvements) {
       var type = WagonImprovementCatalog.findByCode(improvement.improvementTypeCode())
@@ -323,16 +379,47 @@ public class WagonManagementService
       if (type.consumptionBonus() != null) {
         currentConsumption += type.consumptionBonus();
       }
+      if (type.propulsionEffect() != null && !type.propulsionEffect().isBlank()) {
+        var draftEffect = WagonDraftConstraint.tryParse(type.propulsionEffect());
+        if (draftEffect.isPresent()) {
+          currentDraftConstraint = currentDraftConstraint.plus(draftEffect.get());
+        }
+      }
     }
 
     return new DerivedWagonStats(
         wagonType.cost(),
         Math.max(0, currentHitPoints),
         Math.max(0, currentHardness),
-        wagonType.propulsion(),
+        currentDraftConstraint.format(),
         Math.max(0, currentTravelerCapacity),
         Math.max(0, currentCargoCapacity),
         Math.max(0, currentConsumption));
+  }
+
+  private int derivedDraftStrength(WagonType wagonType, List<CaravanWagonImprovement> improvements) {
+    var constraint = WagonDraftConstraint.parse(wagonType.propulsion());
+    for (var improvement : improvements) {
+      var type = WagonImprovementCatalog.findByCode(improvement.improvementTypeCode())
+          .orElseThrow(() -> new IllegalStateException("Unknown improvement catalog entry: " + improvement.improvementTypeCode()));
+      if (type.propulsionEffect() != null && !type.propulsionEffect().isBlank()) {
+        var draftEffect = WagonDraftConstraint.tryParse(type.propulsionEffect());
+        if (draftEffect.isPresent()) {
+          constraint = constraint.plus(draftEffect.get());
+        }
+      }
+    }
+    return constraint.minimumStrength();
+  }
+
+  private List<CaravanBeastView> draftBeasts(UUID caravanId, UUID wagonId) {
+    return beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(caravanId, wagonId, CaravanBeastAssignmentType.DRAFT).stream()
+        .map(this::toView)
+        .toList();
+  }
+
+  private int effectiveDraftStrength(CaravanBeastView beast) {
+    return beast.strength() * (beast.fourLegged() ? 2 : 1);
   }
 
   private int roundStat(double value) {
@@ -343,14 +430,15 @@ public class WagonManagementService
       WagonImprovementType improvementType,
       WagonType wagonType,
       List<CaravanWagonImprovement> improvements) {
+    var currentDraftConstraint = deriveCurrentDraftConstraint(wagonType, improvements);
     if (improvements.stream().anyMatch(improvement -> improvement.improvementTypeCode().equals(improvementType.code()))
         && !improvementType.isRepeatable()
         && improvements.stream().filter(improvement -> improvement.improvementTypeCode().equals(improvementType.code())).count() >= improvementType.maxPerWagon()) {
       return "Mejora ya aplicada";
     }
     if (improvementType.requiredBasePropulsionFragment() != null
-        && !wagonType.propulsion().contains(improvementType.requiredBasePropulsionFragment())) {
-      return "Propulsión base insuficiente";
+        && !currentDraftConstraint.format().contains(improvementType.requiredBasePropulsionFragment())) {
+      return "Propulsión insuficiente";
     }
     for (var prerequisite : improvementType.prerequisites()) {
       if (improvements.stream().noneMatch(improvement -> improvement.improvementTypeCode().equals(prerequisite))) {
@@ -367,6 +455,23 @@ public class WagonManagementService
       return "Límite alcanzado";
     }
     return null;
+  }
+
+  private WagonDraftConstraint deriveCurrentDraftConstraint(
+      WagonType wagonType,
+      List<CaravanWagonImprovement> improvements) {
+    var currentDraftConstraint = WagonDraftConstraint.parse(wagonType.propulsion());
+    for (var improvement : improvements) {
+      var type = WagonImprovementCatalog.findByCode(improvement.improvementTypeCode())
+          .orElseThrow(() -> new IllegalStateException("Unknown improvement catalog entry: " + improvement.improvementTypeCode()));
+      if (type.propulsionEffect() != null && !type.propulsionEffect().isBlank()) {
+        var draftEffect = WagonDraftConstraint.tryParse(type.propulsionEffect());
+        if (draftEffect.isPresent()) {
+          currentDraftConstraint = currentDraftConstraint.plus(draftEffect.get());
+        }
+      }
+    }
+    return currentDraftConstraint;
   }
 
   private void validateImprovementAddition(

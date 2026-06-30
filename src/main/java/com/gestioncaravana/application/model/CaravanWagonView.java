@@ -24,6 +24,9 @@ public record CaravanWagonView(
     String specialBenefit,
     String description,
     String notes,
+    List<CaravanBeastView> draftBeasts,
+    int draftStrength,
+    int draftRequiredStrength,
     List<CaravanWagonImprovementView> improvements,
     Instant createdAt,
     Instant updatedAt) {}

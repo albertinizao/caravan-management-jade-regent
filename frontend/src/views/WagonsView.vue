@@ -13,6 +13,7 @@ import {
   listWagonImprovementCatalog,
 } from "@/services/wagons";
 import type { Caravan } from "@/types/caravan";
+import type { CaravanBeast } from "@/types/beast";
 import type {
   CaravanWagon,
   CaravanWagonImprovement,
@@ -35,11 +36,36 @@ const improvementModalOpen = ref(false);
 const selectedImprovementCode = ref<string | null>(null);
 const improvementsExpanded = ref(false);
 const improvementDeleteMode = ref(false);
+const draftPanelExpanded = ref(true);
 const addTypeFilter = ref<"all" | "viajeros" | "mercancias" | "especiales">("all");
 const addSearch = ref("");
 const improvementSearch = ref("");
 const wagonsTypeFilter = ref<"all" | "viajeros" | "mercancias" | "especiales">("all");
 const wagonsSearch = ref("");
+
+interface DraftRequirement {
+  maxLargeBeasts: number;
+  maxMediumBeasts: number;
+  minimumStrength: number;
+}
+
+interface DraftStrengthState {
+  className: string;
+  label: string;
+  description: string;
+}
+
+interface DraftBeastGroup {
+  key: string;
+  name: string;
+  size: string;
+  sizeLabel: string;
+  count: number;
+  fourLegged: boolean;
+  baseStrength: number;
+  effectiveStrength: number;
+  totalEffectiveStrength: number;
+}
 
 const selectedCatalogItem = computed(() => {
   if (selectedCatalogCode.value) {
@@ -190,6 +216,7 @@ function closeModal() {
   improvementCatalog.value = [];
   improvementsExpanded.value = false;
   improvementDeleteMode.value = false;
+  draftPanelExpanded.value = true;
 }
 
 function closeAddModal() {
@@ -359,6 +386,129 @@ function limitMessage(item: WagonCatalogItem) {
   }
 
   return `${current}/${maxAllowed}`;
+}
+
+function parseDraftRequirement(propulsion: string): DraftRequirement | null {
+  const match = propulsion.match(/(?:(\d+)\s+criatura[s]?\s+grande[s]?\s*\/\s*)?(\d+)\s+mediana[s]?\s*\(\+(\d+)\s+fuerza\)/i);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    maxLargeBeasts: Number(match[1] ?? 0),
+    maxMediumBeasts: Number(match[2]),
+    minimumStrength: Number(match[3]),
+  };
+}
+
+function draftOccupancyForWagon(wagon: CaravanWagon) {
+  const largeBeasts = wagon.draftBeasts.filter((beast) => beast.size.toUpperCase() === "G");
+  const mediumBeasts = wagon.draftBeasts.filter((beast) => beast.size.toUpperCase() === "M");
+
+  return {
+    largeBeasts,
+    mediumBeasts,
+    largeCount: largeBeasts.length,
+    mediumCount: mediumBeasts.length,
+  };
+}
+
+function draftBeastGroupKey(beast: CaravanBeast) {
+  if (beast.catalogBeastCode) {
+    return `catalog:${beast.catalogBeastCode}`;
+  }
+
+  return `custom:${beast.name}:${beast.size}:${beast.strength}:${beast.fourLegged}:${beast.speed}:${beast.thermalAdaptation ?? "na"}`;
+}
+
+function draftBeastSizeLabel(size: string) {
+  if (size === "G") {
+    return "Grande";
+  }
+  if (size === "M") {
+    return "Mediana";
+  }
+  return size;
+}
+
+function groupedDraftBeasts(wagon: CaravanWagon): DraftBeastGroup[] {
+  const groups = new Map<string, DraftBeastGroup>();
+
+  for (const beast of wagon.draftBeasts) {
+    const key = draftBeastGroupKey(beast);
+    const existing = groups.get(key);
+    const effectiveStrength = draftEffectiveStrength(beast);
+    if (existing) {
+      existing.count += 1;
+      existing.totalEffectiveStrength += effectiveStrength;
+      continue;
+    }
+
+    groups.set(key, {
+      key,
+      name: beast.name,
+      size: beast.size,
+      sizeLabel: draftBeastSizeLabel(beast.size),
+      count: 1,
+      fourLegged: beast.fourLegged,
+      baseStrength: beast.strength,
+      effectiveStrength,
+      totalEffectiveStrength: effectiveStrength,
+    });
+  }
+
+  return Array.from(groups.values()).sort((left, right) => left.name.localeCompare(right.name, "es"));
+}
+
+function draftEffectiveStrength(beast: CaravanBeast) {
+  return beast.strength * (beast.fourLegged ? 2 : 1);
+}
+
+function draftStrengthState(wagon: CaravanWagon): DraftStrengthState {
+  const required = Math.max(0, wagon.draftRequiredStrength);
+  const total = Math.max(0, wagon.draftStrength);
+
+  if (required === 0) {
+    return {
+      className: "limit-ok",
+      label: "Sin requisito",
+      description: "Este carro no necesita fuerza mínima para tirar.",
+    };
+  }
+
+  if (total < required) {
+    return {
+      className: "limit-warning",
+      label: `No alcanza (${total}/${required})`,
+      description: "Las criaturas asignadas no alcanzan la fuerza necesaria para mover el carro.",
+    };
+  }
+
+  if (total >= required * 2) {
+    return {
+      className: "draft-boost-high",
+      label: "Supera la fuerza requerida en un 100% o más",
+      description: "No necesitan descanso por este motivo.",
+    };
+  }
+
+  if (total >= Math.ceil(required * 1.5)) {
+    return {
+      className: "draft-boost-mid",
+      label: "Supera la fuerza requerida en un 50% o más",
+      description: "Quedarán fatigadas tras 10 días ininterrumpidos.",
+    };
+  }
+
+  return {
+    className: "draft-boost-low",
+    label: "Iguala o supera la fuerza requerida",
+    description: "Quedarán fatigadas tras 5 días ininterrumpidos.",
+  };
+}
+
+function toggleDraftPanel() {
+  draftPanelExpanded.value = !draftPanelExpanded.value;
 }
 
 onMounted(refresh);
@@ -623,6 +773,89 @@ onMounted(refresh);
             <div><dt>Límite</dt><dd>{{ selectedWagon.limit }}</dd></div>
             <div><dt>Consumo</dt><dd>{{ selectedWagon.consumption }}</dd></div>
           </dl>
+
+          <section class="info-block">
+            <div class="section-header">
+              <div>
+                <h3>Tiro actual</h3>
+                <p class="muted">Criaturas asignadas al tiro y fuerza efectiva del conjunto.</p>
+              </div>
+              <div class="draft-header-actions">
+                <span class="draft-power-badge" :class="draftStrengthState(selectedWagon).className">
+                  {{ draftStrengthState(selectedWagon).label }}
+                </span>
+                <button class="secondary-button draft-toggle-button" type="button" @click="toggleDraftPanel">
+                  {{ draftPanelExpanded ? "Ocultar" : "Mostrar" }}
+                </button>
+              </div>
+            </div>
+
+            <template v-if="draftPanelExpanded">
+              <div
+                v-if="selectedWagon.draftBeasts.length === 0"
+                class="warning-block"
+              >
+                <strong>Alerta</strong>
+                <p>No hay criaturas asignadas al tiro de este carro.</p>
+              </div>
+              <div v-else-if="draftStrengthState(selectedWagon).className === 'limit-warning'" class="warning-block">
+                <strong>Alerta</strong>
+                <p>{{ draftStrengthState(selectedWagon).description }}</p>
+              </div>
+              <template v-else>
+                <dl class="stats draft-stats">
+                  <div>
+                    <dt>Máx. grandes</dt>
+                    <dd>{{ parseDraftRequirement(selectedWagon.propulsion)?.maxLargeBeasts ?? 0 }}</dd>
+                  </div>
+                  <div>
+                    <dt>Máx. medianas</dt>
+                    <dd>{{ parseDraftRequirement(selectedWagon.propulsion)?.maxMediumBeasts ?? 0 }}</dd>
+                  </div>
+                  <div>
+                    <dt>Actual grandes</dt>
+                    <dd>{{ draftOccupancyForWagon(selectedWagon).largeCount }}</dd>
+                  </div>
+                  <div>
+                    <dt>Actual medianas</dt>
+                    <dd>{{ draftOccupancyForWagon(selectedWagon).mediumCount }}</dd>
+                  </div>
+                  <div>
+                    <dt>Fuerza requerida</dt>
+                    <dd>{{ selectedWagon.draftRequiredStrength }}</dd>
+                  </div>
+                  <div>
+                    <dt>Fuerza total</dt>
+                    <dd>{{ selectedWagon.draftStrength }}</dd>
+                  </div>
+                </dl>
+
+                <p class="draft-state-description" :class="draftStrengthState(selectedWagon).className">
+                  {{ draftStrengthState(selectedWagon).description }}
+                </p>
+
+                <div class="draft-beast-list">
+                  <article v-for="group in groupedDraftBeasts(selectedWagon)" :key="group.key" class="draft-beast-card">
+                    <div class="draft-beast-main">
+                      <div class="draft-beast-row">
+                        <div class="draft-beast-name-line">
+                          <strong>{{ group.name }}</strong>
+                          <span class="draft-count-badge">{{ group.count }}</span>
+                        </div>
+                        <strong class="draft-base-strength">Fuerza base {{ group.baseStrength }}</strong>
+                      </div>
+                      <p class="muted">{{ group.sizeLabel }}</p>
+                    </div>
+
+                    <div class="draft-beast-stats">
+                      <span v-if="group.fourLegged">Cuenta doble por cuatro patas</span>
+                      <strong>Fuerza efectiva total {{ group.totalEffectiveStrength }}</strong>
+                    </div>
+                  </article>
+                </div>
+              </template>
+            </template>
+          </section>
 
           <section class="info-block">
             <h3>Beneficio especial</h3>
@@ -981,6 +1214,124 @@ p {
   border: 1px solid #f59e0b;
   display: grid;
   gap: 0.35rem;
+}
+
+.draft-power-badge {
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.draft-boost-low {
+  color: #92400e;
+  background: #fef3c7;
+  border-color: #f59e0b;
+}
+
+.draft-boost-mid {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #22c55e;
+}
+
+.draft-boost-high,
+.limit-ok {
+  color: #1d4ed8;
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+.draft-state-description {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.85rem;
+  border: 1px solid transparent;
+}
+
+.draft-collapsed-summary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.draft-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.draft-toggle-button {
+  padding: 0.55rem 0.85rem;
+}
+
+.draft-beast-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.draft-beast-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.9rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 0.85rem;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+}
+
+.draft-beast-main {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.draft-beast-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.draft-beast-name-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.draft-base-strength {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.draft-beast-stats {
+  display: grid;
+  justify-items: end;
+  gap: 0.2rem;
+  text-align: right;
+  align-content: start;
+  min-width: 0;
+}
+
+.draft-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.draft-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .empty-catalog {

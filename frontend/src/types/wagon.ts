@@ -1,3 +1,5 @@
+import type { CaravanBeast } from "@/types/beast";
+
 export interface WagonCatalogItem {
   code: string;
   name: string;
@@ -83,6 +85,9 @@ export interface CaravanWagon {
   specialBenefit: string;
   description: string;
   notes: string | null;
+  draftBeasts: CaravanBeast[];
+  draftStrength: number;
+  draftRequiredStrength: number;
   improvements: CaravanWagonImprovement[];
   createdAt: string;
   updatedAt: string;

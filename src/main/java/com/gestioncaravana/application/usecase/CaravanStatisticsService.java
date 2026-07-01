@@ -9,6 +9,7 @@ import com.gestioncaravana.application.port.in.GetCaravanStatisticsUseCase;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanFeatRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
@@ -40,6 +41,7 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
   private final CaravanTravelerRepositoryPort travelerRepository;
   private final CaravanBeastRepositoryPort beastRepository;
   private final CaravanCargoRepositoryPort cargoRepository;
+  private final CaravanFeatRepositoryPort featRepository;
 
   public CaravanStatisticsService(
       CaravanCampaignRepositoryPort caravanRepository,
@@ -47,13 +49,15 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
       CaravanWagonImprovementRepositoryPort improvementRepository,
       CaravanTravelerRepositoryPort travelerRepository,
       CaravanBeastRepositoryPort beastRepository,
-      CaravanCargoRepositoryPort cargoRepository) {
+      CaravanCargoRepositoryPort cargoRepository,
+      CaravanFeatRepositoryPort featRepository) {
     this.caravanRepository = caravanRepository;
     this.wagonRepository = wagonRepository;
     this.improvementRepository = improvementRepository;
     this.travelerRepository = travelerRepository;
     this.beastRepository = beastRepository;
     this.cargoRepository = cargoRepository;
+    this.featRepository = featRepository;
   }
 
   @Override
@@ -63,16 +67,19 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
     var travelers = travelerRepository.findAllByCaravanId(caravanId);
     var beasts = beastRepository.findAllByCaravanId(caravanId);
     var cargo = cargoRepository.findAllByCaravanId(caravanId);
+    var feats = featRepository.findAllByCaravanId(caravanId);
 
-    var contributions = new ArrayList<CaravanStatContributionView>();
+    var moraleBonus = countActiveFeats(feats, "caravana-familiar") + countActiveFeats(feats, "lider-de-la-caravana");
     var mainStats = new CaravanMainStatsView(
         caravan.mainStats().offense(),
         caravan.mainStats().defense(),
         caravan.mainStats().mobility(),
-        caravan.mainStats().morale(),
+        caravan.mainStats().morale() + moraleBonus,
         caravan.mainStats().unassignedPoints());
 
-    var derivedStats = deriveStats(caravan, wagons, travelers, beasts, cargo, contributions);
+    var contributions = new ArrayList<CaravanStatContributionView>();
+
+    var derivedStats = deriveStats(caravan, mainStats, wagons, travelers, beasts, cargo, feats, contributions);
     var otherStats = deriveOtherStats(caravan, wagons, travelers, beasts, cargo, contributions);
     var warnings = new ArrayList<String>();
     if (caravan.discontent() >= mainStats.morale()) {
@@ -106,18 +113,20 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
 
   private CaravanDerivedStatsView deriveStats(
       CaravanCampaign caravan,
+      CaravanMainStatsView mainStats,
       List<CaravanWagon> wagons,
       List<CaravanTraveler> travelers,
       List<com.gestioncaravana.domain.CaravanBeast> beasts,
       List<CaravanCargo> cargo,
+      List<com.gestioncaravana.domain.CaravanFeat> feats,
       List<CaravanStatContributionView> contributions) {
-    var offense = caravan.mainStats().offense();
-    var defense = caravan.mainStats().defense();
-    var security = caravan.mainStats().mobility();
-    var determination = caravan.mainStats().morale();
+    var offense = mainStats.offense();
+    var defense = mainStats.defense();
+    var security = mainStats.mobility();
+    var determination = mainStats.morale();
 
     contributions.add(contribution("offense", "BASE", caravan.id().toString(), "Caravana", "+" + offense, "BASE", "Ofensiva base"));
-    contributions.add(contribution("defense", "BASE", caravan.id().toString(), "Caravana", "+" + defense, "BASE", "Defensiva base"));
+    contributions.add(contribution("defense", "BASE", caravan.id().toString(), "Caravana", "+" + defense, "BASE", "Defensa base"));
     contributions.add(contribution("security", "BASE", caravan.id().toString(), "Caravana", "+" + security, "BASE", "Movilidad base como seguridad"));
     contributions.add(contribution("determination", "BASE", caravan.id().toString(), "Caravana", "+" + determination, "BASE", "Moral base como determinación"));
 
@@ -127,6 +136,20 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
       determination -= 2;
       contributions.add(contribution("security", "ROLE", "adivino", "Sin adivino", "-2", "ADD", "Penalizador por no tener adivino"));
       contributions.add(contribution("determination", "ROLE", "adivino", "Sin adivino", "-2", "ADD", "Penalizador por no tener adivino"));
+    }
+
+    var familyFeat = countActiveFeats(feats, "caravana-familiar");
+    if (familyFeat > 0) {
+      contributions.add(contribution("morale", "FEAT", "caravana-familiar", "Caravana Familiar", "+" + familyFeat, "ADD", "Bonificación manual activa de Caravana Familiar"));
+    }
+
+    var leaderFeat = countActiveFeats(feats, "lider-de-la-caravana");
+    if (leaderFeat > 0) {
+      security += leaderFeat;
+      determination += leaderFeat;
+      contributions.add(contribution("security", "FEAT", "lider-de-la-caravana", "Líder de la caravana", "+" + leaderFeat, "ADD", "Bonificación manual activa de Líder de la caravana"));
+      contributions.add(contribution("determination", "FEAT", "lider-de-la-caravana", "Líder de la caravana", "+" + leaderFeat, "ADD", "Bonificación manual activa de Líder de la caravana"));
+      contributions.add(contribution("morale", "FEAT", "lider-de-la-caravana", "Líder de la caravana", "+" + leaderFeat, "ADD", "Bonificación manual activa de Líder de la caravana"));
     }
 
     var guards = countTravelersWithRole(travelers, "guarda");
@@ -326,6 +349,12 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
 
   private int countTravelersWithRole(List<CaravanTraveler> travelers, String roleCode) {
     return (int) travelers.stream().filter(traveler -> roleCode.equals(traveler.activeRoleCode())).count();
+  }
+
+  private int countActiveFeats(List<com.gestioncaravana.domain.CaravanFeat> feats, String featTypeCode) {
+    return (int) feats.stream()
+        .filter(feat -> feat.active() && featTypeCode.equals(feat.featTypeCode()))
+        .count();
   }
 
   private int mapSpeedToMilesPerDay(int speed) {

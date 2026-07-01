@@ -297,9 +297,7 @@ async function handleCreateTraveler() {
       availableRoleCodes: [passengerRoleCode, ...createAvailableRoleCodes.value.filter((code) => code !== passengerRoleCode)],
       activeRoleCodes: createActiveRoleCodes.value.length === 0
         ? [passengerRoleCode]
-        : (createActiveRoleCodes.value.includes(passengerRoleCode)
-            ? createActiveRoleCodes.value
-            : [passengerRoleCode, ...createActiveRoleCodes.value]),
+        : createActiveRoleCodes.value,
       activeRoleCode: createPrimaryRoleCode.value || passengerRoleCode,
       maxActiveRoleCount: createMaxActiveRoleCount.value,
       salary: parsedSalary,

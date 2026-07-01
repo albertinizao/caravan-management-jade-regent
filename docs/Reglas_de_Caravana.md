@@ -23,16 +23,16 @@ Los atributos tienen una puntuación que va de 0 a 10, no pudiendo nunca exceder
 ### Estadísticas Principales
 
 - **Ofensiva:** Capacidad de infligir daño.
-- **Defensiva:** Capacidad de soportar daño y velocidad de reparación.
+- **Defensa:** Capacidad de soportar daño y velocidad de reparación.
 - **Movilidad:** Capacidad de atravesar terreno y reaccionar a peligros imprevistos.
 - **Moral:** La actitud y lealtad general de los miembros de la caravana.
 
 ### Estadísticas Derivadas
 
-- **Ataque:** El modificador para acertar con los ataques.
-- **Clase de armadura:** Número objetivo para ser golpeada. Se le suma 1d20.
-- **Seguridad:** El modificador para evitar un peligro físico como un desprendimiento, un barrizal o un incendio forestal.
-- **Determinación:** El modificador para evitar un peligro mental o espiritual.
+- **Ataque:** La Ofensiva se suma automáticamente al ataque.
+- **Clase de armadura:** La Defensa se suma automáticamente a la CA.
+- **Seguridad:** La Movilidad se suma automáticamente a la Seguridad.
+- **Determinación:** La Moral se suma automáticamente a la Determinación.
 
 ### Otros
 
@@ -237,7 +237,7 @@ Vuestros viajeros son muy disciplinados en lo que se refiere a gestionar las res
 
 En caso de ataque, los viajeros saben qué tienen que hacer para defenderse lo más rápido posible.
 
-- **Requisito:** Defensiva 3.
+- **Requisito:** Defensa 3.
 - **Beneficio:** Cuando comience un enfrentamiento por sorpresa, los viajeros pueden realizar hasta dos acciones de movimiento para posicionarse donde les resulte favorable antes de inicial el enfrentamiento. En caso de ser un enfrentamiento previsto con al menos 30 segundos de margen, los viajeros pueden comenzar posicionados donde consideren.
 
 #### Dominio Del Terreno

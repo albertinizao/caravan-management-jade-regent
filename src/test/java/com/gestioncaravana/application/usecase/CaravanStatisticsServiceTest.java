@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanFeatRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
@@ -13,6 +14,8 @@ import com.gestioncaravana.domain.CaravanBeastAssignmentType;
 import com.gestioncaravana.domain.CaravanCampaign;
 import com.gestioncaravana.domain.CaravanCargo;
 import com.gestioncaravana.domain.CaravanCargoSourceType;
+import com.gestioncaravana.domain.CaravanFeat;
+import com.gestioncaravana.domain.CaravanFeatAcquisitionSourceType;
 import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
 import com.gestioncaravana.domain.CaravanWagonImprovement;
@@ -33,6 +36,7 @@ class CaravanStatisticsServiceTest {
   private InMemoryTravelerRepository travelerRepository;
   private InMemoryBeastRepository beastRepository;
   private InMemoryCargoRepository cargoRepository;
+  private InMemoryFeatRepository featRepository;
   private CaravanStatisticsService service;
 
   @BeforeEach
@@ -43,13 +47,15 @@ class CaravanStatisticsServiceTest {
     travelerRepository = new InMemoryTravelerRepository();
     beastRepository = new InMemoryBeastRepository();
     cargoRepository = new InMemoryCargoRepository();
+    featRepository = new InMemoryFeatRepository();
     service = new CaravanStatisticsService(
         caravanRepository,
         wagonRepository,
         improvementRepository,
         travelerRepository,
         beastRepository,
-        cargoRepository);
+        cargoRepository,
+        featRepository);
   }
 
   @Test
@@ -134,18 +140,63 @@ class CaravanStatisticsServiceTest {
         null,
         Instant.parse("2026-01-01T00:00:00Z")));
 
+    featRepository.save(CaravanFeat.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "caravana-familiar",
+        CaravanFeatAcquisitionSourceType.OTHER,
+        null,
+        "Mesa",
+        1,
+        Instant.parse("2026-01-01T00:00:00Z")));
+    featRepository.save(CaravanFeat.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "lider-de-la-caravana",
+        CaravanFeatAcquisitionSourceType.OTHER,
+        null,
+        "Mesa",
+        1,
+        Instant.parse("2026-01-01T00:00:00Z")).updateAcquisition(
+            CaravanFeatAcquisitionSourceType.OTHER,
+            null,
+            "Mesa",
+            false,
+            Instant.parse("2026-01-01T00:00:00Z")));
+
     var statistics = service.getById(caravan.id());
 
     assertThat(statistics.derivedStats().attack()).isEqualTo(2);
     assertThat(statistics.derivedStats().armorClass()).isEqualTo(11);
     assertThat(statistics.derivedStats().security()).isEqualTo(0);
-    assertThat(statistics.derivedStats().determination()).isEqualTo(0);
+    assertThat(statistics.derivedStats().determination()).isEqualTo(1);
     assertThat(statistics.otherStats().speed()).isEqualTo(16);
     assertThat(statistics.otherStats().travelerCapacity()).isEqualTo(8);
     assertThat(statistics.otherStats().cargoCapacity()).isEqualTo(5);
     assertThat(statistics.otherStats().cargoLoad()).isEqualTo(1);
     assertThat(statistics.otherStats().consumption()).isEqualTo(5);
     assertThat(statistics.warnings()).anyMatch(message -> message.contains("adivino"));
+  }
+
+  @Test
+  void appliesManualFeatBonusesWhenTheyAreActive() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
+    featRepository.save(CaravanFeat.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "lider-de-la-caravana",
+        CaravanFeatAcquisitionSourceType.OTHER,
+        null,
+        "Mesa",
+        1,
+        true,
+        Instant.parse("2026-01-01T00:00:00Z")));
+
+    var statistics = service.getById(caravan.id());
+
+    assertThat(statistics.mainStats().morale()).isEqualTo(2);
+    assertThat(statistics.derivedStats().security()).isEqualTo(0);
+    assertThat(statistics.derivedStats().determination()).isEqualTo(1);
   }
 
   private static final class InMemoryCaravanRepository implements CaravanCampaignRepositoryPort {
@@ -342,5 +393,41 @@ class CaravanStatisticsServiceTest {
           .filter(cargo -> cargo.caravanId().equals(caravanId) && wagonId.equals(cargo.wagonId()))
           .count();
     }
+  }
+
+  private static final class InMemoryFeatRepository implements CaravanFeatRepositoryPort {
+    private final List<CaravanFeat> feats = new ArrayList<>();
+
+    @Override
+    public CaravanFeat save(CaravanFeat feat) {
+      feats.removeIf(existing -> existing.id().equals(feat.id()));
+      feats.add(feat);
+      return feat;
+    }
+
+    @Override
+    public List<CaravanFeat> findAllByCaravanId(UUID caravanId) {
+      return feats.stream().filter(feat -> feat.caravanId().equals(caravanId)).toList();
+    }
+
+    @Override
+    public Optional<CaravanFeat> findById(UUID caravanId, UUID featId) {
+      return feats.stream()
+          .filter(feat -> feat.caravanId().equals(caravanId) && feat.id().equals(featId))
+          .findFirst();
+    }
+
+    @Override
+    public long countByCaravanIdAndFeatTypeCode(UUID caravanId, String featTypeCode) {
+      return feats.stream()
+          .filter(feat -> feat.caravanId().equals(caravanId) && feat.featTypeCode().equals(featTypeCode))
+          .count();
+    }
+
+    @Override
+    public void deleteById(UUID caravanId, UUID featId) {}
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {}
   }
 }

@@ -23,9 +23,14 @@ import com.gestioncaravana.application.port.in.GetCaravanTravelerUseCase;
 import com.gestioncaravana.application.port.in.DeleteCaravanWagonImprovementUseCase;
 import com.gestioncaravana.application.port.in.SelectActiveCaravanUseCase;
 import com.gestioncaravana.application.port.in.ListCaravanTravelersUseCase;
+import com.gestioncaravana.application.port.in.ListCaravanFeatCatalogUseCase;
+import com.gestioncaravana.application.port.in.ListCaravanFeatsUseCase;
 import com.gestioncaravana.application.port.in.ListCaravanWagonImprovementsUseCase;
 import com.gestioncaravana.application.port.in.ListWagonImprovementCatalogUseCase;
 import com.gestioncaravana.application.port.in.ListTravelerRoleCatalogUseCase;
+import com.gestioncaravana.application.port.in.GetCaravanFeatUseCase;
+import com.gestioncaravana.application.port.in.AddCaravanFeatUseCase;
+import com.gestioncaravana.application.port.in.UpdateCaravanFeatUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerRoleUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerWagonUseCase;
@@ -61,6 +66,11 @@ public class CaravanController {
   private final ListCaravanBeastsUseCase listCaravanBeastsUseCase;
   private final GetCaravanBeastUseCase getCaravanBeastUseCase;
   private final ListCaravanTravelersUseCase listCaravanTravelersUseCase;
+  private final ListCaravanFeatCatalogUseCase listCaravanFeatCatalogUseCase;
+  private final ListCaravanFeatsUseCase listCaravanFeatsUseCase;
+  private final GetCaravanFeatUseCase getCaravanFeatUseCase;
+  private final AddCaravanFeatUseCase addCaravanFeatUseCase;
+  private final UpdateCaravanFeatUseCase updateCaravanFeatUseCase;
   private final GetCaravanTravelerUseCase getCaravanTravelerUseCase;
   private final AddCaravanBeastUseCase addCaravanBeastUseCase;
   private final UpdateCaravanBeastAssignmentUseCase updateCaravanBeastAssignmentUseCase;
@@ -93,6 +103,11 @@ public class CaravanController {
       ListCaravanBeastsUseCase listCaravanBeastsUseCase,
       GetCaravanBeastUseCase getCaravanBeastUseCase,
       ListCaravanTravelersUseCase listCaravanTravelersUseCase,
+      ListCaravanFeatCatalogUseCase listCaravanFeatCatalogUseCase,
+      ListCaravanFeatsUseCase listCaravanFeatsUseCase,
+      GetCaravanFeatUseCase getCaravanFeatUseCase,
+      AddCaravanFeatUseCase addCaravanFeatUseCase,
+      UpdateCaravanFeatUseCase updateCaravanFeatUseCase,
       GetCaravanTravelerUseCase getCaravanTravelerUseCase,
       AddCaravanBeastUseCase addCaravanBeastUseCase,
       UpdateCaravanBeastAssignmentUseCase updateCaravanBeastAssignmentUseCase,
@@ -123,6 +138,11 @@ public class CaravanController {
     this.listCaravanBeastsUseCase = listCaravanBeastsUseCase;
     this.getCaravanBeastUseCase = getCaravanBeastUseCase;
     this.listCaravanTravelersUseCase = listCaravanTravelersUseCase;
+    this.listCaravanFeatCatalogUseCase = listCaravanFeatCatalogUseCase;
+    this.listCaravanFeatsUseCase = listCaravanFeatsUseCase;
+    this.getCaravanFeatUseCase = getCaravanFeatUseCase;
+    this.addCaravanFeatUseCase = addCaravanFeatUseCase;
+    this.updateCaravanFeatUseCase = updateCaravanFeatUseCase;
     this.getCaravanTravelerUseCase = getCaravanTravelerUseCase;
     this.addCaravanBeastUseCase = addCaravanBeastUseCase;
     this.updateCaravanBeastAssignmentUseCase = updateCaravanBeastAssignmentUseCase;
@@ -152,6 +172,57 @@ public class CaravanController {
             request.mobility(),
             request.morale()));
     return ResponseEntity.status(HttpStatus.CREATED).body(CaravanResponseMapper.toResponse(created));
+  }
+
+  @GetMapping("/caravans/{caravanId}/feats/catalog")
+  List<CaravanFeatCatalogItemResponse> listCaravanFeatCatalog(@PathVariable UUID caravanId) {
+    getCaravanUseCase.getById(caravanId);
+    return listCaravanFeatCatalogUseCase.listCatalog(caravanId).stream()
+        .map(CaravanFeatResponseMapper::toResponse)
+        .toList();
+  }
+
+  @GetMapping("/caravans/{caravanId}/feats")
+  List<CaravanFeatResponse> listCaravanFeats(@PathVariable UUID caravanId) {
+    return listCaravanFeatsUseCase.list(caravanId).stream()
+        .map(CaravanFeatResponseMapper::toResponse)
+        .toList();
+  }
+
+  @GetMapping("/caravans/{caravanId}/feats/{featId}")
+  CaravanFeatResponse getCaravanFeat(@PathVariable UUID caravanId, @PathVariable UUID featId) {
+    return CaravanFeatResponseMapper.toResponse(getCaravanFeatUseCase.getById(caravanId, featId));
+  }
+
+  @PostMapping("/caravans/{caravanId}/feats")
+  ResponseEntity<CaravanFeatResponse> addCaravanFeat(
+      @PathVariable UUID caravanId,
+      @Valid @RequestBody AddCaravanFeatRequest request) {
+    var created = addCaravanFeatUseCase.execute(
+        caravanId,
+        new AddCaravanFeatUseCase.AddCaravanFeatCommand(
+            request.featTypeCode(),
+            request.acquisitionSourceType(),
+            request.acquisitionLevel(),
+            request.acquisitionCause(),
+            request.active()));
+    return ResponseEntity.status(HttpStatus.CREATED).body(CaravanFeatResponseMapper.toResponse(created));
+  }
+
+  @PutMapping("/caravans/{caravanId}/feats/{featId}")
+  CaravanFeatResponse updateCaravanFeat(
+      @PathVariable UUID caravanId,
+      @PathVariable UUID featId,
+      @Valid @RequestBody UpdateCaravanFeatRequest request) {
+    return CaravanFeatResponseMapper.toResponse(
+        updateCaravanFeatUseCase.execute(
+            caravanId,
+            featId,
+            new UpdateCaravanFeatUseCase.UpdateCaravanFeatCommand(
+                request.acquisitionSourceType(),
+                request.acquisitionLevel(),
+                request.acquisitionCause(),
+                request.active())));
   }
 
   @GetMapping("/caravans")

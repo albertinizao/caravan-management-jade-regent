@@ -4,6 +4,7 @@ import HomeView from "@/views/HomeView.vue";
 import CargoView from "@/views/CargoView.vue";
 import BeastsView from "@/views/BeastsView.vue";
 import TravelersView from "@/views/TravelersView.vue";
+import FeatsView from "@/views/FeatsView.vue";
 import WagonsView from "@/views/WagonsView.vue";
 
 export const router = createRouter({
@@ -33,6 +34,11 @@ export const router = createRouter({
       path: "/beasts",
       name: "beasts",
       component: BeastsView,
+    },
+    {
+      path: "/feats",
+      name: "feats",
+      component: FeatsView,
     },
   ],
 });

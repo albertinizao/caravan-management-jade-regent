@@ -45,6 +45,12 @@ const hiddenContributionStats = new Set([
 const selectedCaravan = computed(() => activeCaravan.value ?? caravans.value.find((caravan) => caravan.active) ?? null);
 const allocatedPoints = computed(() => offense.value + defense.value + mobility.value + morale.value - 4);
 const remainingPoints = computed(() => 3 - allocatedPoints.value);
+const automaticDerivedStats = computed(() => ({
+  attack: offense.value,
+  armorClass: 10 + defense.value,
+  security: mobility.value,
+  determination: morale.value,
+}));
 const visibleContributions = computed(() =>
   caravanStatistics.value?.contributions.filter((item) => !hiddenContributionStats.has(item.statCode)) ?? [],
 );
@@ -233,7 +239,7 @@ onMounted(refresh);
                 <dd>{{ selectedCaravan.mainStats.offense }}</dd>
               </div>
               <div>
-                <dt>Defensiva</dt>
+                <dt>Defensa</dt>
                 <dd>{{ selectedCaravan.mainStats.defense }}</dd>
               </div>
               <div>
@@ -252,7 +258,7 @@ onMounted(refresh);
 
             <div v-if="caravanStatistics" class="stats-panel">
               <section>
-                <h3>Estadísticas derivadas</h3>
+                <h3>Estadísticas derivadas automáticas</h3>
                 <dl class="stats stats-2">
                   <div>
                     <dt>Ataque</dt>
@@ -424,7 +430,7 @@ onMounted(refresh);
                 <input v-model.number="offense" type="number" min="1" max="10" />
               </label>
               <label>
-                <span>Defensiva</span>
+                <span>Defensa</span>
                 <input v-model.number="defense" type="number" min="1" max="10" />
               </label>
               <label>
@@ -439,6 +445,31 @@ onMounted(refresh);
             <p class="muted">
               Puntos asignados: {{ allocatedPoints }} / 3 · Puntos libres: {{ remainingPoints }}
             </p>
+
+            <section class="derived-preview">
+              <h3>Vista previa automática</h3>
+              <dl class="stats stats-2">
+                <div>
+                  <dt>Ataque</dt>
+                  <dd>{{ automaticDerivedStats.attack }}</dd>
+                </div>
+                <div>
+                  <dt>CA</dt>
+                  <dd>{{ automaticDerivedStats.armorClass }}</dd>
+                </div>
+                <div>
+                  <dt>Seguridad</dt>
+                  <dd>{{ automaticDerivedStats.security }}</dd>
+                </div>
+                <div>
+                  <dt>Determinación</dt>
+                  <dd>{{ automaticDerivedStats.determination }}</dd>
+                </div>
+              </dl>
+              <p class="muted">
+                Estas estadísticas se calculan automáticamente a partir de tus atributos principales.
+              </p>
+            </section>
 
             <div class="modal-actions">
               <button class="secondary-button" type="button" @click="closeCreateModal">Cancelar</button>

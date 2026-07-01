@@ -1,17 +1,29 @@
 <template>
   <div class="app-shell">
     <header class="topbar">
-      <div>
+      <div class="brand">
         <strong>GestionCaravana</strong>
-        <p>Caravana activa y carga</p>
+        <p>Caravana activa, carga y dotes</p>
       </div>
 
-      <nav class="nav">
-        <RouterLink to="/">Caravanas</RouterLink>
-        <RouterLink to="/travelers">Viajeros</RouterLink>
-        <RouterLink to="/wagons">Carros</RouterLink>
-        <RouterLink to="/cargo">Carga</RouterLink>
-        <RouterLink to="/beasts">Bestias</RouterLink>
+      <button
+        type="button"
+        class="nav-toggle"
+        :aria-expanded="isMenuOpen"
+        aria-controls="primary-navigation"
+        @click="isMenuOpen = !isMenuOpen"
+      >
+        <span class="nav-toggle__icon" aria-hidden="true">{{ isMenuOpen ? "✕" : "☰" }}</span>
+        <span>{{ isMenuOpen ? "Cerrar" : "Menú" }}</span>
+      </button>
+
+      <nav id="primary-navigation" class="nav" :class="{ 'nav--open': isMenuOpen }">
+        <RouterLink to="/" @click="isMenuOpen = false">Caravanas</RouterLink>
+        <RouterLink to="/travelers" @click="isMenuOpen = false">Viajeros</RouterLink>
+        <RouterLink to="/wagons" @click="isMenuOpen = false">Carros</RouterLink>
+        <RouterLink to="/cargo" @click="isMenuOpen = false">Carga</RouterLink>
+        <RouterLink to="/beasts" @click="isMenuOpen = false">Bestias</RouterLink>
+        <RouterLink to="/feats" @click="isMenuOpen = false">Dotes</RouterLink>
       </nav>
     </header>
 
@@ -35,9 +47,21 @@
 </template>
 
 <script setup lang="ts">
+import { ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { useToast } from "@/composables/useToast";
 
+const route = useRoute();
+const isMenuOpen = ref(false);
+
 const { toast } = useToast();
+
+watch(
+  () => route.fullPath,
+  () => {
+    isMenuOpen.value = false;
+  },
+);
 </script>
 
 <style scoped>
@@ -56,15 +80,38 @@ const { toast } = useToast();
   background: white;
 }
 
+.brand {
+  min-width: 0;
+}
+
 .topbar p {
   margin: 0;
   color: #6b7280;
   font-size: 0.9rem;
 }
 
+.nav-toggle {
+  display: none;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.85rem;
+  background: #f9fafb;
+  color: #111827;
+  padding: 0.65rem 0.9rem;
+  font: inherit;
+  font-weight: 600;
+}
+
+.nav-toggle__icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
 .nav {
   display: flex;
   gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .nav a {
@@ -78,6 +125,34 @@ const { toast } = useToast();
 .nav a.router-link-active {
   background: #dbeafe;
   color: #1d4ed8;
+}
+
+@media (max-width: 768px) {
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .nav-toggle {
+    display: inline-flex;
+    align-self: flex-start;
+  }
+
+  .nav {
+    display: none;
+    width: 100%;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding-top: 0.25rem;
+  }
+
+  .nav.nav--open {
+    display: flex;
+  }
+
+  .nav a {
+    width: 100%;
+  }
 }
 
 .global-toast {

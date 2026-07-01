@@ -7,11 +7,15 @@ import com.gestioncaravana.application.port.in.CreateCaravanUseCase.CreateCarava
 import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanFeatCatalogPort;
+import com.gestioncaravana.application.port.out.CaravanFeatRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
 import com.gestioncaravana.domain.CaravanBeast;
 import com.gestioncaravana.domain.CaravanBeastAssignmentType;
+import com.gestioncaravana.domain.CaravanFeat;
+import com.gestioncaravana.domain.CaravanFeatAcquisitionSourceType;
 import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
 import java.time.Clock;
@@ -28,17 +32,21 @@ class CaravanManagementServiceTest {
 
   private InMemoryCaravanRepository repository;
   private InMemoryActiveSelection activeSelection;
+  private InMemoryFeatRepository featRepository;
   private CaravanManagementService service;
 
   @BeforeEach
   void setUp() {
     repository = new InMemoryCaravanRepository();
     activeSelection = new InMemoryActiveSelection();
+    featRepository = new InMemoryFeatRepository();
     service = new CaravanManagementService(
         repository,
         new InMemoryCaravanWagonRepository(),
         new InMemoryTravelerRepository(),
         new InMemoryBeastRepository(),
+        featRepository,
+        new InMemoryFeatCatalogPort(),
         activeSelection,
         Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
   }
@@ -67,12 +75,22 @@ class CaravanManagementServiceTest {
   @Test
   void deletesCaravansAndClearsTheActiveSelectionWhenNeeded() {
     var created = service.execute(new CreateCaravanCommand("Campaign", null, null, null, null, null));
+    featRepository.save(CaravanFeat.create(
+        UUID.randomUUID(),
+        created.id(),
+        "caravana-mejorada",
+        CaravanFeatAcquisitionSourceType.LEVEL_UP,
+        2,
+        null,
+        1,
+        Instant.parse("2026-01-01T00:00:00Z")));
     service.select(created.id());
 
     service.delete(created.id());
 
     assertThat(service.list()).isEmpty();
     assertThat(service.getActive()).isEmpty();
+    assertThat(featRepository.findAllByCaravanId(created.id())).isEmpty();
   }
 
   @Test
@@ -80,6 +98,24 @@ class CaravanManagementServiceTest {
     assertThatThrownBy(() -> service.select(UUID.randomUUID()))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Caravan not found");
+  }
+
+  @Test
+  void showsFeatNamesInTheCaravanSummary() {
+    var created = service.execute(new CreateCaravanCommand("Campaign", null, null, null, null, null));
+    featRepository.save(CaravanFeat.create(
+        UUID.randomUUID(),
+        created.id(),
+        "caravana-mejorada",
+        CaravanFeatAcquisitionSourceType.LEVEL_UP,
+        2,
+        null,
+        1,
+        Instant.parse("2026-01-01T00:00:00Z")));
+
+    var caravan = service.getById(created.id());
+
+    assertThat(caravan.feats()).containsExactly("Caravana Mejorada");
   }
 
   private static final class InMemoryCaravanRepository implements CaravanCampaignRepositoryPort {
@@ -230,6 +266,68 @@ class CaravanManagementServiceTest {
     @Override
     public void deleteByCaravanId(UUID caravanId) {
       beasts.removeIf(beast -> beast.caravanId().equals(caravanId));
+    }
+  }
+
+  private static final class InMemoryFeatRepository implements CaravanFeatRepositoryPort {
+    private final List<CaravanFeat> feats = new ArrayList<>();
+
+    @Override
+    public CaravanFeat save(CaravanFeat feat) {
+      feats.removeIf(existing -> existing.id().equals(feat.id()));
+      feats.add(feat);
+      return feat;
+    }
+
+    @Override
+    public List<CaravanFeat> findAllByCaravanId(UUID caravanId) {
+      return feats.stream().filter(feat -> feat.caravanId().equals(caravanId)).toList();
+    }
+
+    @Override
+    public Optional<CaravanFeat> findById(UUID caravanId, UUID featId) {
+      return feats.stream()
+          .filter(feat -> feat.caravanId().equals(caravanId) && feat.id().equals(featId))
+          .findFirst();
+    }
+
+    @Override
+    public long countByCaravanIdAndFeatTypeCode(UUID caravanId, String featTypeCode) {
+      return feats.stream()
+          .filter(feat -> feat.caravanId().equals(caravanId) && feat.featTypeCode().equals(featTypeCode))
+          .count();
+    }
+
+    @Override
+    public void deleteById(UUID caravanId, UUID featId) {
+      feats.removeIf(feat -> feat.caravanId().equals(caravanId) && feat.id().equals(featId));
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      feats.removeIf(feat -> feat.caravanId().equals(caravanId));
+    }
+  }
+
+  private static final class InMemoryFeatCatalogPort implements CaravanFeatCatalogPort {
+    @Override
+    public List<com.gestioncaravana.domain.CaravanFeatType> all() {
+      return List.of(
+          new com.gestioncaravana.domain.CaravanFeatType(
+              "caravana-mejorada",
+              "Caravana Mejorada",
+              List.of("Nivel 2"),
+              "Aumenta en 1 dos de las estadísticas principales hasta una puntuación máxima de +10.",
+              "Esta dote puede seleccionarse varias veces.",
+              null,
+              true,
+              999,
+              2));
+    }
+
+    @Override
+    public Optional<com.gestioncaravana.domain.CaravanFeatType> findByCode(String code) {
+      return all().stream().filter(feat -> feat.code().equals(code)).findFirst();
     }
   }
 

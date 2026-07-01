@@ -61,6 +61,9 @@ Keep the domain free from Spring, web, JPA, and filesystem concerns.
 .\mvnw.cmd spring-boot:run
 ```
 
+The backend binds to `0.0.0.0:8080`, so it is reachable from the local network
+through the machine IP, for example `http://192.168.1.201:8080`.
+
 ### Frontend
 
 ```powershell
@@ -68,6 +71,9 @@ cd frontend
 npm install
 npm run dev
 ```
+
+The Vite dev server binds to `0.0.0.0`, so the UI is reachable from other
+devices on the LAN, for example `http://192.168.1.201:5173`.
 
 ### Frontend checks
 
@@ -88,4 +94,3 @@ npm run typecheck
 - `AGENTS.md`
 - `docs/architecture.md`
 - `openspec/README.md`
-

@@ -95,7 +95,8 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
       warnings.add("La caravana supera su capacidad de viajeros.");
     }
     if (otherStats.wagonCount() > otherStats.maxWagons()) {
-      warnings.add("La caravana supera su límite de carros.");
+      var wagonOverflow = otherStats.wagonCount() - otherStats.maxWagons();
+      warnings.add("La caravana supera su límite de carros: aplica -1 a cualquier tirada por cada carro adicional (" + wagonOverflow + " por encima).");
     }
 
     return new CaravanStatisticsView(
@@ -195,13 +196,14 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
 
     for (var wagon : wagons) {
       var wagonType = requireWagonType(wagon.wagonTypeCode());
+      var wagonName = wagon.displayNameOr(wagonType.name());
       if ("carro-de-viajeros".equals(wagon.wagonTypeCode())) {
         defense += 1;
-        contributions.add(contribution("armorClass", "WAGON", wagon.id().toString(), wagonType.name(), "+1", "ADD", "Cada Carro de Viajeros aporta +1 CA"));
+        contributions.add(contribution("armorClass", "WAGON", wagon.id().toString(), wagonName, "+1", "ADD", "Cada Carro de Viajeros aporta +1 CA"));
       }
       if ("carro-de-prisioneros".equals(wagon.wagonTypeCode())) {
         security += 2;
-        contributions.add(contribution("security", "WAGON", wagon.id().toString(), wagonType.name(), "+2", "ADD", "Cada Carro de Prisioneros aporta +2 Seguridad"));
+        contributions.add(contribution("security", "WAGON", wagon.id().toString(), wagonName, "+2", "ADD", "Cada Carro de Prisioneros aporta +2 Seguridad"));
       }
     }
 
@@ -220,7 +222,8 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
     var consumption = 0;
 
     for (var wagon : wagons) {
-      var derived = deriveWagonStats(requireWagonType(wagon.wagonTypeCode()), improvementRepository.findAllByCaravanIdAndWagonId(caravan.id(), wagon.id()));
+      var wagonType = requireWagonType(wagon.wagonTypeCode());
+      var derived = deriveWagonStats(wagon.displayNameOr(wagonType.name()), wagonType, improvementRepository.findAllByCaravanIdAndWagonId(caravan.id(), wagon.id()));
       travelerCapacity += derived.travelerCapacity();
       cargoCapacity += derived.cargoCapacity();
       consumption += derived.consumption();
@@ -304,7 +307,7 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
     return Math.max(0, speed);
   }
 
-  private WagonStats deriveWagonStats(WagonType wagonType, List<CaravanWagonImprovement> improvements) {
+  private WagonStats deriveWagonStats(String wagonName, WagonType wagonType, List<CaravanWagonImprovement> improvements) {
     var currentTravelerCapacity = wagonType.travelerCapacity();
     var currentCargoCapacity = wagonType.cargoCapacity();
     var currentConsumption = wagonType.consumption();
@@ -336,7 +339,7 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
       }
     }
 
-    return new WagonStats(wagonType.name(), Math.max(0, currentTravelerCapacity), Math.max(0, currentCargoCapacity), Math.max(0, currentConsumption));
+    return new WagonStats(wagonName, Math.max(0, currentTravelerCapacity), Math.max(0, currentCargoCapacity), Math.max(0, currentConsumption));
   }
 
   private boolean allWagonsHaveImprovement(List<CaravanWagon> wagons, String code) {

@@ -383,7 +383,7 @@ public class TravelerManagementService
     var wagonName = traveler.wagonId() == null
         ? null
         : wagonRepository.findById(traveler.caravanId(), traveler.wagonId())
-            .flatMap(wagon -> WagonCatalog.findByCode(wagon.wagonTypeCode()).map(type -> type.name()))
+            .flatMap(wagon -> WagonCatalog.findByCode(wagon.wagonTypeCode()).map(type -> wagon.displayNameOr(type.name())))
             .orElse(null);
     var roleName = TravelerRoleCatalog.findByCode(traveler.activeRoleCode()).map(TravelerRoleCatalogItem::name).orElse(traveler.activeRoleCode());
     var servedTravelerName = traveler.roleSpecificData() == null || traveler.roleSpecificData().servedTravelerId() == null

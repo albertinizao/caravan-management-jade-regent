@@ -8,6 +8,12 @@ import type {
 
 export interface AddCaravanWagonPayload {
   wagonTypeCode: string;
+  displayName?: string | null;
+  specificCommodity?: string | null;
+}
+
+export interface UpdateCaravanWagonPayload {
+  displayName?: string | null;
 }
 
 export interface AddCaravanWagonImprovementPayload {
@@ -41,6 +47,17 @@ export function listCaravanWagonImprovements(caravanId: string, wagonId: string)
 export function addCaravanWagon(caravanId: string, payload: AddCaravanWagonPayload) {
   return fetchJson<CaravanWagon>(`/caravans/${caravanId}/wagons`, {
     method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateCaravanWagon(
+  caravanId: string,
+  wagonId: string,
+  payload: UpdateCaravanWagonPayload,
+) {
+  return fetchJson<CaravanWagon>(`/caravans/${caravanId}/wagons/${wagonId}`, {
+    method: "PUT",
     body: JSON.stringify(payload),
   });
 }

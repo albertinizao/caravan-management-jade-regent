@@ -308,7 +308,7 @@ public class BeastManagementService
     var assignedWagonName = beast.assignedWagonId() == null
         ? null
         : wagonRepository.findById(beast.caravanId(), beast.assignedWagonId())
-            .flatMap(wagon -> WagonCatalog.findByCode(wagon.wagonTypeCode()).map(type -> type.name()))
+            .flatMap(wagon -> WagonCatalog.findByCode(wagon.wagonTypeCode()).map(type -> wagon.displayNameOr(type.name())))
             .orElse(null);
     return new CaravanBeastView(
         beast.id(),

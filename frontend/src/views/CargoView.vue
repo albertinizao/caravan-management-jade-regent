@@ -52,7 +52,26 @@ const catalogQuantity = ref("1");
 const catalogCargoUnits = ref("1");
 const catalogWagonId = ref("");
 const catalogOrigin = ref("");
-const catalogSpecificCommodity = ref("");
+const specificCommodityOptions = [
+  "Madera",
+  "Hierro",
+  "Cobre",
+  "Cristal",
+  "Cuero",
+  "Plata",
+  "Sal",
+  "Oro",
+  "Adamantita",
+  "Mithril",
+  "Platino",
+  "Carbón",
+  "Hielo",
+  "Leña",
+  "Materiales mágicos",
+  "Munición (concreta)",
+] as const;
+const catalogSpecificCommodityOption = ref("");
+const catalogSpecificCommodityCustom = ref("");
 const catalogDeity = ref("");
 const catalogNotes = ref("");
 const customDisplayName = ref("");
@@ -61,8 +80,6 @@ const customQuantity = ref("1");
 const customCargoUnits = ref("1");
 const customWagonId = ref("");
 const customOrigin = ref("");
-const customSpecificCommodity = ref("");
-const customDeity = ref("");
 const customNotes = ref("");
 const { showToast } = useToast();
 
@@ -77,6 +94,21 @@ const catalogByCode = computed(() =>
 const selectedCatalogItem = computed(() =>
   selectedCatalogCode.value ? catalogByCode.value[selectedCatalogCode.value] ?? null : null,
 );
+const selectedCatalogRequiredMetadataKeys = computed(
+  () => selectedCatalogItem.value?.requiredMetadataKeys ?? [],
+);
+const catalogRequiresOrigin = computed(() => selectedCatalogRequiredMetadataKeys.value.includes("origin"));
+const catalogRequiresSpecificCommodity = computed(() =>
+  selectedCatalogRequiredMetadataKeys.value.includes("specificCommodity"),
+);
+const catalogRequiresDeity = computed(() => selectedCatalogRequiredMetadataKeys.value.includes("deity"));
+const catalogSpecificCommodityValue = computed(() => {
+  if (catalogSpecificCommodityOption.value === "custom") {
+    return catalogSpecificCommodityCustom.value.trim() || null;
+  }
+
+  return catalogSpecificCommodityOption.value || null;
+});
 
 const filteredCargo = computed(() => {
   const query = search.value.trim().toLowerCase();
@@ -124,8 +156,18 @@ const catalogCargoUnitsValue = computed(() => parsePositiveInteger(catalogCargoU
 const customQuantityValue = computed(() => parsePositiveInteger(customQuantity.value, 1));
 const customCargoUnitsValue = computed(() => parsePositiveInteger(customCargoUnits.value, 1));
 const selectedCargoLoad = computed(() => (selectedCargo.value ? totalCargoUnits(selectedCargo.value.quantity, selectedCargo.value.cargoUnits) : 0));
-const catalogAvailableWagons = computed(() => filterWagonsForCatalog(selectedCatalogItem.value, catalogQuantityValue.value, catalogCargoUnitsValue.value));
+const catalogAvailableWagons = computed(() =>
+  filterWagonsForCatalog(
+    selectedCatalogItem.value,
+    catalogQuantityValue.value,
+    catalogCargoUnitsValue.value,
+    catalogSpecificCommodityValue.value,
+  ),
+);
 const customAvailableWagons = computed(() => filterWagonsForCustomCargo(customQuantityValue.value, customCargoUnitsValue.value));
+const customSelectedWagon = computed(() =>
+  customWagonId.value ? customAvailableWagons.value.find((wagon) => wagon.id === customWagonId.value) ?? null : null,
+);
 const selectedCargoAvailableWagons = computed(() => (selectedCargo.value ? filterWagonsForCargo(selectedCargo.value) : []));
 const catalogQuantityMax = computed(() => maxQuantityForWagon(catalogWagonId.value, catalogCargoUnitsValue.value));
 const customQuantityMax = computed(() => maxQuantityForWagon(customWagonId.value, customCargoUnitsValue.value));
@@ -215,7 +257,8 @@ function resetCatalogForm() {
   catalogCargoUnits.value = String(item?.defaultCargoUnits ?? 1);
   catalogWagonId.value = pickDefaultCatalogWagonId(item);
   catalogOrigin.value = "";
-  catalogSpecificCommodity.value = "";
+  catalogSpecificCommodityOption.value = "";
+  catalogSpecificCommodityCustom.value = "";
   catalogDeity.value = "";
   catalogNotes.value = "";
 }
@@ -238,8 +281,6 @@ function resetCustomForm() {
   customCargoUnits.value = "1";
   customWagonId.value = pickDefaultCustomWagonId();
   customOrigin.value = "";
-  customSpecificCommodity.value = "";
-  customDeity.value = "";
   customNotes.value = "";
 }
 
@@ -275,7 +316,11 @@ function getWagonRemainingCargoUnits(wagonId: string) {
   return cargoSummary.value.find((summary) => summary.wagonId === wagonId)?.remainingCargoUnits ?? 0;
 }
 
-function isWagonCompatibleWithCatalogItem(wagon: CaravanWagon, item: CargoCatalogItem | null) {
+function isWagonCompatibleWithCatalogItem(
+  wagon: CaravanWagon,
+  item: CargoCatalogItem | null,
+  specificCommodity?: string | null,
+) {
   if (!item) {
     return false;
   }
@@ -284,13 +329,24 @@ function isWagonCompatibleWithCatalogItem(wagon: CaravanWagon, item: CargoCatalo
     return item.allowedWagonCodes.includes(wagon.wagonTypeCode);
   }
 
+  if (item.requiredMetadataKeys.includes("specificCommodity")) {
+    if (wagon.wagonTypeCode === "carro-de-mercancias-especificas") {
+      if (!specificCommodity) {
+        return false;
+      }
+
+      return wagon.specificCommodity?.trim().toLowerCase() === specificCommodity.trim().toLowerCase();
+    }
+
+    return wagon.wagonTypeCode !== "carro-de-suministros";
+  }
+
   return wagon.wagonTypeCode !== "carro-de-suministros"
     && wagon.wagonTypeCode !== "carro-de-mercancias-especificas";
 }
 
 function isWagonCompatibleForCustomCargo(wagon: CaravanWagon) {
-  return wagon.wagonTypeCode !== "carro-de-suministros"
-    && wagon.wagonTypeCode !== "carro-de-mercancias-especificas";
+  return wagon.wagonTypeCode !== "carro-de-suministros";
 }
 
 function canFitCargoLoad(wagon: CaravanWagon, requiredCargoUnits: number, currentWagonId?: string | null) {
@@ -309,13 +365,20 @@ function maxQuantityForWagon(wagonId: string, cargoUnits: number) {
   return Math.max(1, Math.floor(getWagonRemainingCargoUnits(wagonId) / cargoUnits));
 }
 
-function filterWagonsForCatalog(item: CargoCatalogItem | null, quantity: number, cargoUnits: number) {
+function filterWagonsForCatalog(
+  item: CargoCatalogItem | null,
+  quantity: number,
+  cargoUnits: number,
+  specificCommodity?: string | null,
+) {
   if (!item) {
     return [];
   }
 
   const requiredCargoUnits = totalCargoUnits(quantity, cargoUnits);
-  return wagons.value.filter((wagon) => isWagonCompatibleWithCatalogItem(wagon, item) && canFitCargoLoad(wagon, requiredCargoUnits));
+  return wagons.value.filter((wagon) =>
+    isWagonCompatibleWithCatalogItem(wagon, item, specificCommodity) && canFitCargoLoad(wagon, requiredCargoUnits),
+  );
 }
 
 function filterWagonsForCustomCargo(quantity: number, cargoUnits: number) {
@@ -412,6 +475,18 @@ async function handleAddCatalogCargo() {
     catalogModalError.value = "Debes seleccionar un carro";
     return;
   }
+  if (catalogRequiresOrigin.value && !catalogOrigin.value.trim()) {
+    catalogModalError.value = "El origen es obligatorio para este tipo de carga";
+    return;
+  }
+  if (catalogRequiresSpecificCommodity.value && !catalogSpecificCommodityValue.value) {
+    catalogModalError.value = "Debes seleccionar qué mercancía específica es";
+    return;
+  }
+  if (catalogRequiresDeity.value && !catalogDeity.value.trim()) {
+    catalogModalError.value = "La deidad es obligatoria para este tipo de carga";
+    return;
+  }
 
   const parsedQuantity = catalogQuantityValue.value;
   const parsedCargoUnits = catalogCargoUnitsValue.value;
@@ -437,7 +512,7 @@ async function handleAddCatalogCargo() {
       cargoUnits: parsedCargoUnits,
       wagonId,
       origin: catalogOrigin.value.trim() || null,
-      specificCommodity: catalogSpecificCommodity.value.trim() || null,
+      specificCommodity: catalogSpecificCommodityValue.value,
       deity: catalogDeity.value.trim() || null,
       notes: catalogNotes.value.trim() || null,
     });
@@ -509,8 +584,6 @@ async function handleAddCustomCargo() {
       cargoUnits: parsedCargoUnits,
       wagonId,
       origin: customOrigin.value.trim() || null,
-      specificCommodity: customSpecificCommodity.value.trim() || null,
-      deity: customDeity.value.trim() || null,
       notes: customNotes.value.trim() || null,
     });
     closeCustomModal();
@@ -683,6 +756,18 @@ function formatGroupedCargoLoad(totalCargoLoad: number) {
 watch(selectedCatalogCode, () => {
   if (catalogModalOpen.value) {
     resetCatalogForm();
+  }
+});
+
+watch(catalogSpecificCommodityOption, (option) => {
+  if (option !== "custom") {
+    catalogSpecificCommodityCustom.value = "";
+  }
+});
+
+watch(catalogSpecificCommodityValue, () => {
+  if (catalogModalOpen.value) {
+    syncCatalogWagonSelection();
   }
 });
 
@@ -893,15 +978,64 @@ onMounted(refresh);
               </label>
               <p class="muted">Solo se muestran carros válidos y con capacidad suficiente para esta carga.</p>
 
+              <div v-if="selectedCatalogRequiredMetadataKeys.length" class="info-block">
+                <h4>Metadatos requeridos</h4>
+                <p class="muted">Este tipo de carga solo muestra los campos que realmente necesita.</p>
+              </div>
 
-              <label>
-                <span>Notas</span>
-                <textarea v-model="catalogNotes" rows="3" placeholder="Opcional"></textarea>
-              </label>
+              <div class="two-columns">
+                <label v-if="catalogRequiresOrigin">
+                  <span>Origen</span>
+                  <input v-model="catalogOrigin" type="text" placeholder="Obligatorio" />
+                </label>
+                <label v-if="catalogRequiresSpecificCommodity">
+                  <span>Mercancía específica</span>
+                  <select v-model="catalogSpecificCommodityOption">
+                    <option value="" disabled>Selecciona una mercancía</option>
+                    <option v-for="option in specificCommodityOptions" :key="option" :value="option">
+                      {{ option }}
+                    </option>
+                    <option value="custom">Carga personalizada</option>
+                  </select>
+                </label>
+              </div>
+
+              <div v-if="catalogRequiresSpecificCommodity && catalogSpecificCommodityOption === 'custom'" class="two-columns">
+                <label>
+                  <span>Nombre de la carga</span>
+                  <input
+                    v-model="catalogSpecificCommodityCustom"
+                    type="text"
+                    placeholder="Escribe el nombre"
+                  />
+                </label>
+              </div>
+
+              <div class="two-columns">
+                <label v-if="catalogRequiresDeity">
+                  <span>Deidad</span>
+                  <input v-model="catalogDeity" type="text" placeholder="Obligatorio" />
+                </label>
+                <label>
+                  <span>Notas</span>
+                  <textarea v-model="catalogNotes" rows="3" placeholder="Opcional"></textarea>
+                </label>
+              </div>
 
               <div class="modal-actions">
                 <button class="secondary-button" type="button" :disabled="loading || submitting" @click="closeCatalogModal">Cancelar</button>
-                <button class="primary-button" type="button" :disabled="loading || submitting" :aria-busy="isPending('add-catalog')" @click="handleAddCatalogCargo">
+                <button
+                  class="primary-button"
+                  type="button"
+                  :disabled="
+                    loading ||
+                    submitting ||
+                    !selectedCatalogItem ||
+                    (catalogRequiresSpecificCommodity && !catalogSpecificCommodityValue)
+                  "
+                  :aria-busy="isPending('add-catalog')"
+                  @click="handleAddCatalogCargo"
+                >
                   <span class="button-with-spinner">
                     <span v-if="isPending('add-catalog')" class="button-spinner" aria-hidden="true"></span>
                     <span>Confirmar</span>
@@ -964,21 +1098,14 @@ onMounted(refresh);
               <input v-model="customOrigin" type="text" placeholder="Opcional" />
             </label>
             <label>
-              <span>Mercancía específica</span>
-              <input v-model="customSpecificCommodity" type="text" placeholder="Opcional" />
-            </label>
-          </div>
-
-          <div class="two-columns">
-            <label>
-              <span>Deidad</span>
-              <input v-model="customDeity" type="text" placeholder="Opcional" />
-            </label>
-            <label>
               <span>Notas</span>
               <input v-model="customNotes" type="text" placeholder="Opcional" />
             </label>
           </div>
+
+          <p v-if="customSelectedWagon?.wagonTypeCode === 'carro-de-mercancias-especificas'" class="muted">
+            Este carro asignará automáticamente su mercancía específica al guardar.
+          </p>
 
           <div class="modal-actions">
             <button class="secondary-button" type="button" :disabled="loading || submitting" @click="closeCustomModal">Cancelar</button>

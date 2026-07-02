@@ -82,8 +82,8 @@ class CaravanDayCycleServiceTest {
   @Test
   void farmersToggleTheirProductionMarkerAndPreferSupplyWagonsWhenGenerating() {
     var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", Instant.parse("2026-01-01T00:00:00Z")));
-    var suppliesWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-suministros", Instant.parse("2026-01-01T00:00:00Z")));
+    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", null, Instant.parse("2026-01-01T00:00:00Z")));
+    var suppliesWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-suministros", null, Instant.parse("2026-01-01T00:00:00Z")));
 
     var farmer = travelerRepository.save(CaravanTraveler.create(
         UUID.randomUUID(),
@@ -130,7 +130,7 @@ class CaravanDayCycleServiceTest {
   @Test
   void farmersFallBackToAnyWagonWithFreeSpaceWhenNoSupplyWagonExists() {
     var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", Instant.parse("2026-01-01T00:00:00Z")));
+    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", null, Instant.parse("2026-01-01T00:00:00Z")));
     var farmer = travelerRepository.save(CaravanTraveler.create(
         UUID.randomUUID(),
         caravan.id(),
@@ -170,7 +170,7 @@ class CaravanDayCycleServiceTest {
   @Test
   void farmersWarnWhenTheirGeneratedSupplyCannotFitAnywhere() {
     var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", Instant.parse("2026-01-01T00:00:00Z")));
+    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", null, Instant.parse("2026-01-01T00:00:00Z")));
     var farmer = travelerRepository.save(CaravanTraveler.create(
         UUID.randomUUID(),
         caravan.id(),
@@ -351,7 +351,7 @@ class CaravanDayCycleServiceTest {
   @Test
   void servantsGiveFarmersAnExtraSupplyEveryFourDays() {
     var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Farmer-Servant", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", Instant.parse("2026-01-01T00:00:00Z")));
+    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", null, Instant.parse("2026-01-01T00:00:00Z")));
     var farmer = travelerRepository.save(CaravanTraveler.create(
         UUID.randomUUID(),
         caravan.id(),
@@ -411,7 +411,7 @@ class CaravanDayCycleServiceTest {
   @Test
   void servantsThatCanAlsoFarmTriggerTheBonusEveryTwoDays() {
     var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Farmer-Servant-Compat", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", Instant.parse("2026-01-01T00:00:00Z")));
+    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", null, Instant.parse("2026-01-01T00:00:00Z")));
     var farmer = travelerRepository.save(CaravanTraveler.create(
         UUID.randomUUID(),
         caravan.id(),
@@ -631,7 +631,7 @@ class CaravanDayCycleServiceTest {
   @Test
   void deletesConsumedPerishableUnitImmediatelyWhenConsumptionUsesItUp() {
     var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var wagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-suministros", Instant.parse("2026-01-01T00:00:00Z")));
+    var wagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-suministros", null, Instant.parse("2026-01-01T00:00:00Z")));
 
     travelerRepository.save(CaravanTraveler.create(
         UUID.randomUUID(),
@@ -1010,3 +1010,4 @@ class CaravanDayCycleServiceTest {
     return caravan;
   }
 }
+

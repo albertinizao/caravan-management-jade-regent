@@ -129,7 +129,8 @@ public class CargoManagementService
             .orElseThrow(() -> new IllegalArgumentException("Cargo not found: " + command.catalogCode()))
         : null;
 
-    validateCargoForWagon(wagonType, catalogItem, command.catalogCode(), command.specificCommodity(), command.origin(), command.deity());
+    var specificCommodity = resolveSpecificCommodityForWagon(wagon, wagonType, command.catalogCode(), command.specificCommodity());
+    validateCargoForWagon(wagon, wagonType, catalogItem, command.catalogCode(), specificCommodity, command.origin(), command.deity());
     var quantity = resolveQuantity(catalogItem, command.quantity());
     var cargoUnits = resolveCargoUnits(catalogItem, command.cargoUnits());
 
@@ -139,7 +140,7 @@ public class CargoManagementService
         quantity,
         cargoUnits,
         command.catalogCode(),
-        command.specificCommodity(),
+        specificCommodity,
         null);
 
     var now = clock.instant();
@@ -156,7 +157,7 @@ public class CargoManagementService
           cargoUnits,
           wagon.id(),
           command.origin(),
-          command.specificCommodity(),
+          specificCommodity,
           command.deity(),
           command.notes(),
           now);
@@ -174,7 +175,7 @@ public class CargoManagementService
         cargoUnits,
         wagon.id(),
         command.origin(),
-        command.specificCommodity(),
+        specificCommodity,
         command.deity(),
         command.notes(),
         now);
@@ -191,12 +192,14 @@ public class CargoManagementService
     var catalogItem = cargo.sourceType() == CaravanCargoSourceType.CATALOG
         ? CargoCatalog.findByCode(cargo.catalogCode()).orElse(null)
         : null;
+    var specificCommodity = resolveSpecificCommodityForWagon(wagon, wagonType, cargo.catalogCode(), command.specificCommodity() != null ? command.specificCommodity() : cargo.specificCommodity());
 
     validateCargoForWagon(
+        wagon,
         wagonType,
         catalogItem,
         cargo.catalogCode(),
-        command.specificCommodity() != null ? command.specificCommodity() : cargo.specificCommodity(),
+        specificCommodity,
         command.origin() != null ? command.origin() : cargo.origin(),
         command.deity() != null ? command.deity() : cargo.deity());
     var quantity = command.quantity() == null ? cargo.quantity() : command.quantity();
@@ -208,7 +211,7 @@ public class CargoManagementService
         quantity,
         cargoUnits,
         cargo.catalogCode(),
-        command.specificCommodity() != null ? command.specificCommodity() : cargo.specificCommodity(),
+        specificCommodity,
         cargo.id());
 
     var updated = cargo.update(
@@ -217,7 +220,7 @@ public class CargoManagementService
         command.quantity(),
         command.cargoUnits(),
         command.origin(),
-        command.specificCommodity(),
+        specificCommodity,
         command.deity(),
         command.notes(),
         clock.instant()).assignWagon(wagonId, clock.instant());
@@ -236,9 +239,10 @@ public class CargoManagementService
     var catalogItem = cargo.sourceType() == CaravanCargoSourceType.CATALOG
         ? CargoCatalog.findByCode(cargo.catalogCode()).orElse(null)
         : null;
+    var specificCommodity = resolveSpecificCommodityForWagon(wagon, wagonType, cargo.catalogCode(), cargo.specificCommodity());
 
-    validateCargoForWagon(wagonType, catalogItem, cargo.catalogCode(), cargo.specificCommodity(), cargo.origin(), cargo.deity());
-    validateCargoCapacity(caravanId, wagon, cargo.quantity(), cargo.cargoUnits(), cargo.catalogCode(), cargo.specificCommodity(), cargo.id());
+    validateCargoForWagon(wagon, wagonType, catalogItem, cargo.catalogCode(), specificCommodity, cargo.origin(), cargo.deity());
+    validateCargoCapacity(caravanId, wagon, cargo.quantity(), cargo.cargoUnits(), cargo.catalogCode(), specificCommodity, cargo.id());
     return toView(cargoRepository.save(cargo.assignWagon(command.wagonId(), clock.instant())));
   }
 
@@ -321,9 +325,10 @@ public class CargoManagementService
     var filtered = cargo.stream().filter(entry -> wagon.id().equals(entry.wagonId())).toList();
     var used = filtered.stream().mapToInt(entry -> entry.quantity() * entry.cargoUnits()).sum();
     var capacity = deriveCargoCapacity(wagonType, improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagon.id()));
+    var wagonName = wagon.displayNameOr(wagonType.name());
     return new CaravanCargoSummaryView(
         wagon.id(),
-        wagonType.name(),
+        wagonName,
         capacity,
         used,
         Math.max(0, capacity - used),
@@ -331,15 +336,17 @@ public class CargoManagementService
   }
 
   private void validateCargoForWagon(
+      CaravanWagon wagon,
       WagonType wagonType,
       CargoCatalogItem catalogItem,
       String catalogCode,
       String specificCommodity,
       String origin,
       String deity) {
-    var restrictedWagon = wagonType.code().equals(SUPPLIES_WAGON_CODE)
-        || wagonType.code().equals(SPECIFIC_GOODS_WAGON_CODE);
-    if (catalogCode == null && restrictedWagon) {
+    var wagonSpecificCommodity = normalizeText(wagon.specificCommodity());
+    var normalizedSpecificCommodity = normalizeText(specificCommodity);
+
+    if (catalogCode == null && wagonType.code().equals(SUPPLIES_WAGON_CODE)) {
       throw new IllegalArgumentException("This wagon only accepts catalog cargo with explicit placement rules");
     }
     if (wagonType.code().equals(SUPPLIES_WAGON_CODE)
@@ -348,10 +355,22 @@ public class CargoManagementService
       throw new IllegalArgumentException("Carro De Suministros only accepts supplies or perishable supplies");
     }
     if (wagonType.code().equals(SPECIFIC_GOODS_WAGON_CODE) && !SPECIFIC_GOODS_CODE.equals(catalogCode)) {
-      throw new IllegalArgumentException("Carro De Mercancías Específicas only accepts specific merchandise");
+      if (normalizedSpecificCommodity == null) {
+        throw new IllegalArgumentException("specificCommodity is required");
+      }
+      if (wagonSpecificCommodity == null) {
+        throw new IllegalArgumentException("Carro De Mercancías Específicas requires a configured specific commodity");
+      }
+      if (!wagonSpecificCommodity.equalsIgnoreCase(normalizedSpecificCommodity)) {
+        throw new IllegalArgumentException("This cargo specific merchandise does not match the wagon's specific commodity");
+      }
     }
     if (SPECIFIC_GOODS_CODE.equals(catalogCode) && (specificCommodity == null || specificCommodity.isBlank())) {
       throw new IllegalArgumentException("specificCommodity is required");
+    }
+    if (SPECIFIC_GOODS_CODE.equals(catalogCode) && wagonSpecificCommodity != null && normalizedSpecificCommodity != null
+        && !wagonSpecificCommodity.equalsIgnoreCase(normalizedSpecificCommodity)) {
+      throw new IllegalArgumentException("This cargo specific merchandise does not match the wagon's specific commodity");
     }
     if (catalogItem != null) {
       if (catalogItem.requiredMetadataKeys().contains("origin") && (origin == null || origin.isBlank())) {
@@ -384,11 +403,10 @@ public class CargoManagementService
     if (currentUsed + totalCargoUnits > capacity) {
       throw new IllegalArgumentException("Wagon cargo capacity reached");
     }
-    if (SPECIFIC_GOODS_CODE.equals(catalogCode) && specificCommodity != null && !specificCommodity.isBlank()) {
+    if (SPECIFIC_GOODS_WAGON_CODE.equals(wagon.wagonTypeCode()) && specificCommodity != null && !specificCommodity.isBlank()) {
       var incompatibleSpecificCargo = cargoRepository.findAllByCaravanId(caravanId).stream()
           .filter(entry -> excludeCargoId == null || !excludeCargoId.equals(entry.id()))
           .filter(entry -> wagon.id().equals(entry.wagonId()))
-          .filter(entry -> SPECIFIC_GOODS_CODE.equals(entry.catalogCode()))
           .filter(entry -> entry.specificCommodity() != null && !entry.specificCommodity().equalsIgnoreCase(specificCommodity))
           .findFirst();
       if (incompatibleSpecificCargo.isPresent()) {
@@ -451,6 +469,44 @@ public class CargoManagementService
   private boolean shouldStoreAsUnitInstances(CaravanCargoSourceType sourceType, String catalogCode) {
     return sourceType == CaravanCargoSourceType.CATALOG
         && (SUPPLIES_CODE.equals(catalogCode) || PERISHABLE_SUPPLIES_CODE.equals(catalogCode));
+  }
+
+  private String resolveSpecificCommodityForWagon(
+      CaravanWagon wagon,
+      WagonType wagonType,
+      String catalogCode,
+      String specificCommodity) {
+    var normalizedSpecificCommodity = normalizeText(specificCommodity);
+    if (SPECIFIC_GOODS_WAGON_CODE.equals(wagonType.code())) {
+      var wagonSpecificCommodity = normalizeText(wagon.specificCommodity());
+      if (wagonSpecificCommodity == null) {
+        throw new IllegalArgumentException("Carro De Mercancías Específicas requires a configured specific commodity");
+      }
+      if (catalogCode == null) {
+        if (normalizedSpecificCommodity != null && !wagonSpecificCommodity.equalsIgnoreCase(normalizedSpecificCommodity)) {
+          throw new IllegalArgumentException("This cargo specific merchandise does not match the wagon's specific commodity");
+        }
+        return wagonSpecificCommodity;
+      }
+      if (SPECIFIC_GOODS_CODE.equals(catalogCode)) {
+        if (normalizedSpecificCommodity == null) {
+          throw new IllegalArgumentException("specificCommodity is required");
+        }
+        if (!wagonSpecificCommodity.equalsIgnoreCase(normalizedSpecificCommodity)) {
+          throw new IllegalArgumentException("This cargo specific merchandise does not match the wagon's specific commodity");
+        }
+        return normalizedSpecificCommodity;
+      }
+    }
+
+    return normalizedSpecificCommodity;
+  }
+
+  private String normalizeText(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    return value.trim();
   }
 
   private List<CaravanCargo> saveUnitCargoInstances(

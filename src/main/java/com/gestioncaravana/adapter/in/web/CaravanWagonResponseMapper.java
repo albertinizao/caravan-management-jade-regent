@@ -37,6 +37,7 @@ final class CaravanWagonResponseMapper {
         view.caravanId(),
         view.wagonTypeCode(),
         view.name(),
+        view.specificCommodity(),
         view.category(),
         view.cost(),
         view.hitPoints(),

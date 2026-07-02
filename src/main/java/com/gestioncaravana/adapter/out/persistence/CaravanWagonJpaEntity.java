@@ -20,6 +20,12 @@ public class CaravanWagonJpaEntity {
   @Column(nullable = false)
   private String wagonTypeCode;
 
+  @Column
+  private String displayName;
+
+  @Column
+  private String specificCommodity;
+
   @Column(nullable = false)
   private Instant createdAt;
 
@@ -50,6 +56,22 @@ public class CaravanWagonJpaEntity {
 
   public void setWagonTypeCode(String wagonTypeCode) {
     this.wagonTypeCode = wagonTypeCode;
+  }
+
+  public String getDisplayName() {
+    return displayName;
+  }
+
+  public void setDisplayName(String displayName) {
+    this.displayName = displayName;
+  }
+
+  public String getSpecificCommodity() {
+    return specificCommodity;
+  }
+
+  public void setSpecificCommodity(String specificCommodity) {
+    this.specificCommodity = specificCommodity;
   }
 
   public Instant getCreatedAt() {

@@ -251,7 +251,7 @@ class BeastManagementServiceTest {
   }
 
   private CaravanWagon createWagon(UUID caravanId, String wagonTypeCode) {
-    var wagon = CaravanWagon.create(UUID.randomUUID(), caravanId, wagonTypeCode, NOW);
+    var wagon = CaravanWagon.create(UUID.randomUUID(), caravanId, wagonTypeCode, null, NOW);
     wagonRepository.save(wagon);
     return wagon;
   }

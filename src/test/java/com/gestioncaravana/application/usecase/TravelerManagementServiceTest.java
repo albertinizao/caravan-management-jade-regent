@@ -210,7 +210,7 @@ class TravelerManagementServiceTest {
   }
 
   private CaravanWagon createWagon(UUID caravanId, String wagonTypeCode) {
-    var wagon = CaravanWagon.create(UUID.randomUUID(), caravanId, wagonTypeCode, Instant.parse("2026-01-01T00:00:00Z"));
+    var wagon = CaravanWagon.create(UUID.randomUUID(), caravanId, wagonTypeCode, null, Instant.parse("2026-01-01T00:00:00Z"));
     wagonRepository.save(wagon);
     return wagon;
   }
@@ -400,3 +400,4 @@ class TravelerManagementServiceTest {
     }
   }
 }
+

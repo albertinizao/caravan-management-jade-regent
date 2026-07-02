@@ -61,19 +61,33 @@ class WagonManagementServiceTest {
   void addsAndListsWagonsForTheCaravan() {
     var caravan = createCaravan();
 
-    var created = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto"));
+    var created = service.execute(
+        caravan.id(),
+        new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto", "Carromato del grupo"));
 
-    assertThat(created.name()).isEqualTo("Carro Cubierto");
+    assertThat(created.name()).isEqualTo("Carromato del grupo");
     assertThat(service.list(caravan.id())).hasSize(1);
     assertThat(service.getById(caravan.id(), created.id()).wagonTypeCode()).isEqualTo("carro-cubierto");
     assertThat(service.getById(caravan.id(), created.id()).improvements()).isEmpty();
   }
 
   @Test
+  void renamesWagonWithoutChangingItsType() {
+    var caravan = createCaravan();
+    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto", null));
+
+    var renamed = service.execute(caravan.id(), wagon.id(), new com.gestioncaravana.application.port.in.UpdateCaravanWagonUseCase.UpdateCaravanWagonCommand("La Rueda Roja"));
+
+    assertThat(renamed.name()).isEqualTo("La Rueda Roja");
+    assertThat(renamed.wagonTypeCode()).isEqualTo("carro-cubierto");
+    assertThat(service.getById(caravan.id(), wagon.id()).name()).isEqualTo("La Rueda Roja");
+  }
+
+  @Test
   void rejectsUnknownWagonTypes() {
     var caravan = createCaravan();
 
-    assertThatThrownBy(() -> service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("unknown")))
+    assertThatThrownBy(() -> service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("unknown", null)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Wagon type not found");
   }
@@ -81,29 +95,27 @@ class WagonManagementServiceTest {
   @Test
   void enforcesPerTypeLimits() {
     var caravan = createCaravan();
-    service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-arcano"));
+    service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-arcano", null));
 
-    assertThatThrownBy(() -> service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-arcano")))
+    assertThatThrownBy(() -> service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-arcano", null)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Wagon type limit reached");
   }
 
   @Test
-  void enforcesCaravanMaximumWagonCount() {
+  void allowsCaravanToExceedItsMaximumWagonCount() {
     var caravan = createCaravan();
-    for (int i = 0; i < 11; i++) {
-      service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto"));
+    for (int i = 0; i < 12; i++) {
+      service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto", null));
     }
 
-    assertThatThrownBy(() -> service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto")))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Caravan wagon limit reached");
+    assertThat(service.list(caravan.id())).hasSize(12);
   }
 
   @Test
   void deletesWagonsFromAcaravan() {
     var caravan = createCaravan();
-    var created = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto"));
+    var created = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto", null));
 
     service.delete(caravan.id(), created.id());
 
@@ -113,7 +125,7 @@ class WagonManagementServiceTest {
   @Test
   void deletesWagonAndClearsAssignedBeastsAndTravelers() {
     var caravan = createCaravan();
-    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto"));
+    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto", null));
 
     var draftBeast = beastRepository.save(CaravanBeast.createCustom(
         UUID.randomUUID(),
@@ -161,7 +173,7 @@ class WagonManagementServiceTest {
   @Test
   void addsAndRemovesImprovementAndUpdatesDerivedStats() {
     var caravan = createCaravan();
-    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto"));
+    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto", null));
 
     var withImprovement = service.execute(
         caravan.id(),
@@ -182,7 +194,7 @@ class WagonManagementServiceTest {
   @Test
   void updatesDraftAndAllowsHigherTierDraftImprovementAfterThePreviousOne() {
     var caravan = createCaravan();
-    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-de-prisioneros"));
+    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-de-prisioneros", null));
 
     var afterTwoHorses = service.execute(
         caravan.id(),
@@ -204,7 +216,7 @@ class WagonManagementServiceTest {
   @Test
   void derivesPropulsionForMediumOnlyDraftVehiclesWithoutBreakingTheFormat() {
     var caravan = createCaravan();
-    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("trineo-de-pasajeros"));
+    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("trineo-de-pasajeros", null));
 
     assertThat(wagon.propulsion()).isEqualTo("2 medianas (+4 Fuerza)");
   }
@@ -212,7 +224,7 @@ class WagonManagementServiceTest {
   @Test
   void includesCurrentDraftBeastsAndTheirEffectiveStrengthInWagonDetails() {
     var caravan = createCaravan();
-    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-de-prisioneros"));
+    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-de-prisioneros", null));
 
     beastRepository.save(CaravanBeast.createCustom(
         UUID.randomUUID(),
@@ -241,7 +253,7 @@ class WagonManagementServiceTest {
   @Test
   void rejectsIncompatibleImprovements() {
     var caravan = createCaravan();
-    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto"));
+    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto", null));
     service.execute(caravan.id(), wagon.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonImprovementUseCase.AddCaravanWagonImprovementCommand("patines-de-hielo"));
 
     assertThatThrownBy(() -> service.execute(
@@ -442,3 +454,4 @@ class WagonManagementServiceTest {
     }
   }
 }
+

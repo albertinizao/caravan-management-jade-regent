@@ -9,6 +9,7 @@ public record CaravanWagonResponse(
     UUID caravanId,
     String wagonTypeCode,
     String name,
+    String specificCommodity,
     String category,
     int cost,
     int hitPoints,

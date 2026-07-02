@@ -70,6 +70,7 @@ export interface CaravanWagon {
   caravanId: string;
   wagonTypeCode: string;
   name: string;
+  specificCommodity: string | null;
   category: string;
   cost: number;
   hitPoints: number;

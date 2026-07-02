@@ -186,6 +186,12 @@ watch(
   color: #1d4ed8;
 }
 
+.global-toast--warning {
+  background: #fffbeb;
+  border-color: #fbbf24;
+  color: #92400e;
+}
+
 .toast-enter-active,
 .toast-leave-active {
   transition:

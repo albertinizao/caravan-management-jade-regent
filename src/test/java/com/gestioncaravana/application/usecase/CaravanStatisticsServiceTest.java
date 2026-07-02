@@ -61,7 +61,7 @@ class CaravanStatisticsServiceTest {
   @Test
   void derivesAFullStatSheetFromTheCurrentCaravanComposition() {
     var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var wagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-cubierto", Instant.parse("2026-01-01T00:00:00Z")));
+    var wagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-cubierto", null, Instant.parse("2026-01-01T00:00:00Z")));
 
     beastRepository.save(CaravanBeast.createCustom(
         UUID.randomUUID(),
@@ -197,6 +197,25 @@ class CaravanStatisticsServiceTest {
     assertThat(statistics.mainStats().morale()).isEqualTo(2);
     assertThat(statistics.derivedStats().security()).isEqualTo(0);
     assertThat(statistics.derivedStats().determination()).isEqualTo(1);
+  }
+
+  @Test
+  void warnsWhenTheCaravanExceedsItsWagonLimit() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
+    for (int i = 0; i < 12; i++) {
+      wagonRepository.save(CaravanWagon.create(
+          UUID.randomUUID(),
+          caravan.id(),
+          "carro-cubierto",
+          null,
+          Instant.parse("2026-01-01T00:00:00Z")));
+    }
+
+    var statistics = service.getById(caravan.id());
+
+    assertThat(statistics.otherStats().wagonCount()).isEqualTo(12);
+    assertThat(statistics.otherStats().maxWagons()).isEqualTo(11);
+    assertThat(statistics.warnings()).anyMatch(message -> message.contains("cada carro adicional"));
   }
 
   private static final class InMemoryCaravanRepository implements CaravanCampaignRepositoryPort {
@@ -431,3 +450,4 @@ class CaravanStatisticsServiceTest {
     public void deleteByCaravanId(UUID caravanId) {}
   }
 }
+

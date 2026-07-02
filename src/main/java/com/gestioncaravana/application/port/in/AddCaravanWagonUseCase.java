@@ -7,5 +7,9 @@ public interface AddCaravanWagonUseCase {
 
   CaravanWagonView execute(UUID caravanId, AddCaravanWagonCommand command);
 
-  record AddCaravanWagonCommand(String wagonTypeCode) {}
+  record AddCaravanWagonCommand(String wagonTypeCode, String displayName, String specificCommodity) {
+    public AddCaravanWagonCommand(String wagonTypeCode, String displayName) {
+      this(wagonTypeCode, displayName, null);
+    }
+  }
 }

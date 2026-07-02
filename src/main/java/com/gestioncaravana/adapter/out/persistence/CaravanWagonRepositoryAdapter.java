@@ -51,6 +51,8 @@ public class CaravanWagonRepositoryAdapter implements CaravanWagonRepositoryPort
     entity.setId(wagon.id().toString());
     entity.setCaravanId(wagon.caravanId().toString());
     entity.setWagonTypeCode(wagon.wagonTypeCode());
+    entity.setDisplayName(wagon.displayName());
+    entity.setSpecificCommodity(wagon.specificCommodity());
     entity.setCreatedAt(wagon.createdAt());
     entity.setUpdatedAt(wagon.updatedAt());
     return entity;
@@ -61,6 +63,8 @@ public class CaravanWagonRepositoryAdapter implements CaravanWagonRepositoryPort
         UUID.fromString(entity.getId()),
         UUID.fromString(entity.getCaravanId()),
         entity.getWagonTypeCode(),
+        entity.getDisplayName(),
+        entity.getSpecificCommodity(),
         entity.getCreatedAt(),
         entity.getUpdatedAt());
   }

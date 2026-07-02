@@ -20,6 +20,7 @@ import {
   listCaravanWagons,
   listWagonCatalog,
   listWagonImprovementCatalog,
+  updateCaravanWagon,
 } from "@/services/wagons";
 import { listCaravanTravelers, updateCaravanTravelerWagon } from "@/services/travelers";
 import type { Caravan } from "@/types/caravan";
@@ -45,7 +46,29 @@ const pendingAction = ref<string | null>(null);
 const error = ref<string | null>(null);
 const addModalOpen = ref(false);
 const selectedCatalogCode = ref<string | null>(null);
+const addWagonName = ref("");
+const specificCommodityOptions = [
+  "Madera",
+  "Hierro",
+  "Cobre",
+  "Cristal",
+  "Cuero",
+  "Plata",
+  "Sal",
+  "Oro",
+  "Adamantita",
+  "Mithril",
+  "Platino",
+  "Carbón",
+  "Hielo",
+  "Leña",
+  "Materiales mágicos",
+  "Munición (concreta)",
+] as const;
+const addWagonSpecificCommodityOption = ref("");
+const addWagonSpecificCommodityCustom = ref("");
 const selectedWagon = ref<CaravanWagon | null>(null);
+const wagonNameDraft = ref("");
 const selectedWagonCargo = ref<CaravanCargo[]>([]);
 const wagonCargoCatalog = ref<CargoCatalogItem[]>([]);
 const assignmentModalOpen = ref(false);
@@ -69,7 +92,8 @@ const cargoUnits = ref("1");
 const cargoDisplayName = ref("");
 const cargoCategory = ref("");
 const cargoOrigin = ref("");
-const cargoSpecificCommodity = ref("");
+const cargoSpecificCommodityOption = ref("");
+const cargoSpecificCommodityCustom = ref("");
 const cargoDeity = ref("");
 const cargoNotes = ref("");
 const addTypeFilter = ref<"all" | "viajeros" | "mercancias" | "especiales">("all");
@@ -108,6 +132,14 @@ interface DraftBeastGroup {
   totalEffectiveStrength: number;
 }
 
+interface GroupedCargoRow {
+  key: string;
+  representative: CaravanCargo;
+  entries: CaravanCargo[];
+  quantity: number;
+  totalCargoLoad: number;
+}
+
 const selectedCatalogItem = computed(() => {
   if (selectedCatalogCode.value) {
     return catalog.value.find((item) => item.code === selectedCatalogCode.value) ?? null;
@@ -125,9 +157,52 @@ const selectedImprovementItem = computed(() => {
 });
 
 const totalCapacity = computed(() => (activeCaravan.value ? 10 + activeCaravan.value.level : 0));
+const caravanWagonLimitState = computed(() => {
+  if (!activeCaravan.value) {
+    return null;
+  }
+
+  const maxWagons = totalCapacity.value;
+  const currentWagons = wagons.value.length;
+
+  if (currentWagons > maxWagons) {
+    return {
+      kind: "danger" as const,
+      message: `La caravana supera su límite de carros en ${currentWagons - maxWagons}. Aplica -1 a cualquier tirada por cada carro adicional.`,
+    };
+  }
+
+  if (currentWagons === maxWagons) {
+    return {
+      kind: "warning" as const,
+      message: "La caravana ha alcanzado su límite de carros. El siguiente carro lo superará y aplicará -1 a cualquier tirada por cada carro adicional.",
+    };
+  }
+
+  return null;
+});
 const selectedCatalogNeedsOverride = computed(() =>
   selectedCatalogItem.value ? isLimitExceeded(selectedCatalogItem.value) : false
 );
+const selectedCatalogRequiresSpecificCommodity = computed(
+  () => selectedCatalogItem.value?.code === "carro-de-mercancias-especificas",
+);
+const addWagonSpecificCommodityValue = computed(() => {
+  if (!selectedCatalogRequiresSpecificCommodity.value) {
+    return null;
+  }
+
+  if (addWagonSpecificCommodityOption.value === "custom") {
+    return addWagonSpecificCommodityCustom.value.trim() || null;
+  }
+
+  return addWagonSpecificCommodityOption.value || null;
+});
+watch(addWagonSpecificCommodityOption, (option) => {
+  if (option !== "custom") {
+    addWagonSpecificCommodityCustom.value = "";
+  }
+});
 const visibleCatalogItems = computed(() =>
   catalog.value.filter((item) => matchesTypeFilter(item.category, addTypeFilter.value))
     .filter((item) => matchesSearch(item.name, addSearch.value))
@@ -156,6 +231,49 @@ const selectedWagonDraftBeasts = computed(() =>
 const selectedWagonCargoLoad = computed(() =>
   selectedWagonCargo.value.reduce((total, entry) => total + entry.quantity * entry.cargoUnits, 0),
 );
+const groupedSelectedWagonCargo = computed<GroupedCargoRow[]>(() => {
+  const groups = new Map<string, GroupedCargoRow>();
+
+  for (const item of selectedWagonCargo.value) {
+    const key = wagonCargoGroupKey(item);
+    const existing = groups.get(key);
+    const itemLoad = totalCargoUnits(item.quantity, item.cargoUnits);
+
+    if (existing) {
+      existing.entries.push(item);
+      existing.quantity += item.quantity;
+      existing.totalCargoLoad += itemLoad;
+      continue;
+    }
+
+    groups.set(key, {
+      key,
+      representative: item,
+      entries: [item],
+      quantity: item.quantity,
+      totalCargoLoad: itemLoad,
+    });
+  }
+
+  return Array.from(groups.values());
+});
+
+const selectedWagonTypeName = computed(() => {
+  if (!selectedWagon.value) {
+    return "";
+  }
+
+  return catalog.value.find((item) => item.code === selectedWagon.value?.wagonTypeCode)?.name
+    ?? selectedWagon.value.wagonTypeCode;
+});
+
+const selectedWagonSpecificCommodityLabel = computed(() => {
+  if (!selectedWagon.value || selectedWagon.value.wagonTypeCode !== "carro-de-mercancias-especificas") {
+    return null;
+  }
+
+  return selectedWagon.value.specificCommodity?.trim() || "Sin mercancía específica asignada";
+});
 
 const selectedWagonCargoRemaining = computed(() =>
   selectedWagon.value ? Math.max(0, selectedWagon.value.cargoCapacity - selectedWagonCargoLoad.value) : 0,
@@ -172,9 +290,78 @@ const selectedCargoCatalogItem = computed(() =>
 const cargoQuantityValue = computed(() => parsePositiveInteger(cargoQuantity.value, selectedCargoCatalogItem.value?.defaultQuantity ?? 1));
 const cargoUnitsValue = computed(() => parsePositiveInteger(cargoUnits.value, selectedCargoCatalogItem.value?.defaultCargoUnits ?? 1));
 const cargoQuantityMax = computed(() => maxQuantityForCargo(cargoUnitsValue.value));
+const selectedCargoRequiredMetadataKeys = computed(
+  () => selectedCargoCatalogItem.value?.requiredMetadataKeys ?? [],
+);
+const cargoRequiresOrigin = computed(() => selectedCargoRequiredMetadataKeys.value.includes("origin"));
+const cargoRequiresSpecificCommodity = computed(() =>
+  selectedCargoRequiredMetadataKeys.value.includes("specificCommodity"),
+);
+const cargoRequiresDeity = computed(() => selectedCargoRequiredMetadataKeys.value.includes("deity"));
+const cargoSpecificCommodityLocked = computed(
+  () => selectedWagon.value?.wagonTypeCode === "carro-de-mercancias-especificas",
+);
+const cargoSpecificCommodityIsCustom = computed(() => {
+  if (!cargoSpecificCommodityLocked.value) {
+    return false;
+  }
+
+  const wagonSpecificCommodity = selectedWagon.value?.specificCommodity?.trim() ?? "";
+  if (!wagonSpecificCommodity) {
+    return false;
+  }
+
+  return !specificCommodityOptions.some(
+    (option) => option.toLowerCase() === wagonSpecificCommodity.toLowerCase(),
+  );
+});
+const cargoSpecificCommodityValue = computed(() => {
+  if (cargoSpecificCommodityOption.value === "custom") {
+    return cargoSpecificCommodityCustom.value.trim() || null;
+  }
+
+  return cargoSpecificCommodityOption.value || null;
+});
+function syncCargoSpecificCommoditySelection() {
+  if (!cargoModalOpen.value || cargoModalMode.value !== "catalog") {
+    return;
+  }
+
+  const item = selectedCargoCatalogItem.value;
+  if (!item || !item.requiredMetadataKeys.includes("specificCommodity")) {
+    cargoSpecificCommodityOption.value = "";
+    cargoSpecificCommodityCustom.value = "";
+    return;
+  }
+
+  if (cargoSpecificCommodityLocked.value) {
+    const wagonSpecificCommodity = selectedWagon.value?.specificCommodity?.trim() ?? "";
+    cargoSpecificCommodityOption.value = wagonSpecificCommodity;
+    cargoSpecificCommodityCustom.value = "";
+    return;
+  }
+
+  if (cargoSpecificCommodityValue.value) {
+    return;
+  }
+
+  const wagonSpecificCommodity = selectedWagon.value?.specificCommodity?.trim();
+  if (!wagonSpecificCommodity) {
+    return;
+  }
+
+  const matchingOption = specificCommodityOptions.find(
+    (option) => option.toLowerCase() === wagonSpecificCommodity.toLowerCase(),
+  );
+
+  cargoSpecificCommodityOption.value = matchingOption ?? "custom";
+  cargoSpecificCommodityCustom.value = matchingOption ? "" : wagonSpecificCommodity;
+}
 const addableCargoCatalogItems = computed(() =>
   wagonCargoCatalog.value.filter((item) =>
-    selectedWagon.value ? isWagonCompatibleWithCatalogItem(selectedWagon.value, item) : false
+    selectedWagon.value
+      ? isWagonCompatibleWithCatalogItem(selectedWagon.value, item, selectedWagon.value.specificCommodity)
+      : false
   ),
 );
 
@@ -249,10 +436,18 @@ watch(selectedCargoCatalogItem, (item) => {
 
   cargoUnits.value = String(item.defaultCargoUnits ?? 1);
   cargoQuantity.value = String(item.defaultQuantity ?? 1);
+  syncCargoSpecificCommoditySelection();
+});
+
+watch(cargoSpecificCommodityOption, (option) => {
+  if (option !== "custom") {
+    cargoSpecificCommodityCustom.value = "";
+  }
 });
 
 watch([addableCargoCatalogItems, cargoModalOpen, cargoModalMode], () => {
   syncCargoFormSelection();
+  syncCargoSpecificCommoditySelection();
 });
 
 async function refresh() {
@@ -297,6 +492,7 @@ async function refresh() {
         const refreshedWagon = wagonsResponse.find((wagon) => wagon.id === selectedWagon.value?.id);
         if (refreshedWagon) {
           selectedWagon.value = await getCaravanWagon(activeResponse.caravan.id, refreshedWagon.id);
+          wagonNameDraft.value = selectedWagon.value.name;
           await loadSelectedWagonCargo(activeResponse.caravan.id, refreshedWagon.id);
         } else {
           closeModal();
@@ -325,16 +521,30 @@ async function handleAddSelected() {
     return;
   }
 
+  if (selectedCatalogRequiresSpecificCommodity.value && !addWagonSpecificCommodityValue.value) {
+    error.value = "Debes seleccionar de qué mercancía específica es este carro";
+    return;
+  }
+
   submitting.value = true;
   pendingAction.value = "add-wagon";
   error.value = null;
 
-  try {
-    await addCaravanWagon(activeCaravan.value.id, { wagonTypeCode: selectedCatalogItem.value.code });
+    try {
+    const wagonName = addWagonName.value.trim() || selectedCatalogItem.value.name;
+    await addCaravanWagon(activeCaravan.value.id, {
+      wagonTypeCode: selectedCatalogItem.value.code,
+      displayName: addWagonName.value.trim() || null,
+      specificCommodity: addWagonSpecificCommodityValue.value,
+    });
     await refresh();
     addModalOpen.value = false;
     selectedCatalogCode.value = selectedCatalogItem.value.code;
-    showToast(`Carro añadido: ${selectedCatalogItem.value.name}.`);
+    if (caravanWagonLimitState.value?.kind === "danger") {
+      showToast(`Carro añadido: ${wagonName}. ${caravanWagonLimitState.value.message}`, "warning");
+    } else {
+      showToast(`Carro añadido: ${wagonName}.`);
+    }
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to add wagon";
   } finally {
@@ -345,11 +555,19 @@ async function handleAddSelected() {
 
 function openAddModal() {
   selectedCatalogCode.value = null;
+  addWagonName.value = "";
+  addWagonSpecificCommodityOption.value = "";
+  addWagonSpecificCommodityCustom.value = "";
   addModalOpen.value = true;
 }
 
 function selectCatalogItem(code: string) {
   selectedCatalogCode.value = code;
+  addWagonName.value = selectedCatalogItem.value?.name ?? "";
+  if (selectedCatalogItem.value?.code !== "carro-de-mercancias-especificas") {
+    addWagonSpecificCommodityOption.value = "";
+    addWagonSpecificCommodityCustom.value = "";
+  }
 }
 
 async function openWagonDetails(wagon: CaravanWagon) {
@@ -359,6 +577,7 @@ async function openWagonDetails(wagon: CaravanWagon) {
 
   try {
     selectedWagon.value = await getCaravanWagon(activeCaravan.value.id, wagon.id);
+    wagonNameDraft.value = selectedWagon.value.name;
     await loadSelectedWagonCargo(activeCaravan.value.id, wagon.id);
     improvementModalOpen.value = false;
     selectedImprovementCode.value = null;
@@ -443,6 +662,7 @@ async function handleDeleteSelectedWagon() {
 
 function closeModal() {
   selectedWagon.value = null;
+  wagonNameDraft.value = "";
   selectedWagonCargo.value = [];
   closeCargoModal();
   closeAssignmentModal();
@@ -457,6 +677,34 @@ function closeModal() {
 function closeAddModal() {
   addModalOpen.value = false;
   selectedCatalogCode.value = null;
+  addWagonName.value = "";
+  addWagonSpecificCommodityOption.value = "";
+  addWagonSpecificCommodityCustom.value = "";
+}
+
+async function handleRenameSelectedWagon() {
+  if (!activeCaravan.value || !selectedWagon.value) {
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = `rename-wagon:${selectedWagon.value.id}`;
+  error.value = null;
+
+  try {
+    const updatedWagon = await updateCaravanWagon(activeCaravan.value.id, selectedWagon.value.id, {
+      displayName: wagonNameDraft.value.trim() || null,
+    });
+    selectedWagon.value = updatedWagon;
+    wagonNameDraft.value = updatedWagon.name;
+    replaceWagonInList(updatedWagon);
+    showToast(`Nombre actualizado: ${updatedWagon.name}.`);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Failed to rename wagon";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
 }
 
 function closeCargoModal() {
@@ -466,6 +714,21 @@ function closeCargoModal() {
 
 async function loadSelectedWagonCargo(caravanId: string, wagonId: string) {
   selectedWagonCargo.value = await listCaravanCargo(caravanId, { wagonId });
+}
+
+function wagonCargoGroupKey(item: CaravanCargo) {
+  return [
+    item.wagonId ?? "",
+    item.sourceType,
+    item.catalogCode ?? "",
+    item.displayName,
+    item.category,
+    item.origin ?? "",
+    item.specificCommodity ?? "",
+    item.deity ?? "",
+    item.notes ?? "",
+    item.priceExpression ?? "",
+  ].join("\u0001");
 }
 
 function parsePositiveInteger(value: string, fallback: number) {
@@ -497,13 +760,26 @@ function maxQuantityForCargo(cargoUnits: number) {
   return Math.max(1, Math.floor(selectedWagonRemainingCargoUnits(selectedWagon.value) / cargoUnits));
 }
 
-function isWagonCompatibleWithCatalogItem(wagon: CaravanWagon, item: CargoCatalogItem | null) {
+function isWagonCompatibleWithCatalogItem(
+  wagon: CaravanWagon,
+  item: CargoCatalogItem | null,
+  specificCommodity?: string | null,
+) {
   if (!item) {
     return false;
   }
 
   if (item.allowedWagonCodes.length > 0) {
     return item.allowedWagonCodes.includes(wagon.wagonTypeCode);
+  }
+
+  if (item.requiredMetadataKeys.includes("specificCommodity")) {
+    if (wagon.wagonTypeCode === "carro-de-mercancias-especificas") {
+      const normalizedSpecificCommodity = specificCommodity?.trim() ?? "";
+      return normalizedSpecificCommodity.length > 0;
+    }
+
+    return wagon.wagonTypeCode !== "carro-de-suministros";
   }
 
   return wagon.wagonTypeCode !== "carro-de-suministros"
@@ -517,6 +793,11 @@ function isWagonCompatibleForCustomCargo(wagon: CaravanWagon) {
 
 function openCargoModal(mode: "catalog" | "custom") {
   if (!selectedWagon.value || !activeCaravan.value) {
+    return;
+  }
+
+  if (mode === "custom" && selectedWagon.value.wagonTypeCode === "carro-de-mercancias-especificas") {
+    cargoModalError.value = "Este carro solo admite mercancía de catálogo";
     return;
   }
 
@@ -535,7 +816,8 @@ function resetCargoForm() {
     cargoDisplayName.value = "";
     cargoCategory.value = "";
     cargoOrigin.value = "";
-    cargoSpecificCommodity.value = "";
+    cargoSpecificCommodityOption.value = "";
+    cargoSpecificCommodityCustom.value = "";
     cargoDeity.value = "";
     cargoNotes.value = "";
     return;
@@ -543,7 +825,8 @@ function resetCargoForm() {
 
   cargoQuantity.value = "1";
   cargoOrigin.value = "";
-  cargoSpecificCommodity.value = "";
+  cargoSpecificCommodityOption.value = "";
+  cargoSpecificCommodityCustom.value = "";
   cargoDeity.value = "";
   cargoNotes.value = "";
 
@@ -555,11 +838,14 @@ function resetCargoForm() {
     return;
   }
 
-  const compatibleCatalogItems = wagonCargoCatalog.value.filter((item) => isWagonCompatibleWithCatalogItem(wagon, item));
+  const compatibleCatalogItems = wagonCargoCatalog.value.filter((item) =>
+    isWagonCompatibleWithCatalogItem(wagon, item, wagon.specificCommodity),
+  );
   cargoCatalogCode.value = compatibleCatalogItems[0]?.code ?? "";
   cargoUnits.value = String(compatibleCatalogItems[0]?.defaultCargoUnits ?? 1);
   cargoDisplayName.value = "";
   cargoCategory.value = "";
+  syncCargoSpecificCommoditySelection();
 }
 
 function syncCargoFormSelection() {
@@ -576,6 +862,7 @@ function syncCargoFormSelection() {
   if (!available.some((item) => item.code === cargoCatalogCode.value)) {
     cargoCatalogCode.value = available[0].code;
   }
+  syncCargoSpecificCommoditySelection();
 }
 
 async function handleAddCatalogCargoToSelectedWagon() {
@@ -585,6 +872,19 @@ async function handleAddCatalogCargoToSelectedWagon() {
 
   const quantity = cargoQuantityValue.value;
   const cargoUnitsPerEntry = cargoUnitsValue.value;
+
+  if (cargoRequiresOrigin.value && !cargoOrigin.value.trim()) {
+    cargoModalError.value = "El origen es obligatorio para esta mercancía";
+    return;
+  }
+  if (cargoRequiresSpecificCommodity.value && !cargoSpecificCommodityValue.value) {
+    cargoModalError.value = "Debes seleccionar qué mercancía específica es";
+    return;
+  }
+  if (cargoRequiresDeity.value && !cargoDeity.value.trim()) {
+    cargoModalError.value = "La deidad es obligatoria para esta mercancía";
+    return;
+  }
 
   if (totalCargoUnits(quantity, cargoUnitsPerEntry) > selectedWagonRemainingCargoUnits(selectedWagon.value)) {
     cargoModalError.value = "La cantidad supera la capacidad disponible del carro";
@@ -602,7 +902,7 @@ async function handleAddCatalogCargoToSelectedWagon() {
       cargoUnits: cargoUnitsPerEntry,
       wagonId: selectedWagon.value.id,
       origin: cargoOrigin.value.trim() || null,
-      specificCommodity: cargoSpecificCommodity.value.trim() || null,
+      specificCommodity: cargoSpecificCommodityValue.value,
       deity: cargoDeity.value.trim() || null,
       notes: cargoNotes.value.trim() || null,
     });
@@ -656,7 +956,7 @@ async function handleAddCustomCargoToSelectedWagon() {
       cargoUnits: cargoUnitsPerEntry,
       wagonId: selectedWagon.value.id,
       origin: cargoOrigin.value.trim() || null,
-      specificCommodity: cargoSpecificCommodity.value.trim() || null,
+      specificCommodity: cargoSpecificCommodityValue.value,
       deity: cargoDeity.value.trim() || null,
       notes: cargoNotes.value.trim() || null,
     });
@@ -1191,6 +1491,11 @@ onMounted(refresh);
           </div>
         </section>
 
+        <div v-if="caravanWagonLimitState" class="warning-block caravan-limit-alert">
+          <strong>Alerta</strong>
+          <p>{{ caravanWagonLimitState.message }}</p>
+        </div>
+
         <section class="card">
           <div class="section-header">
             <div>
@@ -1234,18 +1539,19 @@ onMounted(refresh);
                 </tr>
               </thead>
               <tbody>
-                <tr
-                  v-for="wagon in visibleWagons"
-                  :key="wagon.id"
+                  <tr
+                    v-for="wagon in visibleWagons"
+                    :key="wagon.id"
                   tabindex="0"
                   role="button"
                   @click="openWagonDetails(wagon)"
                   @keyup.enter="openWagonDetails(wagon)"
                 >
-                  <td>
-                    <strong>{{ wagon.name }}</strong>
-                    <p class="muted">{{ wagon.specialBenefit }}</p>
-                  </td>
+                    <td>
+                      <strong>{{ wagon.name }}</strong>
+                      <p v-if="wagon.specificCommodity" class="muted">Mercancía específica: {{ wagon.specificCommodity }}</p>
+                      <p class="muted">{{ wagon.specialBenefit }}</p>
+                    </td>
                   <td>{{ wagon.category }}</td>
                   <td>{{ wagon.hitPoints }}</td>
                   <td>{{ wagon.hardness }}</td>
@@ -1271,6 +1577,11 @@ onMounted(refresh);
             <button class="ghost-button" type="button" @click="closeAddModal">Cerrar</button>
           </div>
 
+          <div v-if="caravanWagonLimitState" class="warning-block caravan-limit-alert">
+            <strong>Alerta</strong>
+            <p>{{ caravanWagonLimitState.message }}</p>
+          </div>
+
           <div class="filters">
             <label>
               <span>Tipo de carro</span>
@@ -1288,9 +1599,22 @@ onMounted(refresh);
               </label>
               <button
                 class="primary-button confirm-button"
-                :class="{ disabled: submitting || !selectedCatalogItem || selectedCatalogNeedsOverride, loading: submitting }"
+                :class="{
+                  disabled:
+                    submitting ||
+                    !selectedCatalogItem ||
+                    selectedCatalogNeedsOverride ||
+                    (selectedCatalogRequiresSpecificCommodity && !addWagonSpecificCommodityValue),
+                  loading: submitting,
+                }"
                 type="button"
-                :disabled="loading || submitting || !selectedCatalogItem || selectedCatalogNeedsOverride"
+                :disabled="
+                  loading ||
+                  submitting ||
+                  !selectedCatalogItem ||
+                  selectedCatalogNeedsOverride ||
+                  (selectedCatalogRequiresSpecificCommodity && !addWagonSpecificCommodityValue)
+                "
                 :aria-busy="isPending('add-wagon')"
                 @click="handleAddSelected"
               >
@@ -1337,8 +1661,35 @@ onMounted(refresh);
                 </div>
               </div>
 
-              <dl class="stats">
-                <div><dt>Coste</dt><dd>{{ selectedCatalogItem.cost }} po</dd></div>
+                <label class="search-field add-name-field">
+                  <span>Nombre del nuevo carro</span>
+                  <input v-model="addWagonName" type="text" placeholder="Se mostrará en el frontal" />
+                </label>
+
+                <div v-if="selectedCatalogRequiresSpecificCommodity" class="two-columns">
+                  <label class="search-field add-name-field">
+                    <span>Mercancía específica</span>
+                    <select v-model="addWagonSpecificCommodityOption" class="styled-select">
+                      <option value="" disabled>Selecciona una mercancía</option>
+                      <option v-for="option in specificCommodityOptions" :key="option" :value="option">
+                        {{ option }}
+                      </option>
+                      <option value="custom">Carga personalizada</option>
+                    </select>
+                  </label>
+
+                  <label v-if="addWagonSpecificCommodityOption === 'custom'" class="search-field add-name-field">
+                    <span>Nombre de la carga</span>
+                    <input
+                      v-model="addWagonSpecificCommodityCustom"
+                      type="text"
+                      placeholder="Escribe el nombre"
+                    />
+                  </label>
+                </div>
+
+                <dl class="stats">
+                  <div><dt>Coste</dt><dd>{{ selectedCatalogItem.cost }} po</dd></div>
                 <div><dt>PG</dt><dd>{{ selectedCatalogItem.hitPoints }}</dd></div>
                 <div><dt>Dureza</dt><dd>{{ selectedCatalogItem.hardness }}</dd></div>
                 <div><dt>Propulsión</dt><dd>{{ selectedCatalogItem.propulsion }}</dd></div>
@@ -1383,11 +1734,14 @@ onMounted(refresh);
 
       <div v-if="selectedWagon" class="modal-backdrop" @click.self="closeModal">
         <div class="modal">
-          <div class="modal-header">
-            <div>
-              <p class="eyebrow">Detalle del carro</p>
-              <h2>{{ selectedWagon.name }}</h2>
-            </div>
+            <div class="modal-header">
+              <div>
+                <p class="eyebrow">Detalle del carro</p>
+                <h2>{{ selectedWagon.name }}</h2>
+                <p v-if="selectedWagonSpecificCommodityLabel" class="muted">
+                  Mercancía específica: {{ selectedWagonSpecificCommodityLabel }}
+                </p>
+              </div>
             <div class="detail-actions">
               <button class="secondary-button" type="button" :disabled="loading || submitting" @click="openImprovementModal">
                 <span class="button-with-spinner">
@@ -1405,8 +1759,38 @@ onMounted(refresh);
             </div>
           </div>
 
+          <div class="name-editor-card">
+            <div class="name-editor-header">
+              <div>
+                <p class="eyebrow">Nombre visible</p>
+                <p class="muted">Este nombre se usará en los listados y combos seleccionables.</p>
+              </div>
+              <button
+                class="primary-button"
+                type="button"
+                :disabled="loading || submitting"
+                :aria-busy="isPending(`rename-wagon:${selectedWagon.id}`)"
+                @click="handleRenameSelectedWagon"
+              >
+                <span class="button-with-spinner">
+                  <span v-if="isPending(`rename-wagon:${selectedWagon.id}`)" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ isPending(`rename-wagon:${selectedWagon.id}`) ? "Guardando…" : "Guardar cambios" }}</span>
+                </span>
+              </button>
+            </div>
+
+            <label class="name-editor-field">
+              <span>Nombre para mostrar</span>
+              <input
+                v-model="wagonNameDraft"
+                type="text"
+                placeholder="Vacío usa el nombre del tipo"
+              />
+            </label>
+          </div>
+
           <dl class="stats modal-stats">
-            <div><dt>Tipo</dt><dd>{{ selectedWagon.wagonTypeCode }}</dd></div>
+            <div><dt>Tipo</dt><dd>{{ selectedWagonTypeName }}</dd></div>
             <div><dt>Coste</dt><dd>{{ selectedWagon.cost }} po</dd></div>
             <div><dt>PG</dt><dd>{{ selectedWagon.hitPoints }}</dd></div>
             <div><dt>Dureza</dt><dd>{{ selectedWagon.hardness }}</dd></div>
@@ -1521,13 +1905,16 @@ onMounted(refresh);
 
           <section class="info-block">
             <div class="section-header">
-              <div>
-                <h3>Mercancías transportadas</h3>
-                <p class="muted">
-                  {{ selectedWagonCargo.length }} entradas · {{ selectedWagonCargoLoad }} / {{ selectedWagon.cargoCapacity }}
+                <div>
+                  <h3>Mercancías transportadas</h3>
+                  <p class="muted">
+                  {{ groupedSelectedWagonCargo.length }} entradas · {{ selectedWagonCargoLoad }} / {{ selectedWagon.cargoCapacity }}
                   usadas · quedan {{ selectedWagonCargoRemaining }}.
                 </p>
-              </div>
+                  <p v-if="selectedWagonSpecificCommodityLabel" class="muted">
+                    Mercancía específica del carro: {{ selectedWagonSpecificCommodityLabel }}
+                  </p>
+                </div>
               <div class="accordion-actions">
                 <button
                   class="secondary-button"
@@ -1538,6 +1925,7 @@ onMounted(refresh);
                   Añadir de catálogo
                 </button>
                 <button
+                  v-if="selectedWagon.wagonTypeCode !== 'carro-de-mercancias-especificas'"
                   class="secondary-button"
                   type="button"
                   :disabled="loading || submitting || selectedWagonCargoRemaining === 0"
@@ -1548,7 +1936,7 @@ onMounted(refresh);
               </div>
             </div>
 
-            <div v-if="selectedWagonCargo.length === 0" class="muted">
+            <div v-if="groupedSelectedWagonCargo.length === 0" class="muted">
               No hay mercancías asignadas a este carro.
             </div>
             <div v-else>
@@ -1565,26 +1953,36 @@ onMounted(refresh);
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="entry in selectedWagonCargo" :key="entry.id">
+                  <tr v-for="entry in groupedSelectedWagonCargo" :key="entry.key">
                     <td>
-                      <strong>{{ entry.displayName }}</strong>
-                      <p class="muted">{{ entry.sourceTypeLabel }}</p>
+                      <strong>{{ entry.representative.displayName }}</strong>
+                      <p class="muted">{{ entry.representative.sourceTypeLabel }}</p>
+                      <p v-if="entry.representative.specificCommodity" class="muted">
+                        Mercancía específica: {{ entry.representative.specificCommodity }}
+                      </p>
+                      <p v-if="entry.entries.length > 1" class="muted">
+                        {{ entry.entries.length }} entradas agrupadas
+                      </p>
                     </td>
-                    <td>{{ entry.origin ?? "—" }}</td>
-                    <td>{{ entry.category }}</td>
+                    <td>{{ entry.representative.origin ?? "—" }}</td>
+                    <td>{{ entry.representative.category }}</td>
                     <td>{{ entry.quantity }}</td>
-                    <td>{{ entry.quantity * entry.cargoUnits }}</td>
-                    <td>{{ entry.notes ?? "—" }}</td>
+                    <td>{{ entry.totalCargoLoad }}</td>
+                    <td>{{ entry.representative.notes ?? "—" }}</td>
                     <td>
                       <button
                         class="trash-button"
                         type="button"
                         :disabled="loading || submitting"
-                        :aria-label="`Eliminar ${entry.displayName}`"
-                        @click="handleDeleteSelectedWagonCargo(entry)"
+                        :aria-label="`Eliminar ${entry.representative.displayName}`"
+                        @click="handleDeleteSelectedWagonCargo(entry.representative)"
                       >
                         <span class="button-with-spinner">
-                          <span v-if="isPending(`delete-cargo:${entry.id}`)" class="button-spinner" aria-hidden="true"></span>
+                          <span
+                            v-if="isPending(`delete-cargo:${entry.representative.id}`)"
+                            class="button-spinner"
+                            aria-hidden="true"
+                          ></span>
                           <span>🗑</span>
                         </span>
                       </button>
@@ -1806,20 +2204,56 @@ onMounted(refresh);
 
             <template v-if="selectedCargoCatalogItem">
               <div class="two-columns">
-                <label>
+                <label v-if="cargoRequiresOrigin">
                   <span>Origen</span>
-                  <input v-model="cargoOrigin" type="text" />
+                  <input v-model="cargoOrigin" type="text" placeholder="Obligatorio" />
                 </label>
-                <label>
+                <label v-if="cargoRequiresSpecificCommodity">
                   <span>Mercancía específica</span>
-                  <input v-model="cargoSpecificCommodity" type="text" />
+                  <input
+                    v-if="cargoSpecificCommodityLocked && cargoSpecificCommodityIsCustom"
+                    :value="selectedWagon?.specificCommodity?.trim() || ''"
+                    type="text"
+                    readonly
+                  />
+                  <select
+                    v-else-if="cargoSpecificCommodityLocked"
+                    v-model="cargoSpecificCommodityOption"
+                    class="styled-select"
+                    disabled
+                  >
+                    <option :value="selectedWagon?.specificCommodity?.trim() || ''">
+                      {{ selectedWagon?.specificCommodity?.trim() || "Sin mercancía específica asignada" }}
+                    </option>
+                  </select>
+                  <select v-else v-model="cargoSpecificCommodityOption" class="styled-select">
+                    <option value="" disabled>Selecciona una mercancía</option>
+                    <option v-for="option in specificCommodityOptions" :key="option" :value="option">
+                      {{ option }}
+                    </option>
+                    <option value="custom">Carga personalizada</option>
+                  </select>
+                </label>
+              </div>
+
+              <div
+                v-if="cargoRequiresSpecificCommodity && !cargoSpecificCommodityLocked && cargoSpecificCommodityOption === 'custom'"
+                class="two-columns"
+              >
+                <label>
+                  <span>Nombre de la carga</span>
+                  <input
+                    v-model="cargoSpecificCommodityCustom"
+                    type="text"
+                    placeholder="Escribe el nombre"
+                  />
                 </label>
               </div>
 
               <div class="two-columns">
-                <label>
+                <label v-if="cargoRequiresDeity">
                   <span>Deidad</span>
-                  <input v-model="cargoDeity" type="text" />
+                  <input v-model="cargoDeity" type="text" placeholder="Obligatorio" />
                 </label>
                 <label>
                   <span>Notas</span>
@@ -1851,14 +2285,31 @@ onMounted(refresh);
               </label>
             </div>
 
-            <div class="two-columns">
+              <div class="two-columns">
+                <label>
+                  <span>Origen</span>
+                  <input v-model="cargoOrigin" type="text" />
+                </label>
+                <label>
+                  <span>Mercancía específica</span>
+                  <select v-model="cargoSpecificCommodityOption" class="styled-select">
+                    <option value="" disabled>Selecciona una mercancía</option>
+                    <option v-for="option in specificCommodityOptions" :key="option" :value="option">
+                      {{ option }}
+                    </option>
+                    <option value="custom">Carga personalizada</option>
+                  </select>
+                </label>
+              </div>
+
+            <div v-if="cargoSpecificCommodityOption === 'custom'" class="two-columns">
               <label>
-                <span>Origen</span>
-                <input v-model="cargoOrigin" type="text" />
-              </label>
-              <label>
-                <span>Mercancía específica</span>
-                <input v-model="cargoSpecificCommodity" type="text" />
+                <span>Nombre de la carga</span>
+                <input
+                  v-model="cargoSpecificCommodityCustom"
+                  type="text"
+                  placeholder="Escribe el nombre"
+                />
               </label>
             </div>
 
@@ -1878,7 +2329,12 @@ onMounted(refresh);
             <button
               class="primary-button confirm-button"
               type="button"
-              :disabled="loading || submitting || !selectedWagon || (cargoModalMode === 'catalog' && !selectedCargoCatalogItem)"
+              :disabled="
+                loading ||
+                submitting ||
+                !selectedWagon ||
+                (cargoModalMode === 'catalog' && (!selectedCargoCatalogItem || (cargoRequiresSpecificCommodity && !cargoSpecificCommodityValue)))
+              "
               :aria-busy="submitting"
               @click="cargoModalMode === 'catalog' ? handleAddCatalogCargoToSelectedWagon() : handleAddCustomCargoToSelectedWagon()"
             >
@@ -2188,6 +2644,10 @@ p {
   margin: 1rem 0;
 }
 
+.add-name-field {
+  margin-top: 0.25rem;
+}
+
 .search-action-row {
   display: flex;
   align-items: end;
@@ -2266,6 +2726,10 @@ p {
   border: 1px solid #f59e0b;
   display: grid;
   gap: 0.35rem;
+}
+
+.caravan-limit-alert {
+  margin-top: 1rem;
 }
 
 .draft-power-badge {
@@ -2770,6 +3234,54 @@ dd {
   width: min(1100px, 100%);
 }
 
+.modal-form {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid #dbe3f0;
+  border-radius: 1rem;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+}
+
+.modal-form label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.modal-form input,
+.modal-form select {
+  width: 100%;
+  padding: 0.85rem 0.95rem;
+  border-radius: 0.9rem;
+  border: 1px solid #cbd5e1;
+  background: white;
+  font: inherit;
+  color: #0f172a;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.modal-form input:focus,
+.modal-form select:focus {
+  outline: none;
+  border-color: #1d4ed8;
+  box-shadow:
+    0 0 0 3px rgba(29, 78, 216, 0.14),
+    inset 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.modal-form select {
+  min-height: 3rem;
+}
+
+.two-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
 .add-layout {
   display: grid;
   grid-template-columns: 1fr 1.1fr;
@@ -2787,6 +3299,74 @@ dd {
   display: flex;
   gap: 0.75rem;
   align-items: center;
+}
+
+.name-editor-card {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem 1rem 0.95rem;
+  border: 1px solid #dbe3f0;
+  border-radius: 1rem;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.name-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.name-editor-field {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.name-editor-field span {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.name-editor-field input,
+.search-field input,
+.search-field select,
+.styled-select {
+  width: 100%;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.9rem;
+  background: white;
+  font: inherit;
+  font-size: 1rem;
+  color: #0f172a;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.name-editor-field input:focus,
+.search-field input:focus,
+.search-field select:focus,
+.styled-select:focus {
+  outline: none;
+  border-color: #1d4ed8;
+  box-shadow:
+    0 0 0 3px rgba(29, 78, 216, 0.14),
+    inset 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.styled-select {
+  min-height: 3rem;
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #475569 50%),
+    linear-gradient(135deg, #475569 50%, transparent 50%);
+  background-position:
+    calc(100% - 1.15rem) calc(50% - 0.15rem),
+    calc(100% - 0.85rem) calc(50% - 0.15rem);
+  background-size: 0.42rem 0.42rem, 0.42rem 0.42rem;
+  background-repeat: no-repeat;
+  padding-right: 2.2rem;
 }
 
 .danger-button {
@@ -2839,20 +3419,29 @@ dd {
     grid-template-columns: 1fr;
   }
 
-  .grid,
-  .summary {
-    display: grid;
+  .modal-form {
+    padding: 0.9rem;
   }
 
-  .stats,
-  .summary-stats,
-  .modal-stats {
-    grid-template-columns: 1fr 1fr;
+  .grid,
+  .summary,
+  .name-editor-header {
+    grid-template-columns: 1fr;
+  }
+
+  .grid,
+  .summary,
+  .name-editor-header {
+    display: grid;
   }
 
   .summary-actions {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .name-editor-header {
+    align-items: stretch;
   }
 
   .filters {
@@ -2877,7 +3466,8 @@ dd {
 
   .stats,
   .summary-stats,
-  .modal-stats {
+  .modal-stats,
+  .two-columns {
     grid-template-columns: 1fr;
   }
 

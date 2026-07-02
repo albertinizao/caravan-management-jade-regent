@@ -51,7 +51,7 @@ class CargoManagementServiceTest {
   @DisplayName("adds catalog supplies as individual unit rows")
   void addsCatalogSuppliesAsIndividualUnitRows(String catalogCode) {
     var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var wagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-suministros", Instant.parse("2026-01-01T00:00:00Z")));
+    var wagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-suministros", null, Instant.parse("2026-01-01T00:00:00Z")));
 
     var created = service.execute(
         caravan.id(),
@@ -80,6 +80,68 @@ class CargoManagementServiceTest {
           assertThat(entry.currentProvisions()).isEqualTo(10);
           assertThat(entry.dayPassed()).isFalse();
         });
+  }
+
+  @org.junit.jupiter.api.Test
+  void allowsCustomCargoOnSpecificGoodsWagonByInheritingItsSpecificCommodity() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
+    var wagon = wagonRepository.save(CaravanWagon.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "carro-de-mercancias-especificas",
+        null,
+        "Queso",
+        Instant.parse("2026-01-01T00:00:00Z")));
+
+    var created = service.execute(
+        caravan.id(),
+        new AddCaravanCargoUseCase.AddCaravanCargoCommand(
+            CaravanCargoSourceType.CUSTOM,
+            null,
+            "Queso",
+            "Lácteos",
+            1,
+            2,
+            wagon.id(),
+            null,
+            null,
+            null,
+            null));
+
+    assertThat(created.specificCommodity()).isEqualTo("Queso");
+    assertThat(cargoRepository.findAllByCaravanId(caravan.id())).singleElement().satisfies(entry -> {
+      assertThat(entry.wagonId()).isEqualTo(wagon.id());
+      assertThat(entry.specificCommodity()).isEqualTo("Queso");
+    });
+  }
+
+  @org.junit.jupiter.api.Test
+  void rejectsCustomCargoWhenSpecificGoodsWagonCommodityDoesNotMatch() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
+    var wagon = wagonRepository.save(CaravanWagon.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "carro-de-mercancias-especificas",
+        null,
+        "Queso",
+        Instant.parse("2026-01-01T00:00:00Z")));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.execute(
+        caravan.id(),
+        new AddCaravanCargoUseCase.AddCaravanCargoCommand(
+            CaravanCargoSourceType.CUSTOM,
+            null,
+            "Manzanas",
+            "Fruta",
+            1,
+            1,
+            wagon.id(),
+            null,
+            "Manzanas",
+            null,
+            null)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("specific merchandise");
   }
 
   private static final class InMemoryCaravanRepository implements CaravanCampaignRepositoryPort {
@@ -196,3 +258,4 @@ class CargoManagementServiceTest {
     public void deleteById(UUID caravanId, UUID wagonId, UUID improvementId) {}
   }
 }
+

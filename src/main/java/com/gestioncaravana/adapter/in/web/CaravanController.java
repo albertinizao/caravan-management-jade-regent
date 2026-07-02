@@ -32,6 +32,7 @@ import com.gestioncaravana.application.port.in.ListTravelerRoleCatalogUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanFeatUseCase;
 import com.gestioncaravana.application.port.in.AddCaravanFeatUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanFeatUseCase;
+import com.gestioncaravana.application.port.in.UpdateCaravanWagonUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerRoleUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerWagonUseCase;
@@ -88,6 +89,7 @@ public class CaravanController {
   private final ListCaravanWagonsUseCase listCaravanWagonsUseCase;
   private final GetCaravanWagonUseCase getCaravanWagonUseCase;
   private final AddCaravanWagonUseCase addCaravanWagonUseCase;
+  private final UpdateCaravanWagonUseCase updateCaravanWagonUseCase;
   private final AddCaravanWagonImprovementUseCase addCaravanWagonImprovementUseCase;
   private final DeleteCaravanWagonImprovementUseCase deleteCaravanWagonImprovementUseCase;
   private final DeleteCaravanWagonUseCase deleteCaravanWagonUseCase;
@@ -127,6 +129,7 @@ public class CaravanController {
       ListCaravanWagonsUseCase listCaravanWagonsUseCase,
       GetCaravanWagonUseCase getCaravanWagonUseCase,
       AddCaravanWagonUseCase addCaravanWagonUseCase,
+      UpdateCaravanWagonUseCase updateCaravanWagonUseCase,
       AddCaravanWagonImprovementUseCase addCaravanWagonImprovementUseCase,
       DeleteCaravanWagonImprovementUseCase deleteCaravanWagonImprovementUseCase,
       DeleteCaravanWagonUseCase deleteCaravanWagonUseCase) {
@@ -164,6 +167,7 @@ public class CaravanController {
     this.listCaravanWagonsUseCase = listCaravanWagonsUseCase;
     this.getCaravanWagonUseCase = getCaravanWagonUseCase;
     this.addCaravanWagonUseCase = addCaravanWagonUseCase;
+    this.updateCaravanWagonUseCase = updateCaravanWagonUseCase;
     this.addCaravanWagonImprovementUseCase = addCaravanWagonImprovementUseCase;
     this.deleteCaravanWagonImprovementUseCase = deleteCaravanWagonImprovementUseCase;
     this.deleteCaravanWagonUseCase = deleteCaravanWagonUseCase;
@@ -512,9 +516,20 @@ public class CaravanController {
   @PostMapping("/caravans/{caravanId}/wagons")
   ResponseEntity<CaravanWagonResponse> addCaravanWagon(
       @PathVariable UUID caravanId, @Valid @RequestBody AddCaravanWagonRequest request) {
-    var created = addCaravanWagonUseCase.execute(
-        caravanId, new AddCaravanWagonUseCase.AddCaravanWagonCommand(request.wagonTypeCode()));
-    return ResponseEntity.status(HttpStatus.CREATED).body(CaravanWagonResponseMapper.toResponse(created));
+      var created = addCaravanWagonUseCase.execute(
+          caravanId,
+          new AddCaravanWagonUseCase.AddCaravanWagonCommand(
+              request.wagonTypeCode(), request.displayName(), request.specificCommodity()));
+      return ResponseEntity.status(HttpStatus.CREATED).body(CaravanWagonResponseMapper.toResponse(created));
+    }
+
+  @PutMapping("/caravans/{caravanId}/wagons/{wagonId}")
+  CaravanWagonResponse updateCaravanWagon(
+      @PathVariable UUID caravanId,
+      @PathVariable UUID wagonId,
+      @RequestBody UpdateCaravanWagonRequest request) {
+    return CaravanWagonResponseMapper.toResponse(
+        updateCaravanWagonUseCase.execute(caravanId, wagonId, new UpdateCaravanWagonUseCase.UpdateCaravanWagonCommand(request.displayName())));
   }
 
   @PostMapping("/caravans/{caravanId}/wagons/{wagonId}/improvements")

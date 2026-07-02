@@ -14,6 +14,7 @@ import com.gestioncaravana.application.port.in.ListCaravanWagonImprovementsUseCa
 import com.gestioncaravana.application.port.in.ListCaravanWagonsUseCase;
 import com.gestioncaravana.application.port.in.ListWagonImprovementCatalogUseCase;
 import com.gestioncaravana.application.port.in.ListWagonCatalogUseCase;
+import com.gestioncaravana.application.port.in.UpdateCaravanWagonUseCase;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
@@ -47,6 +48,7 @@ public class WagonManagementService
         ListCaravanWagonsUseCase,
         GetCaravanWagonUseCase,
         AddCaravanWagonUseCase,
+        UpdateCaravanWagonUseCase,
         AddCaravanWagonImprovementUseCase,
         DeleteCaravanWagonImprovementUseCase,
         DeleteCaravanWagonUseCase {
@@ -145,13 +147,9 @@ public class WagonManagementService
     var caravan = requireCaravan(caravanId);
     var wagonType = WagonCatalog.findByCode(command.wagonTypeCode())
         .orElseThrow(() -> new IllegalArgumentException("Wagon type not found: " + command.wagonTypeCode()));
+    var specificCommodity = normalizeSpecificCommodity(wagonType, command.specificCommodity());
 
     var maxWagons = 10 + caravan.level();
-    var currentTotal = wagonRepository.countByCaravanId(caravanId);
-    if (currentTotal >= maxWagons) {
-      throw new IllegalArgumentException("Caravan wagon limit reached");
-    }
-
     var maxOfType = wagonType.limit().resolveMaxAllowed(maxWagons);
     var currentOfType = wagonRepository.countByCaravanIdAndWagonTypeCode(caravanId, wagonType.code());
     if (currentOfType >= maxOfType) {
@@ -159,8 +157,16 @@ public class WagonManagementService
     }
 
     var now = clock.instant();
-    var wagon = CaravanWagon.create(UUID.randomUUID(), caravanId, wagonType.code(), now);
+    var wagon = CaravanWagon.create(UUID.randomUUID(), caravanId, wagonType.code(), command.displayName(), specificCommodity, now);
     return toView(wagonRepository.save(wagon), List.of());
+  }
+
+  @Override
+  public CaravanWagonView execute(UUID caravanId, UUID wagonId, UpdateCaravanWagonCommand command) {
+    requireCaravan(caravanId);
+    var wagon = requireWagon(caravanId, wagonId);
+    var updated = wagon.rename(command.displayName(), clock.instant());
+    return toView(wagonRepository.save(updated), improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagonId));
   }
 
   @Override
@@ -288,11 +294,13 @@ public class WagonManagementService
     var derived = deriveWagonStats(wagonType, improvements);
     var draftBeasts = draftBeasts(wagon.caravanId(), wagon.id());
     var draftStrength = draftBeasts.stream().mapToInt(this::effectiveDraftStrength).sum();
+    var displayName = wagon.displayNameOr(wagonType.name());
     return new CaravanWagonView(
         wagon.id(),
         wagon.caravanId(),
         wagon.wagonTypeCode(),
-        wagonType.name(),
+        displayName,
+        wagon.specificCommodity(),
         wagonType.category(),
         derived.cost(),
         derived.hitPoints(),
@@ -562,5 +570,17 @@ public class WagonManagementService
     public long countByCaravanIdAndWagonId(UUID caravanId, UUID wagonId) {
       return 0;
     }
+  }
+
+  private String normalizeSpecificCommodity(WagonType wagonType, String specificCommodity) {
+    if (!"carro-de-mercancias-especificas".equals(wagonType.code())) {
+      return null;
+    }
+
+    if (specificCommodity == null || specificCommodity.isBlank()) {
+      throw new IllegalArgumentException("specificCommodity is required");
+    }
+
+    return specificCommodity.trim();
   }
 }

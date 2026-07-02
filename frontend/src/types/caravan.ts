@@ -70,3 +70,50 @@ export interface CaravanStatistics {
   updatedAt: string;
 }
 
+export interface CaravanDailyChoice {
+  travelerId: string | null;
+  mode: string;
+}
+
+export interface CaravanDailyContribution {
+  effectCode: string;
+  sourceType: string;
+  sourceId: string;
+  sourceName: string;
+  operation: string;
+  quantity: number;
+  reason: string;
+  applied: boolean;
+  ignoredReason: string | null;
+}
+
+export interface CaravanDayCyclePreview {
+  caravanId: string;
+  dayIndex: number;
+  currentReserve: number;
+  expectedConsumption: number;
+  expectedGeneration: number;
+  expectedNetDelta: number;
+  expectedReserveAfterResolution: number;
+  expectedShortage: number;
+  warnings: string[];
+  requiredChoices: CaravanDailyChoice[];
+  contributions: CaravanDailyContribution[];
+}
+
+export interface CaravanDayCycleResult {
+  caravanId: string;
+  idempotencyKey: string;
+  dayIndex: number;
+  currentReserve: number;
+  expectedConsumption: number;
+  expectedGeneration: number;
+  expectedNetDelta: number;
+  expectedReserveAfterResolution: number;
+  expectedShortage: number;
+  resolvedAt: string;
+  choices: CaravanDailyChoice[];
+  contributions: CaravanDailyContribution[];
+  warnings: string[];
+}
+

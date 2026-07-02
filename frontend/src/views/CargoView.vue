@@ -19,6 +19,14 @@ import type { Caravan } from "@/types/caravan";
 import type { CaravanCargo, CaravanCargoSummary, CargoCatalogItem } from "@/types/cargo";
 import type { CaravanWagon } from "@/types/wagon";
 
+interface GroupedCargoRow {
+  key: string;
+  representative: CaravanCargo;
+  entries: CaravanCargo[];
+  quantity: number;
+  totalCargoLoad: number;
+}
+
 const activeCaravan = ref<Caravan | null>(null);
 const cargo = ref<CaravanCargo[]>([]);
 const cargoSummary = ref<CaravanCargoSummary[]>([]);
@@ -70,13 +78,40 @@ const selectedCatalogItem = computed(() =>
   selectedCatalogCode.value ? catalogByCode.value[selectedCatalogCode.value] ?? null : null,
 );
 
-const visibleCargo = computed(() => {
+const filteredCargo = computed(() => {
   const query = search.value.trim().toLowerCase();
   return cargo.value
     .filter((item) => !query || item.displayName.toLowerCase().includes(query) || item.category.toLowerCase().includes(query))
     .filter((item) => sourceFilter.value === "all" || item.sourceType === sourceFilter.value)
     .filter((item) => categoryFilter.value === "all" || item.category === categoryFilter.value)
     .filter((item) => wagonFilter.value === "all" || item.wagonId === wagonFilter.value);
+});
+
+const visibleCargo = computed<GroupedCargoRow[]>(() => {
+  const groups = new Map<string, GroupedCargoRow>();
+
+  for (const item of filteredCargo.value) {
+    const key = cargoGroupKey(item);
+    const existing = groups.get(key);
+    const itemLoad = totalCargoUnits(item.quantity, item.cargoUnits);
+
+    if (existing) {
+      existing.entries.push(item);
+      existing.quantity += item.quantity;
+      existing.totalCargoLoad += itemLoad;
+      continue;
+    }
+
+    groups.set(key, {
+      key,
+      representative: item,
+      entries: [item],
+      quantity: item.quantity,
+      totalCargoLoad: itemLoad,
+    });
+  }
+
+  return Array.from(groups.values());
 });
 
 const categories = computed(() =>
@@ -94,6 +129,14 @@ const customAvailableWagons = computed(() => filterWagonsForCustomCargo(customQu
 const selectedCargoAvailableWagons = computed(() => (selectedCargo.value ? filterWagonsForCargo(selectedCargo.value) : []));
 const catalogQuantityMax = computed(() => maxQuantityForWagon(catalogWagonId.value, catalogCargoUnitsValue.value));
 const customQuantityMax = computed(() => maxQuantityForWagon(customWagonId.value, customCargoUnitsValue.value));
+const selectedCargoGroup = computed<GroupedCargoRow | null>(() => {
+  const cargoId = selectedCargo.value?.id;
+  if (!cargoId) {
+    return null;
+  }
+
+  return visibleCargo.value.find((group) => group.entries.some((entry) => entry.id === cargoId)) ?? null;
+});
 
 async function refresh() {
   const previousAction = pendingAction.value;
@@ -211,6 +254,21 @@ function parsePositiveInteger(value: string, fallback: number) {
 
 function totalCargoUnits(quantity: number, cargoUnits: number) {
   return quantity * cargoUnits;
+}
+
+function cargoGroupKey(item: CaravanCargo) {
+  return [
+    item.wagonId ?? "",
+    item.sourceType,
+    item.catalogCode ?? "",
+    item.displayName,
+    item.category,
+    item.origin ?? "",
+    item.specificCommodity ?? "",
+    item.deity ?? "",
+    item.notes ?? "",
+    item.priceExpression ?? "",
+  ].join("\u0001");
 }
 
 function getWagonRemainingCargoUnits(wagonId: string) {
@@ -550,6 +608,65 @@ async function handleDeleteCargo() {
   }
 }
 
+async function handleDeleteCargoUnit() {
+  if (!activeCaravan.value || !selectedCargo.value) {
+    return;
+  }
+
+  const confirmed = window.confirm(`¿Eliminar 1 unidad de "${selectedCargo.value.displayName}"? Esta acción no se puede deshacer.`);
+  if (!confirmed) {
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = "delete-cargo-unit";
+  selectedCargoError.value = null;
+
+  try {
+    await deleteCaravanCargo(activeCaravan.value.id, selectedCargo.value.id);
+    closeCargoDetails();
+    await refresh();
+    showToast("1 unidad de carga eliminada.");
+  } catch (cause) {
+    selectedCargoError.value = cause instanceof Error ? cause.message : "Failed to delete cargo";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+async function handleDeleteCargoGroup() {
+  if (!activeCaravan.value || !selectedCargoGroup.value) {
+    return;
+  }
+
+  const group = selectedCargoGroup.value;
+  const confirmed = window.confirm(
+    `¿Eliminar todas las ${group.entries.length} unidades de "${group.representative.displayName}"? Esta acción no se puede deshacer.`,
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = "delete-cargo-group";
+  selectedCargoError.value = null;
+
+  try {
+    for (const entry of group.entries) {
+      await deleteCaravanCargo(activeCaravan.value.id, entry.id);
+    }
+    closeCargoDetails();
+    await refresh();
+    showToast(`Se eliminaron ${group.entries.length} unidades de carga.`);
+  } catch (cause) {
+    selectedCargoError.value = cause instanceof Error ? cause.message : "Failed to delete cargo";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
 function sourceLabel(sourceType: string) {
   return sourceType === "CATALOG" ? "Catálogo" : "Personalizada";
 }
@@ -557,6 +674,10 @@ function sourceLabel(sourceType: string) {
 function formatCargoLoad(quantity: number, cargoUnits: number) {
   const total = totalCargoUnits(quantity, cargoUnits);
   return cargoUnits === 1 ? `${total} u.c.` : `${total} u.c. (${quantity} × ${cargoUnits})`;
+}
+
+function formatGroupedCargoLoad(totalCargoLoad: number) {
+  return `${totalCargoLoad} u.c.`;
 }
 
 watch(selectedCatalogCode, () => {
@@ -680,17 +801,17 @@ onMounted(refresh);
               </tr>
             </thead>
             <tbody>
-              <tr v-for="entry in visibleCargo" :key="entry.id" @click="openCargoDetails(entry)">
+              <tr v-for="entry in visibleCargo" :key="entry.key" @click="openCargoDetails(entry.representative)">
                 <td>
-                  <strong>{{ entry.displayName }}</strong>
-                  <div class="muted">{{ entry.catalogName ?? entry.displayName }}</div>
+                  <strong>{{ entry.representative.displayName }}</strong>
+                  <div class="muted">{{ entry.representative.catalogName ?? entry.representative.displayName }}</div>
                 </td>
-                <td>{{ sourceLabel(entry.sourceType) }}</td>
-                <td>{{ entry.category }}</td>
+                <td>{{ sourceLabel(entry.representative.sourceType) }}</td>
+                <td>{{ entry.representative.category }}</td>
                 <td>{{ entry.quantity }}</td>
-                <td>{{ formatCargoLoad(entry.quantity, entry.cargoUnits) }}</td>
-                <td>{{ entry.wagonName ?? "Sin carro" }}</td>
-                <td class="muted">{{ entry.notes ?? entry.origin ?? entry.specificCommodity ?? entry.deity ?? "—" }}</td>
+                <td>{{ formatGroupedCargoLoad(entry.totalCargoLoad) }}</td>
+                <td>{{ entry.representative.wagonName ?? "Sin carro" }}</td>
+                <td class="muted">{{ entry.representative.notes ?? entry.representative.origin ?? entry.representative.specificCommodity ?? entry.representative.deity ?? "—" }}</td>
               </tr>
             </tbody>
           </table>
@@ -916,10 +1037,23 @@ onMounted(refresh);
             </div>
 
             <div class="modal-actions">
-              <button class="secondary-button" type="button" :disabled="loading || submitting" :aria-busy="isPending('delete-cargo')" @click="handleDeleteCargo">
+              <button class="secondary-button" type="button" :disabled="loading || submitting" :aria-busy="isPending('delete-cargo-unit')" @click="handleDeleteCargoUnit">
                 <span class="button-with-spinner">
-                  <span v-if="isPending('delete-cargo')" class="button-spinner" aria-hidden="true"></span>
-                  <span>Eliminar</span>
+                  <span v-if="isPending('delete-cargo-unit')" class="button-spinner" aria-hidden="true"></span>
+                  <span>Eliminar 1 unidad</span>
+                </span>
+              </button>
+              <button
+                v-if="selectedCargoGroup && selectedCargoGroup.entries.length > 1"
+                class="secondary-button"
+                type="button"
+                :disabled="loading || submitting"
+                :aria-busy="isPending('delete-cargo-group')"
+                @click="handleDeleteCargoGroup"
+              >
+                <span class="button-with-spinner">
+                  <span v-if="isPending('delete-cargo-group')" class="button-spinner" aria-hidden="true"></span>
+                  <span>Eliminar todas las unidades</span>
                 </span>
               </button>
               <button class="primary-button" type="button" :disabled="loading || submitting || !selectedCargoWagonId" :aria-busy="isPending('move-cargo')" @click="handleMoveCargo">

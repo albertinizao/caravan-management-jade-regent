@@ -40,6 +40,9 @@ public class CaravanTravelerJpaEntity {
   private String servedTravelerId;
 
   @Column
+  private Integer daysServing = 0;
+
+  @Column
   private String wagonId;
 
   @Column
@@ -50,6 +53,9 @@ public class CaravanTravelerJpaEntity {
 
   @Column(nullable = false)
   private int consumption;
+
+  @Column(nullable = false)
+  private Boolean generatingFood = Boolean.FALSE;
 
   @Column(nullable = false)
   private Instant createdAt;
@@ -131,6 +137,14 @@ public class CaravanTravelerJpaEntity {
     this.servedTravelerId = servedTravelerId;
   }
 
+  public Integer getDaysServing() {
+    return daysServing;
+  }
+
+  public void setDaysServing(Integer daysServing) {
+    this.daysServing = daysServing;
+  }
+
   public String getWagonId() {
     return wagonId;
   }
@@ -161,6 +175,14 @@ public class CaravanTravelerJpaEntity {
 
   public void setConsumption(int consumption) {
     this.consumption = consumption;
+  }
+
+  public Boolean getGeneratingFood() {
+    return generatingFood;
+  }
+
+  public void setGeneratingFood(Boolean generatingFood) {
+    this.generatingFood = generatingFood;
   }
 
   public Instant getCreatedAt() {

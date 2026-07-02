@@ -2,15 +2,24 @@
 import { computed, onMounted, ref } from "vue";
 
 import {
+  advanceCaravanDayCycle,
   createCaravan,
   deleteCaravan,
   getActiveCaravan,
   getCaravanStatistics,
   listCaravans,
+  previewCaravanDayCycle,
   selectActiveCaravan,
 } from "@/services/caravans";
 import { useToast } from "@/composables/useToast";
-import type { Caravan, CaravanStatistics } from "@/types/caravan";
+import { listCaravanTravelers } from "@/services/travelers";
+import type {
+  Caravan,
+  CaravanDayCyclePreview,
+  CaravanDayCycleResult,
+  CaravanStatistics,
+} from "@/types/caravan";
+import type { CaravanTraveler } from "@/types/traveler";
 
 const caravans = ref<Caravan[]>([]);
 const activeCaravan = ref<Caravan | null>(null);
@@ -26,6 +35,14 @@ const mobility = ref(1);
 const morale = ref(1);
 const createModalOpen = ref(false);
 const caravanStatistics = ref<CaravanStatistics | null>(null);
+const dayCycleModalOpen = ref(false);
+const dayCycleSubmitting = ref(false);
+const dayCycleFasting = ref(false);
+const dayCycleIdempotencyKey = ref("");
+const dayCycleTravelers = ref<CaravanTraveler[]>([]);
+const dayCyclePreview = ref<CaravanDayCyclePreview | null>(null);
+const dayCycleError = ref<string | null>(null);
+const dayCycleChoices = ref<Record<string, "HUNT" | "EXPLORE">>({});
 const { showToast } = useToast();
 
 const hiddenContributionStats = new Set([
@@ -43,6 +60,9 @@ const hiddenContributionStats = new Set([
 ]);
 
 const selectedCaravan = computed(() => activeCaravan.value ?? caravans.value.find((caravan) => caravan.active) ?? null);
+const canUseIntermittentFasting = computed(
+  () => selectedCaravan.value?.feats.some((feat) => feat === "Ayuno Intermitente") ?? false,
+);
 const allocatedPoints = computed(() => offense.value + defense.value + mobility.value + morale.value - 4);
 const remainingPoints = computed(() => 3 - allocatedPoints.value);
 const automaticDerivedStats = computed(() => ({
@@ -71,6 +91,107 @@ function openCreateModal() {
 
 function closeCreateModal() {
   createModalOpen.value = false;
+}
+
+function openDayCycleModal() {
+  if (!selectedCaravan.value) {
+    return;
+  }
+
+  dayCycleModalOpen.value = true;
+  dayCycleFasting.value = false;
+  dayCycleError.value = null;
+  dayCyclePreview.value = null;
+  dayCycleIdempotencyKey.value = crypto.randomUUID();
+  void refreshDayCyclePreview();
+}
+
+function closeDayCycleModal() {
+  dayCycleModalOpen.value = false;
+  dayCyclePreview.value = null;
+  dayCycleTravelers.value = [];
+  dayCycleChoices.value = {};
+  dayCycleError.value = null;
+}
+
+function buildDayCyclePayload() {
+  return {
+    fastingEnabled: dayCycleFasting.value,
+    choices: Object.entries(dayCycleChoices.value).map(([travelerId, mode]) => ({ travelerId, mode })),
+  };
+}
+
+const dayCycleShortage = computed(() => {
+  const preview = dayCyclePreview.value;
+  if (!preview) {
+    return 0;
+  }
+
+  const shortageFromTotals = preview.expectedConsumption - preview.currentReserve - preview.expectedGeneration;
+  return Math.max(preview.expectedShortage ?? 0, shortageFromTotals, 0);
+});
+
+const hasDayCycleShortage = computed(() => dayCycleShortage.value > 0);
+
+async function refreshDayCyclePreview() {
+  if (!selectedCaravan.value) {
+    return;
+  }
+
+  try {
+    dayCycleError.value = null;
+    const [travelers, preview] = await Promise.all([
+      listCaravanTravelers(selectedCaravan.value.id),
+      previewCaravanDayCycle(selectedCaravan.value.id, buildDayCyclePayload()),
+    ]);
+    dayCycleTravelers.value = travelers;
+    dayCyclePreview.value = preview;
+    for (const traveler of travelers) {
+      if (traveler.activeRoleCode === "batidor" && !dayCycleChoices.value[traveler.id]) {
+        dayCycleChoices.value[traveler.id] = "HUNT";
+      }
+    }
+  } catch (cause) {
+    dayCycleError.value = cause instanceof Error ? cause.message : "No se pudo calcular el día";
+  }
+}
+
+async function handleAdvanceDayCycle() {
+  if (!selectedCaravan.value) {
+    return;
+  }
+
+  dayCycleSubmitting.value = true;
+  dayCycleError.value = null;
+
+  try {
+    const result: CaravanDayCycleResult = await advanceCaravanDayCycle(selectedCaravan.value.id, {
+      idempotencyKey: dayCycleIdempotencyKey.value,
+      ...buildDayCyclePayload(),
+    });
+
+    const resolvedShortage = Math.max(
+      result.expectedShortage ?? 0,
+      result.expectedConsumption - result.currentReserve - result.expectedGeneration,
+      0,
+    );
+
+    if (resolvedShortage > 0) {
+      showToast(
+        `No se ha podido cubrir todo el consumo de la caravana. Faltan ${resolvedShortage} provisiones.`,
+        "error",
+      );
+    } else {
+      showToast(`Día avanzado: ${result.expectedNetDelta >= 0 ? "+" : ""}${result.expectedNetDelta} provisiones netas.`);
+    }
+
+    closeDayCycleModal();
+    await refresh();
+  } catch (cause) {
+    dayCycleError.value = cause instanceof Error ? cause.message : "No se pudo avanzar el día";
+  } finally {
+    dayCycleSubmitting.value = false;
+  }
 }
 
 async function refresh() {
@@ -195,6 +316,9 @@ onMounted(refresh);
           </p>
         </div>
         <div class="hero-actions">
+          <button class="secondary-button" type="button" :disabled="loading || submitting || !selectedCaravan" @click="openDayCycleModal">
+            Pasar el día
+          </button>
           <button class="secondary-button" type="button" :disabled="loading || submitting" @click="openCreateModal">
             Crear caravana
           </button>
@@ -403,6 +527,109 @@ onMounted(refresh);
     </section>
 
     <teleport to="body">
+      <div v-if="dayCycleModalOpen" class="modal-backdrop" @click.self="closeDayCycleModal">
+        <div class="modal modal-cycle">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">Ciclo diario</p>
+              <h2>Pasar el día</h2>
+              <p class="muted" v-if="selectedCaravan">
+                {{ selectedCaravan.name }}
+              </p>
+            </div>
+            <button class="ghost-button" type="button" @click="closeDayCycleModal">Cerrar</button>
+          </div>
+
+            <p v-if="dayCycleError" class="error">{{ dayCycleError }}</p>
+
+            <div v-if="selectedCaravan" class="day-cycle-layout">
+              <section class="card card-compact">
+                <h3>Opciones del día</h3>
+                <p v-if="hasDayCycleShortage" class="warning-banner danger day-cycle-alert">
+                  <strong>Desabastecimiento previsto.</strong>
+                  Faltan <strong>{{ dayCycleShortage }}</strong> provisiones para cubrir el consumo diario.
+                </p>
+                <label class="toggle-row">
+                  <input
+                    v-model="dayCycleFasting"
+                    :disabled="!canUseIntermittentFasting"
+                    type="checkbox"
+                  @change="refreshDayCyclePreview"
+                />
+                <span>Activar Ayuno Intermitente</span>
+              </label>
+              <p v-if="!canUseIntermittentFasting" class="muted">Requiere la dote Ayuno Intermitente.</p>
+
+              <div v-for="traveler in dayCycleTravelers.filter((item) => item.activeRoleCode === 'batidor')" :key="traveler.id" class="day-choice-row">
+                <strong>{{ traveler.fullName }}</strong>
+                <select v-model="dayCycleChoices[traveler.id]" @change="refreshDayCyclePreview">
+                  <option value="HUNT">Cazar</option>
+                  <option value="EXPLORE">Explorar</option>
+                </select>
+              </div>
+
+              <button class="secondary-button" type="button" :disabled="dayCycleSubmitting" @click="refreshDayCyclePreview">
+                Recalcular
+              </button>
+            </section>
+
+              <section class="card card-compact" v-if="dayCyclePreview">
+                <h3>Vista previa</h3>
+                <dl class="stats stats-2">
+                  <div>
+                    <dt>Reserva actual</dt>
+                    <dd>{{ dayCyclePreview.currentReserve }}</dd>
+                  </div>
+                <div>
+                  <dt>Consumo</dt>
+                  <dd>{{ dayCyclePreview.expectedConsumption }}</dd>
+                </div>
+                <div>
+                  <dt>Generación</dt>
+                  <dd>{{ dayCyclePreview.expectedGeneration }}</dd>
+                </div>
+                <div>
+                  <dt>Saldo neto</dt>
+                  <dd>{{ dayCyclePreview.expectedNetDelta }}</dd>
+                </div>
+                <div>
+                  <dt>Reserva final</dt>
+                  <dd>{{ dayCyclePreview.expectedReserveAfterResolution }}</dd>
+                </div>
+                <div>
+                  <dt>Desabastecimiento</dt>
+                  <dd>{{ dayCyclePreview.expectedShortage }}</dd>
+                </div>
+              </dl>
+
+              <section v-if="dayCyclePreview.warnings.length > 0">
+                <h4>Advertencias</h4>
+                <ul class="simple-list">
+                  <li v-for="warning in dayCyclePreview.warnings" :key="warning">{{ warning }}</li>
+                </ul>
+              </section>
+
+              <section>
+                <h4>Contribuciones</h4>
+                <ul class="simple-list">
+                  <li v-for="item in dayCyclePreview.contributions" :key="`${item.effectCode}-${item.sourceType}-${item.sourceId}-${item.quantity}`">
+                    <strong>{{ item.sourceName }}</strong>
+                    <span>{{ item.quantity }} · {{ item.reason }}</span>
+                  </li>
+                </ul>
+              </section>
+            </section>
+          </div>
+
+          <div class="modal-actions">
+            <button class="secondary-button" type="button" @click="closeDayCycleModal">Cancelar</button>
+            <button class="primary-button" type="button" :disabled="dayCycleSubmitting || !dayCyclePreview" @click="handleAdvanceDayCycle">
+              {{ dayCycleSubmitting ? "Avanzando…" : "Confirmar día" }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div v-if="createModalOpen" class="modal-backdrop" @click.self="closeCreateModal">
         <div class="modal modal-create">
           <div class="modal-header">
@@ -799,6 +1026,10 @@ dd {
   width: min(900px, 100%);
 }
 
+.modal-cycle {
+  width: min(980px, 100%);
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -817,10 +1048,44 @@ dd {
   background: rgba(254, 226, 226, 0.9);
 }
 
+.day-cycle-alert {
+  margin-bottom: 0.75rem;
+}
+
+.day-cycle-layout {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.card-compact {
+  box-shadow: none;
+  background: #f8fafc;
+}
+
+.toggle-row,
+.day-choice-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.day-choice-row {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.simple-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
 @media (max-width: 900px) {
   .grid,
   .stats,
-  .sections {
+  .sections,
+  .day-cycle-layout {
     grid-template-columns: 1fr;
   }
 

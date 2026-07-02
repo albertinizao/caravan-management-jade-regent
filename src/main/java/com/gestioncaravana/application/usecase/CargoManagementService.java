@@ -145,6 +145,24 @@ public class CargoManagementService
     var now = clock.instant();
     var displayName = command.sourceType() == CaravanCargoSourceType.CATALOG ? catalogItem.name() : requireText(command.displayName(), "displayName");
     var category = command.sourceType() == CaravanCargoSourceType.CATALOG ? catalogItem.category() : requireText(command.category(), "category");
+    if (shouldStoreAsUnitInstances(command.sourceType(), command.catalogCode())) {
+      var saved = saveUnitCargoInstances(
+          caravanId,
+          command.sourceType(),
+          command.catalogCode(),
+          displayName,
+          category,
+          quantity,
+          cargoUnits,
+          wagon.id(),
+          command.origin(),
+          command.specificCommodity(),
+          command.deity(),
+          command.notes(),
+          now);
+      return toView(saved.getFirst());
+    }
+
     var cargo = CaravanCargo.create(
         UUID.randomUUID(),
         caravanId,
@@ -428,6 +446,47 @@ public class CargoManagementService
       throw new IllegalArgumentException(fieldName + " is required");
     }
     return value.trim();
+  }
+
+  private boolean shouldStoreAsUnitInstances(CaravanCargoSourceType sourceType, String catalogCode) {
+    return sourceType == CaravanCargoSourceType.CATALOG
+        && (SUPPLIES_CODE.equals(catalogCode) || PERISHABLE_SUPPLIES_CODE.equals(catalogCode));
+  }
+
+  private List<CaravanCargo> saveUnitCargoInstances(
+      UUID caravanId,
+      CaravanCargoSourceType sourceType,
+      String catalogCode,
+      String displayName,
+      String category,
+      int quantity,
+      int cargoUnits,
+      UUID wagonId,
+      String origin,
+      String specificCommodity,
+      String deity,
+      String notes,
+      java.time.Instant now) {
+    var saved = new java.util.ArrayList<CaravanCargo>(quantity);
+    for (var index = 0; index < quantity; index++) {
+      var cargo = CaravanCargo.create(
+          UUID.randomUUID(),
+          caravanId,
+          sourceType,
+          catalogCode,
+          displayName,
+          category,
+          1,
+          cargoUnits,
+          wagonId,
+          origin,
+          specificCommodity,
+          deity,
+          notes,
+          now);
+      saved.add(cargoRepository.save(cargo));
+    }
+    return saved;
   }
 
   private String normalize(String value) {

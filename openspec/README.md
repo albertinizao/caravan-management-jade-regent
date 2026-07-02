@@ -12,3 +12,4 @@ This directory contains feature specifications written before implementation.
 - `specs/caravan-cargo/spec.md` — Browse, add, inspect, delete, and assign caravan cargo to specific wagons.
 - `specs/caravan-wagon-improvements/spec.md` — Manage improvements applied to a selected wagon and refresh derived stats.
 - `specs/caravan-statistics/spec.md` — Configure initial caravan stats and inspect the full rule-driven statistics sheet.
+- `specs/caravan-supply-cycle/spec.md` — Advance one day and resolve caravan supply consumption, generation, and shortages.

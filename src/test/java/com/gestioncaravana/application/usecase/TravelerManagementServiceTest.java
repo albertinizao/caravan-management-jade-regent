@@ -125,6 +125,43 @@ class TravelerManagementServiceTest {
   }
 
   @Test
+  void rejectsAssigningASecondServantToTheSameTraveler() {
+    var caravan = createCaravan();
+    var target = service.execute(
+        caravan.id(),
+        new AddCaravanTravelerCommand("Objetivo", null, List.of("pasajero"), List.of("pasajero"), null, 1, null, null, 1, null));
+    service.execute(
+        caravan.id(),
+        new AddCaravanTravelerCommand(
+            "Sirviente 1",
+            null,
+            List.of("pasajero", "sirviente"),
+            List.of("sirviente"),
+            "sirviente",
+            1,
+            null,
+            null,
+            1,
+            target.id()));
+
+    assertThatThrownBy(() -> service.execute(
+        caravan.id(),
+        new AddCaravanTravelerCommand(
+            "Sirviente 2",
+            null,
+            List.of("pasajero", "sirviente"),
+            List.of("sirviente"),
+            "sirviente",
+            1,
+            null,
+            null,
+            1,
+            target.id())))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("already assigned");
+  }
+
+  @Test
   void rejectsUnknownRolesOnCreation() {
     var caravan = createCaravan();
 

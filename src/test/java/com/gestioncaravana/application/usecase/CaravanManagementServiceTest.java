@@ -7,8 +7,10 @@ import com.gestioncaravana.application.port.in.CreateCaravanUseCase.CreateCarava
 import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanDayResolutionRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanFeatCatalogPort;
 import com.gestioncaravana.application.port.out.CaravanFeatRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
@@ -16,6 +18,8 @@ import com.gestioncaravana.domain.CaravanBeast;
 import com.gestioncaravana.domain.CaravanBeastAssignmentType;
 import com.gestioncaravana.domain.CaravanFeat;
 import com.gestioncaravana.domain.CaravanFeatAcquisitionSourceType;
+import com.gestioncaravana.domain.CaravanDayResolution;
+import com.gestioncaravana.domain.CaravanSupplyState;
 import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
 import java.time.Clock;
@@ -46,6 +50,8 @@ class CaravanManagementServiceTest {
         new InMemoryTravelerRepository(),
         new InMemoryBeastRepository(),
         featRepository,
+        new InMemorySupplyStateRepository(),
+        new InMemoryDayResolutionRepository(),
         new InMemoryFeatCatalogPort(),
         activeSelection,
         Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
@@ -328,6 +334,55 @@ class CaravanManagementServiceTest {
     @Override
     public Optional<com.gestioncaravana.domain.CaravanFeatType> findByCode(String code) {
       return all().stream().filter(feat -> feat.code().equals(code)).findFirst();
+    }
+  }
+
+  private static final class InMemorySupplyStateRepository implements CaravanSupplyStateRepositoryPort {
+    private final List<CaravanSupplyState> states = new ArrayList<>();
+
+    @Override
+    public CaravanSupplyState save(CaravanSupplyState state) {
+      states.removeIf(existing -> existing.caravanId().equals(state.caravanId()));
+      states.add(state);
+      return state;
+    }
+
+    @Override
+    public Optional<CaravanSupplyState> findByCaravanId(UUID caravanId) {
+      return states.stream().filter(state -> state.caravanId().equals(caravanId)).findFirst();
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      states.removeIf(state -> state.caravanId().equals(caravanId));
+    }
+  }
+
+  private static final class InMemoryDayResolutionRepository implements CaravanDayResolutionRepositoryPort {
+    private final List<CaravanDayResolution> resolutions = new ArrayList<>();
+
+    @Override
+    public CaravanDayResolution save(CaravanDayResolution resolution) {
+      resolutions.removeIf(existing -> existing.id().equals(resolution.id()));
+      resolutions.add(resolution);
+      return resolution;
+    }
+
+    @Override
+    public Optional<CaravanDayResolution> findByCaravanIdAndIdempotencyKey(UUID caravanId, String idempotencyKey) {
+      return resolutions.stream()
+          .filter(resolution -> resolution.caravanId().equals(caravanId) && resolution.idempotencyKey().equals(idempotencyKey))
+          .findFirst();
+    }
+
+    @Override
+    public List<CaravanDayResolution> findAllByCaravanId(UUID caravanId) {
+      return resolutions.stream().filter(resolution -> resolution.caravanId().equals(caravanId)).toList();
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      resolutions.removeIf(resolution -> resolution.caravanId().equals(caravanId));
     }
   }
 

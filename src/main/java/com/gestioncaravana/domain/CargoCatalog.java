@@ -275,7 +275,7 @@ public final class CargoCatalog {
           "Raciones y agua potable.",
           null,
           List.of(),
-          List.of()),
+          List.of("carro-de-suministros")),
       new CargoCatalogItem(
           "suministros-perecederos",
           "Suministros Perecederos",
@@ -290,7 +290,7 @@ public final class CargoCatalog {
           "Provisiones delicadas.",
           null,
           List.of(),
-          List.of()),
+          List.of("carro-de-suministros")),
       new CargoCatalogItem(
           "tesoro",
           "Tesoro",

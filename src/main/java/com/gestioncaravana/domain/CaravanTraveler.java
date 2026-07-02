@@ -139,6 +139,24 @@ public record CaravanTraveler(
         now);
   }
 
+  public CaravanTraveler withRoleSpecificData(TravelerRoleData roleData, Instant now) {
+    return new CaravanTraveler(
+        id,
+        caravanId,
+        fullName,
+        description,
+        availableRoleCodes,
+        activeRoleCodes,
+        activeRoleCode,
+        maxActiveRoleCount,
+        roleData == null ? TravelerRoleData.empty() : roleData,
+        wagonId,
+        contract,
+        consumption,
+        createdAt,
+        now);
+  }
+
   public CaravanTraveler changeRoles(List<String> roleCodes, String roleCode, int newMaxActiveRoleCount, TravelerRoleData roleData, Instant now) {
     var normalizedRoles = roleCodes == null ? List.<String>of() : roleCodes.stream().map(String::trim).filter(code -> !code.isBlank()).distinct().toList();
     var normalized = roleCode == null ? null : roleCode.trim();
@@ -205,6 +223,10 @@ public record CaravanTraveler(
         consumption,
         createdAt,
         now);
+  }
+
+  public boolean hasActiveRole(String roleCode) {
+    return roleCode != null && activeRoleCodes.stream().anyMatch(roleCode::equals);
   }
 
   private static String normalize(String value) {

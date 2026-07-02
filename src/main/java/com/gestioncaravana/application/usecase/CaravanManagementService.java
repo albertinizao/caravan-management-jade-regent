@@ -11,8 +11,10 @@ import com.gestioncaravana.application.port.in.SelectActiveCaravanUseCase;
 import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanDayResolutionRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanFeatCatalogPort;
 import com.gestioncaravana.application.port.out.CaravanFeatRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
@@ -43,6 +45,8 @@ public class CaravanManagementService
   private final CaravanTravelerRepositoryPort travelerRepository;
   private final CaravanBeastRepositoryPort beastRepository;
   private final CaravanFeatRepositoryPort featRepository;
+  private final CaravanSupplyStateRepositoryPort supplyStateRepository;
+  private final CaravanDayResolutionRepositoryPort dayResolutionRepository;
   private final CaravanFeatCatalogPort featCatalogPort;
   private final ActiveCaravanSelectionPort activeSelectionPort;
   private final Clock clock;
@@ -54,6 +58,8 @@ public class CaravanManagementService
       CaravanTravelerRepositoryPort travelerRepository,
       CaravanBeastRepositoryPort beastRepository,
       CaravanFeatRepositoryPort featRepository,
+      CaravanSupplyStateRepositoryPort supplyStateRepository,
+      CaravanDayResolutionRepositoryPort dayResolutionRepository,
       CaravanFeatCatalogPort featCatalogPort,
       ActiveCaravanSelectionPort activeSelectionPort,
       Clock clock) {
@@ -62,6 +68,8 @@ public class CaravanManagementService
     this.travelerRepository = travelerRepository;
     this.beastRepository = beastRepository;
     this.featRepository = featRepository;
+    this.supplyStateRepository = supplyStateRepository;
+    this.dayResolutionRepository = dayResolutionRepository;
     this.featCatalogPort = featCatalogPort;
     this.activeSelectionPort = activeSelectionPort;
     this.clock = clock;
@@ -73,6 +81,8 @@ public class CaravanManagementService
       CaravanTravelerRepositoryPort travelerRepository,
       CaravanBeastRepositoryPort beastRepository,
       CaravanFeatRepositoryPort featRepository,
+      CaravanSupplyStateRepositoryPort supplyStateRepository,
+      CaravanDayResolutionRepositoryPort dayResolutionRepository,
       ActiveCaravanSelectionPort activeSelectionPort,
       Clock clock) {
     this(
@@ -81,6 +91,8 @@ public class CaravanManagementService
         travelerRepository,
         beastRepository,
         featRepository,
+        supplyStateRepository,
+        dayResolutionRepository,
         new NoopCaravanFeatCatalogPort(),
         activeSelectionPort,
         clock);
@@ -91,6 +103,8 @@ public class CaravanManagementService
       CaravanWagonRepositoryPort wagonRepository,
       CaravanTravelerRepositoryPort travelerRepository,
       CaravanBeastRepositoryPort beastRepository,
+      CaravanSupplyStateRepositoryPort supplyStateRepository,
+      CaravanDayResolutionRepositoryPort dayResolutionRepository,
       ActiveCaravanSelectionPort activeSelectionPort,
       Clock clock) {
     this(
@@ -99,6 +113,8 @@ public class CaravanManagementService
         travelerRepository,
         beastRepository,
         new NoopCaravanFeatRepositoryPort(),
+        supplyStateRepository,
+        dayResolutionRepository,
         new NoopCaravanFeatCatalogPort(),
         activeSelectionPort,
         clock);
@@ -106,6 +122,7 @@ public class CaravanManagementService
 
   @Override
   public CaravanCampaignView execute(CreateCaravanCommand command) {
+    var now = clock.instant();
     var campaign = CaravanCampaign.create(
         UUID.randomUUID(),
         command.name(),
@@ -115,8 +132,10 @@ public class CaravanManagementService
             command.defense(),
             command.mobility(),
             command.morale()),
-        clock.instant());
-    return toView(campaignRepository.save(campaign), false);
+        now);
+    var saved = campaignRepository.save(campaign);
+    supplyStateRepository.save(com.gestioncaravana.domain.CaravanSupplyState.initial(saved.id(), now));
+    return toView(saved, false);
   }
 
   @Override
@@ -153,6 +172,8 @@ public class CaravanManagementService
     travelerRepository.deleteByCaravanId(exists.id());
     beastRepository.deleteByCaravanId(exists.id());
     featRepository.deleteByCaravanId(exists.id());
+    supplyStateRepository.deleteByCaravanId(exists.id());
+    dayResolutionRepository.deleteByCaravanId(exists.id());
 
     activeSelectionPort.getActiveCaravanId()
         .filter(activeId -> activeId.equals(id))

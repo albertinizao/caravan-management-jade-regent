@@ -4,6 +4,8 @@ export interface TravelerRoleCatalogItem {
   description: string;
   requirements: string;
   requiresTargetTraveler: boolean;
+  helperBenefitMode: "NONE" | "DAILY" | "PERIODIC";
+  helperPeriodDays: number | null;
 }
 
 export interface CaravanTraveler {

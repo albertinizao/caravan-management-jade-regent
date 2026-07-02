@@ -5,4 +5,6 @@ public record TravelerRoleCatalogItemResponse(
     String name,
     String description,
     String requirements,
-    boolean requiresTargetTraveler) {}
+    boolean requiresTargetTraveler,
+    String helperBenefitMode,
+    Integer helperPeriodDays) {}

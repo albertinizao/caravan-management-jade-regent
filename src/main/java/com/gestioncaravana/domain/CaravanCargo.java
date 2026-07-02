@@ -12,6 +12,8 @@ public record CaravanCargo(
     String category,
     int quantity,
     int cargoUnits,
+    Integer currentProvisions,
+    Boolean dayPassed,
     UUID wagonId,
     String origin,
     String specificCommodity,
@@ -42,6 +44,12 @@ public record CaravanCargo(
     if (cargoUnits < 1) {
       throw new IllegalArgumentException("cargoUnits must be greater than or equal to 1");
     }
+    if (currentProvisions != null && currentProvisions < 0) {
+      throw new IllegalArgumentException("currentProvisions must be greater than or equal to 0");
+    }
+    if (dayPassed == null) {
+      throw new IllegalArgumentException("dayPassed is required");
+    }
     if (createdAt == null || updatedAt == null) {
       throw new IllegalArgumentException("timestamps are required");
     }
@@ -71,6 +79,8 @@ public record CaravanCargo(
         category.trim(),
         quantity,
         cargoUnits,
+        initialProvisionsFor(catalogCode, quantity, cargoUnits),
+        false,
         wagonId,
         normalize(origin),
         normalize(specificCommodity),
@@ -90,6 +100,8 @@ public record CaravanCargo(
         category,
         quantity,
         cargoUnits,
+        currentProvisions,
+        dayPassed,
         wagonId,
         origin,
         specificCommodity,
@@ -118,6 +130,8 @@ public record CaravanCargo(
         category == null || category.isBlank() ? this.category : category.trim(),
         quantity == null ? this.quantity : quantity,
         cargoUnits == null ? this.cargoUnits : cargoUnits,
+        currentProvisions,
+        dayPassed,
         wagonId,
         origin == null ? this.origin : normalize(origin),
         specificCommodity == null ? this.specificCommodity : normalize(specificCommodity),
@@ -125,6 +139,55 @@ public record CaravanCargo(
         notes == null ? this.notes : normalize(notes),
         createdAt,
         now);
+  }
+
+  public CaravanCargo withCurrentProvisions(Integer currentProvisions, Boolean dayPassed, Instant now) {
+    return new CaravanCargo(
+        id,
+        caravanId,
+        sourceType,
+        catalogCode,
+        displayName,
+        category,
+        quantity,
+        cargoUnits,
+        currentProvisions,
+        dayPassed,
+        wagonId,
+        origin,
+        specificCommodity,
+        deity,
+        notes,
+        createdAt,
+        now);
+  }
+
+  public CaravanCargo withDayPassed(Boolean dayPassed, Instant now) {
+    return new CaravanCargo(
+        id,
+        caravanId,
+        sourceType,
+        catalogCode,
+        displayName,
+        category,
+        quantity,
+        cargoUnits,
+        currentProvisions,
+        dayPassed,
+        wagonId,
+        origin,
+        specificCommodity,
+        deity,
+        notes,
+        createdAt,
+        now);
+  }
+
+  private static Integer initialProvisionsFor(String catalogCode, int quantity, int cargoUnits) {
+    if ("suministros".equals(catalogCode) || "suministros-perecederos".equals(catalogCode)) {
+      return quantity * 10;
+    }
+    return null;
   }
 
   private static String normalize(String value) {

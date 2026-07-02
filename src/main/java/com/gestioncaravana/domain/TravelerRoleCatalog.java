@@ -9,7 +9,7 @@ public final class TravelerRoleCatalog {
 
   private static final List<TravelerRoleCatalogItem> ITEMS = List.of(
       new TravelerRoleCatalogItem("adivino", "Adivino", "Consejero espiritual y guía de la caravana.", "Ser capaz de lanzar conjuros de adivinación.", false),
-      new TravelerRoleCatalogItem("agricultor", "Agricultor", "Cultiva comida para la caravana.", "1 rango en profesión (jardinero o agricultor).", false),
+      new TravelerRoleCatalogItem("agricultor", "Agricultor", "Cultiva comida para la caravana.", "1 rango en profesión (jardinero o agricultor).", false, TravelerRoleHelperBenefitMode.PERIODIC, 4),
       new TravelerRoleCatalogItem("animador-itinerante", "Animador itinerante", "Consigue dinero entreteniendo en asentamientos.", "1 rango en interpretar.", false),
       new TravelerRoleCatalogItem("artesano", "Artesano", "Trabaja en piezas de artesanía.", "1 rango de artesanía.", false),
       new TravelerRoleCatalogItem("artillero", "Artillero", "Maneja máquinas de asedio.", "Competencia con armas de asedio.", false),
@@ -17,7 +17,7 @@ public final class TravelerRoleCatalog {
       new TravelerRoleCatalogItem("boticario", "Boticario", "Produce artículos curativos y apoya el descanso.", "1 rango en saber (naturaleza) o artesanía (alquimia).", false),
       new TravelerRoleCatalogItem("carrero", "Carrero", "Realiza reparaciones sobre la marcha.", "1 rango en artesanía (carpintería) o profesión (ingeniero o carrero).", false),
       new TravelerRoleCatalogItem("carretero", "Carretero", "Controla los carros durante el viaje.", "1 rango en profesión (carretero) o trato con animales.", false),
-      new TravelerRoleCatalogItem("cocinero", "Cocinero", "Mejora el rendimiento de los suministros.", "1 rango en una profesión culinaria relacionada.", false),
+      new TravelerRoleCatalogItem("cocinero", "Cocinero", "Mejora el rendimiento de los suministros.", "1 rango en una profesión culinaria relacionada.", false, TravelerRoleHelperBenefitMode.DAILY, null),
       new TravelerRoleCatalogItem("comediante", "Comediante", "Mejora la determinación de la caravana.", "1 rango en interpretar.", false),
       new TravelerRoleCatalogItem("comerciante", "Comerciante", "Facilita transacciones comerciales.", "1 rango en Diplomacia, engañar o Profesión (mercader).", false),
       new TravelerRoleCatalogItem("cronista", "Cronista", "Registra la historia de la caravana.", "1 rango en Saber (historia), Interpretar (escritura) o Profesión (escriba).", false),

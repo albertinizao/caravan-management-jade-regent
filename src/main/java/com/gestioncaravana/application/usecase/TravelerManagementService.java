@@ -116,7 +116,7 @@ public class TravelerManagementService
       throw new IllegalArgumentException("activeRoleCodes cannot exceed maxActiveRoleCount");
     }
     var roleData = activeRoleCodes.stream().anyMatch(TravelerRoleCatalog::requiresTargetTraveler)
-        ? new TravelerRoleData(requireTargetTraveler(caravanId, command.servedTravelerId()).id())
+        ? new TravelerRoleData(validateRoleTarget(caravanId, null, command.servedTravelerId()).id())
         : TravelerRoleData.empty();
     var traveler = CaravanTraveler.create(
         UUID.randomUUID(),
@@ -194,7 +194,7 @@ public class TravelerManagementService
     }
     var contract = resolveContract(command.salary(), command.contractConditions(), clock.instant());
     var roleData = activeRoleCodes.stream().anyMatch(TravelerRoleCatalog::requiresTargetTraveler)
-        ? new TravelerRoleData(requireTargetTraveler(caravanId, command.servedTravelerId()).id())
+        ? new TravelerRoleData(validateRoleTarget(caravanId, travelerId, command.servedTravelerId()).id())
         : TravelerRoleData.empty();
 
     var wagonId = command.wagonId();
@@ -310,7 +310,17 @@ public class TravelerManagementService
     if (target.id().equals(travelerId)) {
       throw new IllegalArgumentException("servedTravelerId cannot point to the same traveler");
     }
+    if (isTargetAlreadyServedByAnotherTraveler(caravanId, targetTravelerId, travelerId)) {
+      throw new IllegalArgumentException("servedTravelerId is already assigned to another servant");
+    }
     return target;
+  }
+
+  private boolean isTargetAlreadyServedByAnotherTraveler(UUID caravanId, UUID targetTravelerId, UUID excludedTravelerId) {
+    return travelerRepository.findAllByCaravanId(caravanId).stream()
+        .filter(other -> excludedTravelerId == null || !other.id().equals(excludedTravelerId))
+        .filter(other -> other.hasActiveRole("sirviente"))
+        .anyMatch(other -> other.roleSpecificData() != null && targetTravelerId.equals(other.roleSpecificData().servedTravelerId()));
   }
 
   private int currentWagonCapacity(UUID caravanId, UUID wagonId) {
@@ -345,7 +355,9 @@ public class TravelerManagementService
         item.name(),
         item.description(),
         item.requirements(),
-        item.requiresTargetTraveler());
+        item.requiresTargetTraveler(),
+        item.helperBenefitMode().name(),
+        item.helperPeriodDays());
   }
 
   private List<String> ensurePassengerRole(List<String> roleCodes) {

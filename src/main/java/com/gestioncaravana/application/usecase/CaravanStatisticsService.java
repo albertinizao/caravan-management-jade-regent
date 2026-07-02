@@ -85,7 +85,7 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
     if (caravan.discontent() >= mainStats.morale()) {
       warnings.add("El descontento ha alcanzado o superado la moral de la caravana.");
     }
-    if (travelers.stream().noneMatch(traveler -> "adivino".equals(traveler.activeRoleCode()))) {
+    if (travelers.stream().noneMatch(traveler -> traveler.hasActiveRole("adivino"))) {
       warnings.add("La caravana no tiene adivino: aplica el penalizador base de seguridad y determinación.");
     }
     if (otherStats.cargoRemaining() < 0) {
@@ -184,7 +184,7 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
     for (var royalWagon : royalWagons) {
       var passengers = travelers.stream()
           .filter(traveler -> royalWagon.id().equals(traveler.wagonId()))
-          .filter(traveler -> "pasajero".equals(traveler.activeRoleCode()))
+          .filter(traveler -> traveler.hasActiveRole("pasajero"))
           .count();
       if (passengers > 0) {
         var bonus = (int) passengers * 2;
@@ -238,7 +238,7 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
     }
 
     for (var traveler : travelers) {
-      if ("batidor".equals(traveler.activeRoleCode())) {
+      if (traveler.hasActiveRole("batidor")) {
         contributions.add(contribution("consumption", "ROLE", traveler.id().toString(), traveler.fullName(), "-" + traveler.consumption(), "ADD", "Los batidores no cuentan para el consumo"));
       } else {
         consumption += traveler.consumption();
@@ -348,7 +348,7 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
   }
 
   private int countTravelersWithRole(List<CaravanTraveler> travelers, String roleCode) {
-    return (int) travelers.stream().filter(traveler -> roleCode.equals(traveler.activeRoleCode())).count();
+    return (int) travelers.stream().filter(traveler -> traveler.hasActiveRole(roleCode)).count();
   }
 
   private int countActiveFeats(List<com.gestioncaravana.domain.CaravanFeat> feats, String featTypeCode) {

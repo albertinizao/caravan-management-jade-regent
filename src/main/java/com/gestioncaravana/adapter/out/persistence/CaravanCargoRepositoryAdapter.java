@@ -57,6 +57,8 @@ public class CaravanCargoRepositoryAdapter implements CaravanCargoRepositoryPort
     entity.setCategory(cargo.category());
     entity.setQuantity(cargo.quantity());
     entity.setCargoUnits(cargo.cargoUnits());
+    entity.setCurrentProvisions(cargo.currentProvisions());
+    entity.setDayPassed(cargo.dayPassed());
     entity.setWagonId(cargo.wagonId() == null ? null : cargo.wagonId().toString());
     entity.setOrigin(cargo.origin());
     entity.setSpecificCommodity(cargo.specificCommodity());
@@ -77,6 +79,8 @@ public class CaravanCargoRepositoryAdapter implements CaravanCargoRepositoryPort
         entity.getCategory(),
         entity.getQuantity(),
         entity.getCargoUnits(),
+        entity.getCurrentProvisions(),
+        entity.getDayPassed() == null ? Boolean.FALSE : entity.getDayPassed(),
         entity.getWagonId() == null ? null : UUID.fromString(entity.getWagonId()),
         entity.getOrigin(),
         entity.getSpecificCommodity(),

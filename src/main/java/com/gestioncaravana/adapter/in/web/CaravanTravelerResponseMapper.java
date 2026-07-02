@@ -35,6 +35,8 @@ final class CaravanTravelerResponseMapper {
         view.name(),
         view.description(),
         view.requirements(),
-        view.requiresTargetTraveler());
+        view.requiresTargetTraveler(),
+        view.helperBenefitMode(),
+        view.helperPeriodDays());
   }
 }

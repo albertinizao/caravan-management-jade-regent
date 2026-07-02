@@ -35,6 +35,12 @@ public class CaravanCargoJpaEntity {
   @Column(nullable = false)
   private int cargoUnits;
 
+  @Column
+  private Integer currentProvisions;
+
+  @Column
+  private Boolean dayPassed;
+
   @Column(length = 36)
   private String wagonId;
 
@@ -120,6 +126,22 @@ public class CaravanCargoJpaEntity {
 
   public void setCargoUnits(int cargoUnits) {
     this.cargoUnits = cargoUnits;
+  }
+
+  public Integer getCurrentProvisions() {
+    return currentProvisions;
+  }
+
+  public void setCurrentProvisions(Integer currentProvisions) {
+    this.currentProvisions = currentProvisions;
+  }
+
+  public Boolean getDayPassed() {
+    return dayPassed;
+  }
+
+  public void setDayPassed(Boolean dayPassed) {
+    this.dayPassed = dayPassed;
   }
 
   public String getWagonId() {

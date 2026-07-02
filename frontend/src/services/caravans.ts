@@ -1,5 +1,10 @@
 import { fetchJson } from "@/services/http";
-import type { Caravan, CaravanStatistics } from "@/types/caravan";
+import type {
+  Caravan,
+  CaravanDayCyclePreview,
+  CaravanDayCycleResult,
+  CaravanStatistics,
+} from "@/types/caravan";
 
 export interface CreateCaravanPayload {
   name: string;
@@ -12,6 +17,17 @@ export interface CreateCaravanPayload {
 
 export interface SelectActiveCaravanPayload {
   caravanId: string;
+}
+
+export interface CaravanDayCycleChoicePayload {
+  travelerId: string;
+  mode: "HUNT" | "EXPLORE" | string;
+}
+
+export interface CaravanDayCyclePayload {
+  idempotencyKey: string;
+  fastingEnabled: boolean;
+  choices: CaravanDayCycleChoicePayload[];
 }
 
 export interface ActiveCaravanResponse {
@@ -46,6 +62,20 @@ export function getCaravan(id: string) {
 
 export function getCaravanStatistics(id: string) {
   return fetchJson<CaravanStatistics>(`/caravans/${id}/statistics`);
+}
+
+export function previewCaravanDayCycle(id: string, payload: Omit<CaravanDayCyclePayload, "idempotencyKey">) {
+  return fetchJson<CaravanDayCyclePreview>(`/caravans/${id}/day-cycle/preview`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function advanceCaravanDayCycle(id: string, payload: CaravanDayCyclePayload) {
+  return fetchJson<CaravanDayCycleResult>(`/caravans/${id}/day-cycle/advance`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function deleteCaravan(id: string) {

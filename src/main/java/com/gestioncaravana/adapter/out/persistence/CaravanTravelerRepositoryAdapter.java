@@ -65,6 +65,8 @@ public class CaravanTravelerRepositoryAdapter implements CaravanTravelerReposito
     entity.setSalary(traveler.contract() == null ? null : traveler.contract().salary());
     entity.setContractConditions(traveler.contract() == null ? null : traveler.contract().conditions());
     entity.setConsumption(traveler.consumption());
+    entity.setGeneratingFood(traveler.roleSpecificData() != null && traveler.roleSpecificData().generatingFood());
+    entity.setDaysServing(traveler.roleSpecificData() == null ? 0 : traveler.roleSpecificData().daysServing());
     entity.setCreatedAt(traveler.createdAt());
     entity.setUpdatedAt(traveler.updatedAt());
     return entity;
@@ -96,7 +98,10 @@ public class CaravanTravelerRepositoryAdapter implements CaravanTravelerReposito
         activeRoleCodes,
         activeRoleCode,
         entity.getMaxActiveRoleCount() == null || entity.getMaxActiveRoleCount() < 1 ? 1 : entity.getMaxActiveRoleCount(),
-        entity.getServedTravelerId() == null ? TravelerRoleData.empty() : new TravelerRoleData(UUID.fromString(entity.getServedTravelerId())),
+        new TravelerRoleData(
+            entity.getServedTravelerId() == null ? null : UUID.fromString(entity.getServedTravelerId()),
+            Boolean.TRUE.equals(entity.getGeneratingFood()),
+            entity.getDaysServing() == null ? 0 : entity.getDaysServing()),
         entity.getWagonId() == null ? null : UUID.fromString(entity.getWagonId()),
         entity.getSalary() == null && normalize(entity.getContractConditions()) == null
             ? null

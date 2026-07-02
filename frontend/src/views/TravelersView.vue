@@ -112,9 +112,22 @@ const selectedRoleOptions = computed(() =>
   roleCatalog.value.filter((role) => selectedAvailableRoleCodes.value.includes(role.code)),
 );
 
-const createTargetTravelerOptions = computed(() => travelers.value);
+function isTravelerAlreadyServed(travelerId: string, excludedTravelerId?: string | null) {
+  return travelers.value.some((traveler) =>
+    traveler.id !== excludedTravelerId
+    && traveler.servedTravelerId === travelerId
+    && traveler.activeRoleCodes.includes("sirviente"),
+  );
+}
+
+const createTargetTravelerOptions = computed(() =>
+  travelers.value.filter((traveler) => !isTravelerAlreadyServed(traveler.id)),
+);
 const selectedTargetTravelerOptions = computed(() =>
-  travelers.value.filter((traveler) => traveler.id !== selectedTraveler.value?.id),
+  travelers.value.filter((traveler) =>
+    traveler.id !== selectedTraveler.value?.id
+    && (!isTravelerAlreadyServed(traveler.id, selectedTraveler.value?.id) || traveler.id === selectedRoleTargetTravelerId.value),
+  ),
 );
 
 const roleFilterOptions = computed(() => roleCatalog.value);

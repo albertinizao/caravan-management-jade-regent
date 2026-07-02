@@ -3,6 +3,7 @@ package com.gestioncaravana.adapter.in.web;
 import com.gestioncaravana.application.port.in.CreateCaravanUseCase;
 import com.gestioncaravana.application.port.in.DeleteCaravanUseCase;
 import com.gestioncaravana.application.port.in.DeleteCaravanWagonUseCase;
+import com.gestioncaravana.application.port.in.AdvanceCaravanDayCycleUseCase;
 import com.gestioncaravana.application.port.in.AddCaravanBeastUseCase;
 import com.gestioncaravana.application.port.in.ClearCaravanBeastAssignmentUseCase;
 import com.gestioncaravana.application.port.in.GetActiveCaravanUseCase;
@@ -35,6 +36,7 @@ import com.gestioncaravana.application.port.in.UpdateCaravanTravelerRoleUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerWagonUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanBeastAssignmentUseCase;
+import com.gestioncaravana.application.port.in.PreviewCaravanDayCycleUseCase;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -57,6 +59,8 @@ public class CaravanController {
   private final ListCaravansUseCase listCaravansUseCase;
   private final GetCaravanUseCase getCaravanUseCase;
   private final GetCaravanStatisticsUseCase getCaravanStatisticsUseCase;
+  private final PreviewCaravanDayCycleUseCase previewCaravanDayCycleUseCase;
+  private final AdvanceCaravanDayCycleUseCase advanceCaravanDayCycleUseCase;
   private final SelectActiveCaravanUseCase selectActiveCaravanUseCase;
   private final GetActiveCaravanUseCase getActiveCaravanUseCase;
   private final ListWagonCatalogUseCase listWagonCatalogUseCase;
@@ -94,6 +98,8 @@ public class CaravanController {
       ListCaravansUseCase listCaravansUseCase,
       GetCaravanUseCase getCaravanUseCase,
       GetCaravanStatisticsUseCase getCaravanStatisticsUseCase,
+      PreviewCaravanDayCycleUseCase previewCaravanDayCycleUseCase,
+      AdvanceCaravanDayCycleUseCase advanceCaravanDayCycleUseCase,
       SelectActiveCaravanUseCase selectActiveCaravanUseCase,
       GetActiveCaravanUseCase getActiveCaravanUseCase,
       ListWagonCatalogUseCase listWagonCatalogUseCase,
@@ -129,6 +135,8 @@ public class CaravanController {
     this.listCaravansUseCase = listCaravansUseCase;
     this.getCaravanUseCase = getCaravanUseCase;
     this.getCaravanStatisticsUseCase = getCaravanStatisticsUseCase;
+    this.previewCaravanDayCycleUseCase = previewCaravanDayCycleUseCase;
+    this.advanceCaravanDayCycleUseCase = advanceCaravanDayCycleUseCase;
     this.selectActiveCaravanUseCase = selectActiveCaravanUseCase;
     this.getActiveCaravanUseCase = getActiveCaravanUseCase;
     this.listWagonCatalogUseCase = listWagonCatalogUseCase;
@@ -238,6 +246,35 @@ public class CaravanController {
   @GetMapping("/caravans/{id}/statistics")
   CaravanStatisticsResponse getStatistics(@PathVariable UUID id) {
     return CaravanStatisticsResponseMapper.toResponse(getCaravanStatisticsUseCase.getById(id));
+  }
+
+  @PostMapping("/caravans/{caravanId}/day-cycle/preview")
+  CaravanDayCycleResponse previewDayCycle(
+      @PathVariable UUID caravanId,
+      @Valid @RequestBody AdvanceCaravanDayCycleRequest request) {
+    return CaravanDayCycleResponseMapper.toResponse(
+        previewCaravanDayCycleUseCase.preview(
+            caravanId,
+            new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(
+                request.fastingEnabled(),
+                request.choices() == null ? List.of() : request.choices().stream()
+                    .map(choice -> new PreviewCaravanDayCycleUseCase.CaravanDailyChoiceCommand(choice.travelerId(), choice.mode()))
+                    .toList())));
+  }
+
+  @PostMapping("/caravans/{caravanId}/day-cycle/advance")
+  CaravanDayCycleResponse advanceDayCycle(
+      @PathVariable UUID caravanId,
+      @Valid @RequestBody AdvanceCaravanDayCycleRequest request) {
+    return CaravanDayCycleResponseMapper.toResponse(
+        advanceCaravanDayCycleUseCase.execute(
+            caravanId,
+            new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
+                request.idempotencyKey(),
+                request.fastingEnabled(),
+                request.choices() == null ? List.of() : request.choices().stream()
+                    .map(choice -> new AdvanceCaravanDayCycleUseCase.CaravanDailyChoiceCommand(choice.travelerId(), choice.mode()))
+                    .toList())));
   }
 
   @org.springframework.web.bind.annotation.DeleteMapping("/caravans/{id}")

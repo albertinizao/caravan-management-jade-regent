@@ -17,8 +17,13 @@ import org.springframework.stereotype.Component;
 public class MarkdownCaravanFeatCatalogAdapter implements CaravanFeatCatalogPort {
 
   private static final Pattern LEVEL_PATTERN = Pattern.compile("(?i)\\bNivel\\s+(\\d+)\\b");
-  private static final Pattern TRES_VECES_PATTERN = Pattern.compile("(?i)\\btres veces\\b");
-  private static final Pattern SELECTION_LIMIT_PATTERN = Pattern.compile("(?i)\\b(?:puede|se puede|pueden|se pueden)\\s+(?:elegirse|seleccionarse|adquirir)\\s+([^\\.]+)");
+  private static final Pattern BULLET_PATTERN = Pattern.compile("^\\- \\*\\*(.+?):\\*\\*\\s*(.+)$");
+  private static final Pattern REPEATABLE_PATTERN =
+      Pattern.compile("(?i)\\b(varias veces|más de una vez|se apilan|se acumulan)\\b");
+  private static final Pattern EXPLICIT_LIMIT_PATTERN =
+      Pattern.compile("(?i)\\bhasta\\s+(\\d+)\\s+veces\\b");
+  private static final Pattern WORD_LIMIT_PATTERN =
+      Pattern.compile("(?i)\\b(?:una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\\s+veces\\b");
   private final List<CaravanFeatType> feats;
 
   public MarkdownCaravanFeatCatalogAdapter() {
@@ -91,15 +96,12 @@ public class MarkdownCaravanFeatCatalogAdapter implements CaravanFeatCatalogPort
 
     for (var line : lines) {
       var trimmed = line.trim();
-      if (!trimmed.startsWith("- **")) {
+      var matcher = BULLET_PATTERN.matcher(trimmed);
+      if (!matcher.matches()) {
         continue;
       }
-      var labelEnd = trimmed.indexOf("**:", 4);
-      if (labelEnd < 0) {
-        continue;
-      }
-      var label = trimmed.substring(4, labelEnd).trim().toLowerCase();
-      var value = normalizeText(trimmed.substring(labelEnd + 3).trim());
+      var label = matcher.group(1).trim().toLowerCase();
+      var value = normalizeText(matcher.group(2).trim());
       switch (label) {
         case "requisito", "requisitos", "prerrequisito", "prerrequisitos" -> prerequisites.add(value);
         case "beneficio" -> benefit = value;
@@ -121,6 +123,7 @@ public class MarkdownCaravanFeatCatalogAdapter implements CaravanFeatCatalogPort
     return new CaravanFeatType(
         toCode(name),
         name,
+        description == null ? name : description,
         prerequisites,
         benefit,
         special,
@@ -139,31 +142,65 @@ public class MarkdownCaravanFeatCatalogAdapter implements CaravanFeatCatalogPort
   }
 
   private boolean isRepeatable(String text) {
+    if (REPEATABLE_PATTERN.matcher(text).find()) {
+      return true;
+    }
+
     var lower = text.toLowerCase();
     return lower.contains("puede elegirse varias veces")
         || lower.contains("puede seleccionarse varias veces")
         || lower.contains("puede seleccionarse más de una vez")
-        || lower.contains("se apilan")
         || lower.contains("se puede adquirir tres veces")
         || lower.contains("se puede adquirir más de una vez")
-        || lower.contains("puede adquirirse varias veces");
+        || lower.contains("puede adquirirse varias veces")
+        || lower.contains("puede elegirse esta dote varias veces")
+        || lower.contains("puede seleccionarse esta dote varias veces")
+        || lower.contains("puede adquirirse esta dote varias veces")
+        || lower.contains("puede seleccionarse hasta")
+        || lower.contains("puede adquirirse hasta")
+        || lower.contains("se puede adquirir hasta")
+        || lower.contains("se puede seleccionar hasta");
   }
 
   private int parseSelectionLimit(String text, boolean repeatable) {
     if (!repeatable) {
       return 1;
     }
-    if (TRES_VECES_PATTERN.matcher(text).find()) {
-      return 3;
+
+    var explicitMatcher = EXPLICIT_LIMIT_PATTERN.matcher(text);
+    if (explicitMatcher.find()) {
+      return Integer.parseInt(explicitMatcher.group(1));
     }
-    var matcher = SELECTION_LIMIT_PATTERN.matcher(text);
-    if (matcher.find()) {
-      var fragment = matcher.group(1).toLowerCase();
+
+    var wordMatcher = WORD_LIMIT_PATTERN.matcher(text);
+    if (wordMatcher.find()) {
+      var fragment = wordMatcher.group().toLowerCase();
+      if (fragment.contains("dos")) {
+        return 2;
+      }
       if (fragment.contains("tres")) {
         return 3;
       }
-      if (fragment.contains("dos")) {
-        return 2;
+      if (fragment.contains("cuatro")) {
+        return 4;
+      }
+      if (fragment.contains("cinco")) {
+        return 5;
+      }
+      if (fragment.contains("seis")) {
+        return 6;
+      }
+      if (fragment.contains("siete")) {
+        return 7;
+      }
+      if (fragment.contains("ocho")) {
+        return 8;
+      }
+      if (fragment.contains("nueve")) {
+        return 9;
+      }
+      if (fragment.contains("diez")) {
+        return 10;
       }
     }
     return 999;

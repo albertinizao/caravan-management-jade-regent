@@ -18,8 +18,10 @@ const pendingAction = ref<string | null>(null);
 const search = ref("");
 const addModalOpen = ref(false);
 const editModalOpen = ref(false);
+const detailModalOpen = ref(false);
 const modalMode = ref<"add" | "edit">("add");
 const selectedFeat = ref<CaravanFeat | null>(null);
+const selectedDetail = ref<{ kind: "catalog"; item: CaravanFeatCatalogItem } | { kind: "feat"; item: CaravanFeat } | null>(null);
 const selectedFeatTypeCode = ref("");
 const acquisitionSourceType = ref<CaravanFeatAcquisitionSourceType>("LEVEL_UP");
 const acquisitionLevel = ref("");
@@ -31,6 +33,61 @@ const { showToast } = useToast();
 const selectedCatalogItem = computed(() =>
   catalog.value.find((item) => item.code === selectedFeatTypeCode.value) ?? null,
 );
+
+const selectedDetailView = computed(() => {
+  const detail = selectedDetail.value;
+  if (!detail) {
+    return null;
+  }
+
+  if (detail.kind === "catalog") {
+    const item = detail.item;
+    return {
+      kind: detail.kind,
+      name: item.name,
+      code: item.code,
+      description: item.description,
+      prerequisites: item.prerequisites,
+      benefitText: item.benefitText,
+      specialText: item.specialText,
+      notes: item.notes,
+      repeatable: item.repeatable,
+      selectionLimit: item.selectionLimit,
+      minimumLevel: item.minimumLevel,
+      ownedCount: item.ownedCount,
+      available: item.available,
+      blockedReason: item.blockedReason,
+      active: null,
+      acquisitionSourceType: null,
+      acquisitionLevel: null,
+      acquisitionCause: null,
+    };
+  }
+
+  const item = detail.item;
+  return {
+    kind: detail.kind,
+    name: item.name,
+    code: item.featTypeCode,
+    description: item.description,
+    prerequisites: item.prerequisites,
+    benefitText: item.benefitText,
+    specialText: item.specialText,
+    notes: item.notes,
+    repeatable: null,
+    selectionLimit: null,
+    minimumLevel: null,
+    ownedCount: null,
+    available: null,
+    blockedReason: item.blockedReason,
+    active: item.active,
+    acquisitionSourceType: item.acquisitionSourceType,
+    acquisitionLevel: item.acquisitionLevel,
+    acquisitionCause: item.acquisitionCause,
+  };
+});
+
+const selectedDetailTitle = computed(() => selectedDetailView.value?.name ?? "");
 
 const catalogByCode = computed(() => Object.fromEntries(catalog.value.map((item) => [item.code, item] as const)));
 
@@ -72,6 +129,16 @@ function openAddModal() {
   addModalOpen.value = true;
 }
 
+function openCatalogDetail(item: CaravanFeatCatalogItem) {
+  selectedDetail.value = { kind: "catalog", item };
+  detailModalOpen.value = true;
+}
+
+function openFeatDetail(feat: CaravanFeat) {
+  selectedDetail.value = { kind: "feat", item: feat };
+  detailModalOpen.value = true;
+}
+
 function openEditModal(feat: CaravanFeat) {
   modalMode.value = "edit";
   selectedFeat.value = feat;
@@ -89,6 +156,11 @@ function closeModal() {
   editModalOpen.value = false;
   selectedFeat.value = null;
   modalError.value = null;
+}
+
+function closeDetailModal() {
+  detailModalOpen.value = false;
+  selectedDetail.value = null;
 }
 
 async function refresh() {
@@ -194,7 +266,7 @@ onMounted(refresh);
         <p v-else>No hay una caravana activa.</p>
       </div>
       <div class="header-actions">
-        <button class="primary" type="button" @click="openAddModal" :disabled="!activeCaravan || isPending('add')">
+        <button class="primary-button" type="button" @click="openAddModal" :disabled="!activeCaravan || isPending('add')">
           Añadir dote
         </button>
       </div>
@@ -229,7 +301,9 @@ onMounted(refresh);
             <tbody>
               <tr v-for="feat in visibleFeats" :key="feat.id">
                 <td>
-                  <strong>{{ feat.name }}</strong>
+                  <button class="text-button" type="button" @click="openFeatDetail(feat)">
+                    <strong>{{ feat.name }}</strong>
+                  </button>
                   <div class="muted">{{ feat.featTypeCode }}</div>
                 </td>
                 <td>
@@ -243,11 +317,10 @@ onMounted(refresh);
                   <div class="muted">{{ feat.acquisitionCause ?? "—" }}</div>
                 </td>
                 <td>
-                  <div class="muted">Selección #{{ feat.selectionIndex }}</div>
                   <div class="muted">{{ feat.benefitText }}</div>
                 </td>
                 <td class="actions">
-                  <button type="button" @click="openEditModal(feat)">Editar</button>
+                  <button class="ghost-button" type="button" @click="openEditModal(feat)">Editar</button>
                 </td>
               </tr>
             </tbody>
@@ -261,20 +334,35 @@ onMounted(refresh);
           </div>
 
           <div class="catalog-grid">
-            <article v-for="item in visibleCatalog" :key="item.code" class="catalog-card" :class="{ 'catalog-card--blocked': !item.available }">
+            <button
+              v-for="item in visibleCatalog"
+              :key="item.code"
+              type="button"
+              class="catalog-card catalog-card-button"
+              :class="{ 'catalog-card--blocked': !item.available }"
+              @click="openCatalogDetail(item)"
+            >
               <div class="catalog-card__top">
                 <strong>{{ item.name }}</strong>
                 <span class="badge" :class="item.available ? 'badge--ok' : 'badge--warn'">
                   {{ item.available ? "Disponible" : "Bloqueada" }}
                 </span>
               </div>
+              <p class="card-section-label">Detalle</p>
+              <p>{{ item.description }}</p>
+              <p class="card-section-label">Prerrequisitos</p>
               <p class="muted">{{ item.prerequisites.join(" · ") || "Sin prerrequisitos declarados" }}</p>
+              <p class="card-section-label">Beneficio</p>
               <p>{{ item.benefitText }}</p>
-              <p v-if="item.specialText" class="muted">{{ item.specialText }}</p>
+              <p class="card-section-label">Especial</p>
+              <p>{{ item.specialText ?? "Sin especial declarado" }}</p>
               <p v-if="item.notes" class="muted">{{ item.notes }}</p>
-              <p class="muted">Seleccionada {{ item.ownedCount }} veces · Límite {{ item.selectionLimit }}</p>
+              <p v-if="item.ownedCount > 0 && item.selectionLimit > 1" class="muted">
+                Seleccionada {{ item.ownedCount }} veces · Límite {{ item.selectionLimit }}
+              </p>
               <p v-if="item.blockedReason" class="warning-text">{{ item.blockedReason }}</p>
-            </article>
+              <p class="detail-hint">Haz clic para ver la ficha completa</p>
+            </button>
           </div>
         </section>
       </template>
@@ -288,7 +376,7 @@ onMounted(refresh);
               <p class="eyebrow">{{ modalMode === "add" ? "Nueva dote" : "Editar dote" }}</p>
               <h2>{{ modalMode === "add" ? "Añadir dote" : "Editar adquisición" }}</h2>
             </div>
-            <button type="button" class="ghost" @click="closeModal">Cerrar</button>
+            <button type="button" class="ghost-button" @click="closeModal">Cerrar</button>
           </header>
 
           <div class="modal__body">
@@ -327,19 +415,148 @@ onMounted(refresh);
               Cuando está activa, la dote aporta su beneficio a la caravana. Caravana Familiar y Líder de la caravana empiezan activas por defecto.
             </p>
 
-            <p v-if="selectedCatalogItem" class="muted">
-              {{ selectedCatalogItem.benefitText }}
-            </p>
+            <template v-if="selectedCatalogItem">
+              <p class="card-section-label">Detalle</p>
+              <p>{{ selectedCatalogItem.description }}</p>
+              <p class="card-section-label">Beneficio</p>
+              <p>{{ selectedCatalogItem.benefitText }}</p>
+              <p class="card-section-label">Especial</p>
+              <p>{{ selectedCatalogItem.specialText ?? "Sin especial declarado" }}</p>
+            </template>
             <p v-if="selectedCatalogItem?.blockedReason" class="warning-text">{{ selectedCatalogItem.blockedReason }}</p>
             <p v-if="modalError" class="error-banner">{{ modalError }}</p>
           </div>
 
           <footer class="modal__footer">
-            <button type="button" class="ghost" @click="closeModal">Cancelar</button>
-            <button type="button" class="primary" @click="submitFeat" :disabled="submitting">
+            <button type="button" class="ghost-button" @click="closeModal">Cancelar</button>
+            <button type="button" class="primary-button" @click="submitFeat" :disabled="submitting">
               {{ submitting ? "Guardando…" : "Guardar" }}
             </button>
           </footer>
+        </section>
+      </div>
+    </teleport>
+
+    <teleport to="body">
+      <div v-if="detailModalOpen && selectedDetail" class="modal-backdrop" @click.self="closeDetailModal">
+        <section class="modal modal--detail">
+          <header class="modal__header">
+            <div>
+              <p class="eyebrow">Ficha de dote</p>
+              <h2>{{ selectedDetailTitle }}</h2>
+            </div>
+            <button type="button" class="ghost-button" @click="closeDetailModal">Cerrar</button>
+          </header>
+
+          <div v-if="selectedDetailView" class="modal__body">
+            <section class="detail-section">
+              <h3>Resumen</h3>
+              <dl class="detail-grid">
+                <div>
+                  <dt>Código</dt>
+                  <dd>{{ selectedDetailView.code }}</dd>
+                </div>
+                <div>
+                  <dt>Estado</dt>
+                  <dd>
+                    <span v-if="selectedDetailView.kind === 'catalog'" class="badge" :class="selectedDetailView.available ? 'badge--ok' : 'badge--warn'">
+                      {{ selectedDetailView.available ? "Disponible" : "Bloqueada" }}
+                    </span>
+                    <span v-else class="badge" :class="selectedDetailView.active ? 'badge--ok' : 'badge--warn'">
+                      {{ selectedDetailView.active ? "Activa" : "Inactiva" }}
+                    </span>
+                  </dd>
+                </div>
+                <div v-if="selectedDetailView.kind === 'feat'">
+                  <dt>Adquisición</dt>
+                  <dd>
+                    {{ selectedDetailView.acquisitionSourceType === "LEVEL_UP" ? `Subida de nivel · Nivel ${selectedDetailView.acquisitionLevel}` : "Otra causa" }}
+                  </dd>
+                </div>
+                <div v-if="selectedDetailView.kind === 'feat' && selectedDetailView.acquisitionCause">
+                  <dt>Causa</dt>
+                  <dd>{{ selectedDetailView.acquisitionCause }}</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section v-if="selectedDetailView.kind === 'catalog'" class="detail-section">
+              <h3>Catálogo</h3>
+              <dl class="detail-grid">
+                <div>
+                  <dt>Repetible</dt>
+                  <dd>{{ selectedDetailView.repeatable ? "Sí" : "No" }}</dd>
+                </div>
+                <div>
+                  <dt>Nivel mínimo</dt>
+                  <dd>{{ selectedDetailView.minimumLevel ?? "Sin requisito" }}</dd>
+                </div>
+                <div v-if="selectedDetailView.ownedCount > 0 && selectedDetailView.selectionLimit > 1">
+                  <dt>Límite</dt>
+                  <dd>{{ selectedDetailView.selectionLimit }}</dd>
+                </div>
+                <div v-if="selectedDetailView.ownedCount > 0 && selectedDetailView.selectionLimit > 1">
+                  <dt>Seleccionada</dt>
+                  <dd>{{ selectedDetailView.ownedCount }} veces</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section class="detail-section">
+              <h3>Detalle</h3>
+              <p>{{ selectedDetailView.description }}</p>
+            </section>
+
+            <section class="detail-section">
+              <h3>Prerrequisitos</h3>
+              <ul v-if="selectedDetailView.prerequisites.length > 0" class="detail-list">
+                <li v-for="prerequisite in selectedDetailView.prerequisites" :key="prerequisite">{{ prerequisite }}</li>
+              </ul>
+              <p v-else class="muted">Sin prerrequisitos declarados.</p>
+            </section>
+
+            <section class="detail-section">
+              <h3>Beneficio</h3>
+              <p>{{ selectedDetailView.benefitText }}</p>
+            </section>
+
+            <section class="detail-section">
+              <h3>Especial</h3>
+              <p>{{ selectedDetailView.specialText ?? "Sin especial declarado." }}</p>
+            </section>
+
+            <section v-if="selectedDetailView.notes" class="detail-section">
+              <h3>Notas</h3>
+              <p class="muted">{{ selectedDetailView.notes }}</p>
+            </section>
+
+            <section v-if="selectedDetailView.kind === 'feat'" class="detail-section">
+              <h3>Información de adquisición</h3>
+              <dl class="detail-grid">
+                <div>
+                  <dt>Tipo</dt>
+                  <dd>{{ selectedDetailView.acquisitionSourceType === "LEVEL_UP" ? "Subida de nivel" : "Otra causa" }}</dd>
+                </div>
+                <div v-if="selectedDetailView.acquisitionLevel !== null">
+                  <dt>Nivel</dt>
+                  <dd>{{ selectedDetailView.acquisitionLevel }}</dd>
+                </div>
+                <div v-if="selectedDetailView.acquisitionCause">
+                  <dt>Causa</dt>
+                  <dd>{{ selectedDetailView.acquisitionCause }}</dd>
+                </div>
+                <div>
+                  <dt>Activa</dt>
+                  <dd>{{ selectedDetailView.active ? "Sí" : "No" }}</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section v-if="selectedDetailView.kind === 'catalog' && selectedDetailView.blockedReason" class="detail-section">
+              <h3>Bloqueo</h3>
+              <p class="warning-text">{{ selectedDetailView.blockedReason }}</p>
+            </section>
+          </div>
         </section>
       </div>
     </teleport>
@@ -432,19 +649,30 @@ onMounted(refresh);
 }
 
 .actions button,
-.header-actions button,
-.modal__footer button,
-.ghost {
+.ghost-button,
+.primary-button {
+  font: inherit;
   border-radius: 0.75rem;
   padding: 0.65rem 0.95rem;
   border: 1px solid #cbd5e1;
   background: white;
 }
 
-.primary {
+.ghost-button {
+  background: white;
+  color: inherit;
+}
+
+.primary-button {
   background: #2563eb;
   color: white;
   border-color: #2563eb;
+}
+
+.primary-button:disabled,
+.ghost-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .badge {
@@ -478,6 +706,13 @@ onMounted(refresh);
   padding: 0.95rem;
 }
 
+.catalog-card-button {
+  width: 100%;
+  text-align: left;
+  background: white;
+  cursor: pointer;
+}
+
 .catalog-card--blocked {
   background: #fffbeb;
 }
@@ -488,6 +723,81 @@ onMounted(refresh);
   gap: 1rem;
 }
 
+.text-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.text-button strong {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+}
+
+.detail-hint {
+  margin: 0.4rem 0 0;
+  color: #2563eb;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.modal--detail {
+  width: min(760px, 100%);
+}
+
+.detail-section {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.detail-section h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.card-section-label {
+  margin: 0;
+  color: #2563eb;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.detail-grid div {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.8rem;
+  padding: 0.75rem 0.85rem;
+  background: #f8fafc;
+}
+
+.detail-grid dt {
+  color: #6b7280;
+  font-size: 0.82rem;
+  margin-bottom: 0.2rem;
+}
+
+.detail-grid dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.detail-list {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
 .search-input,
 select,
 input {
@@ -495,6 +805,11 @@ input {
   border-radius: 0.75rem;
   border: 1px solid #cbd5e1;
   padding: 0.7rem 0.85rem;
+}
+
+input[type="checkbox"] {
+  width: auto;
+  padding: 0;
 }
 
 .modal-backdrop {
@@ -535,9 +850,15 @@ input {
   font-weight: 600;
 }
 
-.toggle-row {
+.modal__body label.toggle-row {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 0.75rem;
+}
+
+.modal__body label.toggle-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 0;
 }
 </style>

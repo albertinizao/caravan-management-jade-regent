@@ -250,6 +250,7 @@ class FeatManagementServiceTest {
         new CaravanFeatType(
             "caravana-mejorada",
             "Caravana Mejorada",
+            "La caravana mejora su rendimiento general.",
             List.of("Nivel 2"),
             "Aumenta en 1 dos de las estadísticas principales hasta una puntuación máxima de +10.",
             "Esta dote puede seleccionarse varias veces.",
@@ -260,6 +261,7 @@ class FeatManagementServiceTest {
         new CaravanFeatType(
             "caravana-santificada",
             "Caravana Santificada",
+            "La caravana cuenta con la bendición de una deidad.",
             List.of("Determinación 5."),
             "Elige una deidad.",
             "Puede elegirse esta dote varias veces.",
@@ -270,6 +272,7 @@ class FeatManagementServiceTest {
         new CaravanFeatType(
             "carros-adicionales",
             "Carros Adicionales",
+            "La caravana aprende a transportar más carros sin penalizadores.",
             List.of(),
             "Aumenta el número máximo de carros que se pueden añadir a la caravana igual al nivel de la caravana, sin incurrir en ningún penalizador por exceso de carros.",
             null,

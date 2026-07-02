@@ -11,6 +11,7 @@ final class CaravanFeatResponseMapper {
     return new CaravanFeatCatalogItemResponse(
         view.code(),
         view.name(),
+        view.description(),
         view.prerequisites(),
         view.benefitText(),
         view.specialText(),
@@ -29,6 +30,7 @@ final class CaravanFeatResponseMapper {
         view.caravanId(),
         view.featTypeCode(),
         view.name(),
+        view.description(),
         view.prerequisites(),
         view.benefitText(),
         view.specialText(),

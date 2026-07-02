@@ -211,6 +211,7 @@ public class FeatManagementService
     return new CaravanFeatCatalogItemView(
         featType.code(),
         featType.name(),
+        featType.description(),
         featType.prerequisites(),
         featType.benefitText(),
         featType.specialText(),
@@ -235,6 +236,7 @@ public class FeatManagementService
         feat.caravanId(),
         feat.featTypeCode(),
         featType.name(),
+        featType.description(),
         featType.prerequisites(),
         featType.benefitText(),
         featType.specialText(),

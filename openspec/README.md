@@ -13,3 +13,4 @@ This directory contains feature specifications written before implementation.
 - `specs/caravan-wagon-improvements/spec.md` — Manage improvements applied to a selected wagon and refresh derived stats.
 - `specs/caravan-statistics/spec.md` — Configure initial caravan stats and inspect the full rule-driven statistics sheet.
 - `specs/caravan-supply-cycle/spec.md` — Advance one day and resolve caravan supply consumption, generation, and shortages.
+- `specs/caravan-feat-automation/spec.md` — Automate supported caravan feats with explicit triggers, cooldowns, and derived effects.

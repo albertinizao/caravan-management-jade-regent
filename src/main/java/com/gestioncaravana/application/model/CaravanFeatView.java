@@ -10,6 +10,7 @@ public record CaravanFeatView(
     UUID caravanId,
     String featTypeCode,
     String name,
+    String description,
     List<String> prerequisites,
     String benefitText,
     String specialText,

@@ -5,6 +5,7 @@ import java.util.List;
 public record CaravanFeatType(
     String code,
     String name,
+    String description,
     List<String> prerequisites,
     String benefitText,
     String specialText,
@@ -19,6 +20,9 @@ public record CaravanFeatType(
     }
     if (name == null || name.isBlank()) {
       throw new IllegalArgumentException("name is required");
+    }
+    if (description == null || description.isBlank()) {
+      throw new IllegalArgumentException("description is required");
     }
     prerequisites = prerequisites == null ? List.of() : List.copyOf(prerequisites);
     if (benefitText == null || benefitText.isBlank()) {

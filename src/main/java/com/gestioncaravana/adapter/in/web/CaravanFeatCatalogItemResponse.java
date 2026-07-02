@@ -5,6 +5,7 @@ import java.util.List;
 public record CaravanFeatCatalogItemResponse(
     String code,
     String name,
+    String description,
     List<String> prerequisites,
     String benefitText,
     String specialText,

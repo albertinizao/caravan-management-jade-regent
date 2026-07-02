@@ -3,6 +3,7 @@ export type CaravanFeatAcquisitionSourceType = "LEVEL_UP" | "OTHER";
 export interface CaravanFeatCatalogItem {
   code: string;
   name: string;
+  description: string;
   prerequisites: string[];
   benefitText: string;
   specialText: string | null;
@@ -20,6 +21,7 @@ export interface CaravanFeat {
   caravanId: string;
   featTypeCode: string;
   name: string;
+  description: string;
   prerequisites: string[];
   benefitText: string;
   specialText: string | null;

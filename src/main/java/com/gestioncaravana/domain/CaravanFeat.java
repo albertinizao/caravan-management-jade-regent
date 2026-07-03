@@ -12,6 +12,8 @@ public record CaravanFeat(
     String acquisitionCause,
     int selectionIndex,
     boolean active,
+    Boolean manualApplies,
+    String manualAppliesReason,
     Instant createdAt,
     Instant updatedAt) {
 
@@ -46,6 +48,10 @@ public record CaravanFeat(
     if (selectionIndex < 1) {
       throw new IllegalArgumentException("selectionIndex must be greater than or equal to 1");
     }
+    if (manualApplies == null && manualAppliesReason != null) {
+      throw new IllegalArgumentException("manualAppliesReason requires manualApplies");
+    }
+    manualAppliesReason = normalize(manualAppliesReason);
     if (createdAt == null || updatedAt == null) {
       throw new IllegalArgumentException("timestamps are required");
     }
@@ -69,6 +75,8 @@ public record CaravanFeat(
         acquisitionCause,
         selectionIndex,
         true,
+        null,
+        null,
         now);
   }
 
@@ -81,6 +89,8 @@ public record CaravanFeat(
       String acquisitionCause,
       int selectionIndex,
       boolean active,
+      Boolean manualApplies,
+      String manualAppliesReason,
       Instant now) {
     return new CaravanFeat(
         id,
@@ -91,6 +101,8 @@ public record CaravanFeat(
         resolveAcquisitionCause(acquisitionSourceType, acquisitionCause),
         selectionIndex,
         active,
+        manualApplies,
+        manualAppliesReason,
         now,
         now);
   }
@@ -100,6 +112,8 @@ public record CaravanFeat(
       Integer acquisitionLevel,
       String acquisitionCause,
       Boolean active,
+      Boolean manualApplies,
+      String manualAppliesReason,
       Instant now) {
     return new CaravanFeat(
         id,
@@ -110,6 +124,8 @@ public record CaravanFeat(
         resolveAcquisitionCause(sourceType, acquisitionCause),
         selectionIndex,
         active == null ? this.active : active,
+        manualApplies == null ? this.manualApplies : manualApplies,
+        manualAppliesReason == null ? this.manualAppliesReason : manualAppliesReason,
         createdAt,
         now);
   }

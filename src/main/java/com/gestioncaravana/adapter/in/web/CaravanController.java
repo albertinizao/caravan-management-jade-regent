@@ -217,7 +217,9 @@ public class CaravanController {
             request.acquisitionSourceType(),
             request.acquisitionLevel(),
             request.acquisitionCause(),
-            request.active()));
+            request.active(),
+            request.manualApplies(),
+            request.manualAppliesReason()));
     return ResponseEntity.status(HttpStatus.CREATED).body(CaravanFeatResponseMapper.toResponse(created));
   }
 
@@ -234,7 +236,9 @@ public class CaravanController {
                 request.acquisitionSourceType(),
                 request.acquisitionLevel(),
                 request.acquisitionCause(),
-                request.active())));
+                request.active(),
+                request.manualApplies(),
+                request.manualAppliesReason())));
   }
 
   @GetMapping("/caravans")
@@ -428,6 +432,8 @@ public class CaravanController {
             request.salary(),
             request.contractConditions(),
             request.consumption(),
+            request.wagonId(),
+            request.drivingWagonId(),
             request.servedTravelerId()));
     return ResponseEntity.status(HttpStatus.CREATED).body(CaravanTravelerResponseMapper.toResponse(created));
   }
@@ -455,6 +461,7 @@ public class CaravanController {
                 request.activeRoleCode(),
                 request.maxActiveRoleCount(),
                 request.wagonId(),
+                request.drivingWagonId(),
                 request.salary(),
                 request.contractConditions(),
                 request.consumption(),

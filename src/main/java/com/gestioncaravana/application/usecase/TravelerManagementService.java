@@ -48,6 +48,7 @@ public class TravelerManagementService
   private final CaravanWagonImprovementRepositoryPort improvementRepository;
   private final CaravanBeastRepositoryPort beastRepository;
   private final Clock clock;
+  private static final String CARRETERO_ROLE_CODE = "carretero";
 
   public TravelerManagementService(
       CaravanCampaignRepositoryPort caravanRepository,
@@ -118,6 +119,11 @@ public class TravelerManagementService
     var roleData = activeRoleCodes.stream().anyMatch(TravelerRoleCatalog::requiresTargetTraveler)
         ? new TravelerRoleData(validateRoleTarget(caravanId, null, command.servedTravelerId()).id())
         : TravelerRoleData.empty();
+    validateSleepingWagonAssignment(caravanId, null, command.wagonId());
+    if (activeRoleCodes.contains(TravelerRoleCatalog.CARRETERO_CODE) && command.wagonId() == null) {
+      throw new IllegalArgumentException("wagonId is required for role carretero");
+    }
+    validateDrivingWagonAssignment(caravanId, null, command.drivingWagonId(), activeRoleCodes);
     var traveler = CaravanTraveler.create(
         UUID.randomUUID(),
         caravanId,
@@ -128,7 +134,8 @@ public class TravelerManagementService
         activeRoleCode,
         maxActiveRoleCount,
         roleData,
-        null,
+        command.wagonId(),
+        command.drivingWagonId(),
         contract,
         command.consumption() == null ? 1 : command.consumption(),
         now);
@@ -158,6 +165,7 @@ public class TravelerManagementService
             other.activeRoleCode(),
             other.maxActiveRoleCount(),
             com.gestioncaravana.domain.TravelerRoleData.empty(),
+            other.drivingWagonId(),
             clock.instant()))
         .forEach(travelerRepository::save);
 
@@ -199,17 +207,22 @@ public class TravelerManagementService
 
     var wagonId = command.wagonId();
     if (wagonId != null) {
-    var wagon = wagonRepository.findById(caravanId, wagonId)
-        .orElseThrow(() -> new IllegalArgumentException("Wagon not found: " + wagonId));
-    var currentCount = travelerRepository.countByCaravanIdAndWagonId(caravanId, wagonId);
-    var beastCount = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
-        caravanId, wagonId, com.gestioncaravana.domain.CaravanBeastAssignmentType.TRAVELER).size();
-    if (traveler.wagonId() == null || !traveler.wagonId().equals(wagonId)) {
-      if (currentCount + beastCount >= currentWagonCapacity(caravanId, wagon.id())) {
-        throw new IllegalArgumentException("Wagon capacity reached");
+      var wagon = wagonRepository.findById(caravanId, wagonId)
+          .orElseThrow(() -> new IllegalArgumentException("Wagon not found: " + wagonId));
+      var currentCount = travelerRepository.countByCaravanIdAndWagonId(caravanId, wagonId);
+      var beastCount = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
+          caravanId, wagonId, com.gestioncaravana.domain.CaravanBeastAssignmentType.TRAVELER).size();
+      if (traveler.wagonId() == null || !traveler.wagonId().equals(wagonId)) {
+        if (currentCount + beastCount >= currentWagonCapacity(caravanId, wagon.id())) {
+          throw new IllegalArgumentException("Wagon capacity reached");
+        }
       }
     }
+    validateSleepingWagonAssignment(caravanId, travelerId, wagonId);
+    if (activeRoleCodes.contains(TravelerRoleCatalog.CARRETERO_CODE) && wagonId == null) {
+      throw new IllegalArgumentException("wagonId is required for role carretero");
     }
+    validateDrivingWagonAssignment(caravanId, travelerId, command.drivingWagonId(), activeRoleCodes);
 
     var updated = traveler.updateDetails(
         command.fullName(),
@@ -220,6 +233,7 @@ public class TravelerManagementService
         maxActiveRoleCount,
         roleData,
         wagonId,
+        command.drivingWagonId(),
         contract,
         command.consumption() == null ? traveler.consumption() : command.consumption(),
         clock.instant());
@@ -230,6 +244,7 @@ public class TravelerManagementService
   public CaravanTravelerView execute(UUID caravanId, UUID travelerId, UpdateCaravanTravelerWagonCommand command) {
     requireCaravan(caravanId);
     var traveler = requireTraveler(caravanId, travelerId);
+    validateSleepingWagonAssignment(caravanId, travelerId, command.wagonId());
     if (command.wagonId() == null) {
       return toView(travelerRepository.save(traveler.assignWagon(null, clock.instant())));
     }
@@ -239,11 +254,11 @@ public class TravelerManagementService
     var currentCount = travelerRepository.countByCaravanIdAndWagonId(caravanId, command.wagonId());
     var beastCount = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
         caravanId, command.wagonId(), com.gestioncaravana.domain.CaravanBeastAssignmentType.TRAVELER).size();
-    if (traveler.wagonId() == null || !traveler.wagonId().equals(command.wagonId())) {
-      if (currentCount + beastCount >= currentWagonCapacity(caravanId, wagon.id())) {
-        throw new IllegalArgumentException("Wagon capacity reached");
+      if (traveler.wagonId() == null || !traveler.wagonId().equals(command.wagonId())) {
+        if (currentCount + beastCount >= currentWagonCapacity(caravanId, wagon.id())) {
+          throw new IllegalArgumentException("Wagon capacity reached");
+        }
       }
-    }
     return toView(travelerRepository.save(traveler.assignWagon(command.wagonId(), clock.instant())));
   }
 
@@ -274,13 +289,22 @@ public class TravelerManagementService
     var roleData = activeRoleCodes.stream().anyMatch(TravelerRoleCatalog::requiresTargetTraveler)
         ? new TravelerRoleData(validateRoleTarget(caravanId, travelerId, command.servedTravelerId()).id())
         : TravelerRoleData.empty();
+    var drivingWagonId = activeRoleCodes.contains(TravelerRoleCatalog.CARRETERO_CODE)
+        ? traveler.drivingWagonId()
+        : null;
+    if (activeRoleCodes.contains(TravelerRoleCatalog.CARRETERO_CODE) && drivingWagonId == null) {
+      throw new IllegalArgumentException("drivingWagonId is required for role carretero");
+    }
+    validateDrivingWagonAssignment(caravanId, travelerId, drivingWagonId, activeRoleCodes);
 
-    return toView(travelerRepository.save(traveler.changeRoles(
+    var updated = traveler.changeRoles(
         activeRoleCodes,
         activeRoleCode,
         maxActiveRoleCount,
         roleData,
-        clock.instant())));
+        drivingWagonId,
+        clock.instant());
+    return toView(travelerRepository.save(updated));
   }
 
   private CaravanTraveler requireCaravanTraveler(UUID caravanId, UUID travelerId) {
@@ -321,6 +345,49 @@ public class TravelerManagementService
         .filter(other -> excludedTravelerId == null || !other.id().equals(excludedTravelerId))
         .filter(other -> other.hasActiveRole("sirviente"))
         .anyMatch(other -> other.roleSpecificData() != null && targetTravelerId.equals(other.roleSpecificData().servedTravelerId()));
+  }
+
+  private void validateSleepingWagonAssignment(UUID caravanId, UUID travelerId, UUID wagonId) {
+    if (wagonId == null) {
+      return;
+    }
+
+    wagonRepository.findById(caravanId, wagonId)
+        .orElseThrow(() -> new IllegalArgumentException("Wagon not found: " + wagonId));
+
+    var currentCount = travelerRepository.countByCaravanIdAndWagonId(caravanId, wagonId);
+    var beastCount = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
+        caravanId, wagonId, com.gestioncaravana.domain.CaravanBeastAssignmentType.TRAVELER).size();
+    var currentTraveler = travelerId == null ? null : travelerRepository.findById(caravanId, travelerId).orElse(null);
+    if (currentTraveler == null || !wagonId.equals(currentTraveler.wagonId())) {
+      if (currentCount + beastCount >= currentWagonCapacity(caravanId, wagonId)) {
+        throw new IllegalArgumentException("Wagon capacity reached");
+      }
+    }
+  }
+
+  private void validateDrivingWagonAssignment(UUID caravanId, UUID travelerId, UUID drivingWagonId, List<String> activeRoleCodes) {
+    if (activeRoleCodes == null || activeRoleCodes.stream().noneMatch(CARRETERO_ROLE_CODE::equals)) {
+      if (drivingWagonId != null) {
+        throw new IllegalArgumentException("drivingWagonId can only be assigned when role carretero is active");
+      }
+      return;
+    }
+
+    if (drivingWagonId == null) {
+      throw new IllegalArgumentException("drivingWagonId is required for role carretero");
+    }
+
+    wagonRepository.findById(caravanId, drivingWagonId)
+        .orElseThrow(() -> new IllegalArgumentException("Wagon not found: " + drivingWagonId));
+
+    var occupiedByAnotherCarretero = travelerRepository.findAllByCaravanId(caravanId).stream()
+        .filter(other -> travelerId == null || !other.id().equals(travelerId))
+        .filter(other -> drivingWagonId.equals(other.drivingWagonId()))
+        .anyMatch(other -> other.hasActiveRole(CARRETERO_ROLE_CODE));
+    if (occupiedByAnotherCarretero) {
+      throw new IllegalArgumentException("Wagon already has a carretero assigned");
+    }
   }
 
   private int currentWagonCapacity(UUID caravanId, UUID wagonId) {
@@ -385,6 +452,11 @@ public class TravelerManagementService
         : wagonRepository.findById(traveler.caravanId(), traveler.wagonId())
             .flatMap(wagon -> WagonCatalog.findByCode(wagon.wagonTypeCode()).map(type -> wagon.displayNameOr(type.name())))
             .orElse(null);
+    var drivingWagonName = traveler.drivingWagonId() == null
+        ? null
+        : wagonRepository.findById(traveler.caravanId(), traveler.drivingWagonId())
+            .flatMap(wagon -> WagonCatalog.findByCode(wagon.wagonTypeCode()).map(type -> wagon.displayNameOr(type.name())))
+            .orElse(null);
     var roleName = TravelerRoleCatalog.findByCode(traveler.activeRoleCode()).map(TravelerRoleCatalogItem::name).orElse(traveler.activeRoleCode());
     var servedTravelerName = traveler.roleSpecificData() == null || traveler.roleSpecificData().servedTravelerId() == null
         ? null
@@ -402,6 +474,8 @@ public class TravelerManagementService
         roleName,
         traveler.wagonId(),
         wagonName,
+        traveler.drivingWagonId(),
+        drivingWagonName,
         traveler.maxActiveRoleCount(),
         traveler.contract() == null ? null : traveler.contract().salary(),
         traveler.contract() == null ? null : traveler.contract().conditions(),

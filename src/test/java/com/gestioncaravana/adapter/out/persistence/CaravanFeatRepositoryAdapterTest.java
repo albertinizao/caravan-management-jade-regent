@@ -81,6 +81,8 @@ class CaravanFeatRepositoryAdapterTest {
         null,
         1,
         true,
+        null,
+        null,
         createdAt,
         createdAt);
 
@@ -107,6 +109,8 @@ class CaravanFeatRepositoryAdapterTest {
         "Bonus training",
         2,
         true,
+        null,
+        null,
         baseTime.plusSeconds(60),
         baseTime.plusSeconds(60));
     var firstSelection = new CaravanFeat(
@@ -118,6 +122,8 @@ class CaravanFeatRepositoryAdapterTest {
         null,
         1,
         true,
+        null,
+        null,
         baseTime,
         baseTime);
     var otherCaravanFeat = new CaravanFeat(
@@ -129,6 +135,8 @@ class CaravanFeatRepositoryAdapterTest {
         null,
         1,
         true,
+        null,
+        null,
         baseTime.plusSeconds(120),
         baseTime.plusSeconds(120));
 
@@ -157,6 +165,8 @@ class CaravanFeatRepositoryAdapterTest {
         null,
         1,
         true,
+        null,
+        null,
         createdAt,
         createdAt);
 
@@ -171,6 +181,8 @@ class CaravanFeatRepositoryAdapterTest {
         "Retcon after audit",
         1,
         false,
+        null,
+        null,
         createdAt,
         createdAt.plusSeconds(300));
 

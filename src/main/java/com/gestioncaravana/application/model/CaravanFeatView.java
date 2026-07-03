@@ -21,5 +21,10 @@ public record CaravanFeatView(
     int selectionIndex,
     boolean active,
     String blockedReason,
+    Boolean manualApplies,
+    String manualAppliesReason,
+    String automationMode,
+    String automationStateInputs,
+    String automationExactAutomation,
     Instant createdAt,
     Instant updatedAt) {}

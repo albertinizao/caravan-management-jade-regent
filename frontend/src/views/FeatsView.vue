@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 import { useToast } from "@/composables/useToast";
 import { getActiveCaravan, listCaravans } from "@/services/caravans";
@@ -27,6 +27,8 @@ const acquisitionSourceType = ref<CaravanFeatAcquisitionSourceType>("LEVEL_UP");
 const acquisitionLevel = ref("");
 const acquisitionCause = ref("");
 const featActive = ref(true);
+const manualApplies = ref<boolean | null>(null);
+const manualAppliesReason = ref("");
 const modalError = ref<string | null>(null);
 const { showToast } = useToast();
 
@@ -43,24 +45,26 @@ const selectedDetailView = computed(() => {
   if (detail.kind === "catalog") {
     const item = detail.item;
     return {
-      kind: detail.kind,
-      name: item.name,
-      code: item.code,
+        kind: detail.kind,
+        name: item.name,
+        code: item.code,
       description: item.description,
       prerequisites: item.prerequisites,
       benefitText: item.benefitText,
       specialText: item.specialText,
       notes: item.notes,
-      repeatable: item.repeatable,
-      selectionLimit: item.selectionLimit,
-      minimumLevel: item.minimumLevel,
-      ownedCount: item.ownedCount,
-      available: item.available,
-      blockedReason: item.blockedReason,
-      active: null,
-      acquisitionSourceType: null,
-      acquisitionLevel: null,
-      acquisitionCause: null,
+        repeatable: item.repeatable,
+        selectionLimit: item.selectionLimit,
+        minimumLevel: item.minimumLevel,
+        ownedCount: item.ownedCount,
+        available: item.available,
+        blockedReason: item.blockedReason,
+        active: null,
+        manualApplies: null,
+        manualAppliesReason: null,
+        acquisitionSourceType: null,
+        acquisitionLevel: null,
+        acquisitionCause: null,
     };
   }
 
@@ -81,6 +85,8 @@ const selectedDetailView = computed(() => {
     available: null,
     blockedReason: item.blockedReason,
     active: item.active,
+    manualApplies: item.manualApplies,
+    manualAppliesReason: item.manualAppliesReason,
     acquisitionSourceType: item.acquisitionSourceType,
     acquisitionLevel: item.acquisitionLevel,
     acquisitionCause: item.acquisitionCause,
@@ -119,6 +125,8 @@ function resetForm() {
   acquisitionLevel.value = "";
   acquisitionCause.value = "";
   featActive.value = true;
+  manualApplies.value = null;
+  manualAppliesReason.value = "";
   modalError.value = null;
 }
 
@@ -147,9 +155,26 @@ function openEditModal(feat: CaravanFeat) {
   acquisitionLevel.value = feat.acquisitionLevel === null ? "" : String(feat.acquisitionLevel);
   acquisitionCause.value = feat.acquisitionCause ?? "";
   featActive.value = feat.active;
+  manualApplies.value = feat.manualApplies;
+  manualAppliesReason.value = feat.manualAppliesReason ?? "";
   modalError.value = null;
   editModalOpen.value = true;
 }
+
+watch(
+  selectedFeatTypeCode,
+  () => {
+    if (!isManualContract(selectedCatalogItem.value)) {
+      manualApplies.value = null;
+      manualAppliesReason.value = "";
+      return;
+    }
+    if (manualApplies.value === null) {
+      manualApplies.value = true;
+    }
+  },
+  { immediate: true },
+);
 
 function closeModal() {
   addModalOpen.value = false;
@@ -211,6 +236,11 @@ function validateForm() {
   return null;
 }
 
+function isManualContract(item: CaravanFeatCatalogItem | CaravanFeat | null | undefined) {
+  const automationMode = item?.automationMode?.toLowerCase() ?? "";
+  return automationMode.includes("manual");
+}
+
 async function submitFeat() {
   if (!activeCaravan.value) {
     return;
@@ -233,6 +263,8 @@ async function submitFeat() {
       acquisitionLevel: acquisitionSourceType.value === "LEVEL_UP" ? Number(acquisitionLevel.value) : null,
       acquisitionCause: acquisitionSourceType.value === "OTHER" ? acquisitionCause.value.trim() : null,
       active: featActive.value,
+      manualApplies: isManualContract(selectedCatalogItem.value) ? manualApplies.value : null,
+      manualAppliesReason: isManualContract(selectedCatalogItem.value) ? manualAppliesReason.value.trim() || null : null,
     };
 
     if (modalMode.value === "add") {
@@ -304,13 +336,16 @@ onMounted(refresh);
                   <button class="text-button" type="button" @click="openFeatDetail(feat)">
                     <strong>{{ feat.name }}</strong>
                   </button>
-                  <div class="muted">{{ feat.featTypeCode }}</div>
                 </td>
                 <td>
                   <span class="badge" :class="feat.active ? 'badge--ok' : 'badge--warn'">
                     {{ feat.active ? "Activa" : "Inactiva" }}
                   </span>
                   <div v-if="feat.blockedReason" class="muted">{{ feat.blockedReason }}</div>
+                  <div v-if="feat.manualApplies === true" class="muted">
+                    Manual: {{ feat.manualApplies ? "Sí" : "No" }}
+                    <span v-if="feat.manualAppliesReason">· {{ feat.manualAppliesReason }}</span>
+                  </div>
                 </td>
                 <td>
                   <div>{{ feat.acquisitionSourceType === "LEVEL_UP" ? `Nivel ${feat.acquisitionLevel}` : "Otra causa" }}</div>
@@ -415,6 +450,17 @@ onMounted(refresh);
               Cuando está activa, la dote aporta su beneficio a la caravana. Caravana Familiar y Líder de la caravana empiezan activas por defecto.
             </p>
 
+            <template v-if="isManualContract(selectedCatalogItem)">
+              <label class="toggle-row">
+                <input v-model="manualApplies" type="checkbox" :true-value="true" :false-value="false" />
+                <span>Manual aplica</span>
+              </label>
+              <label>
+                <span>Motivo manual</span>
+                <textarea v-model="manualAppliesReason" rows="3" placeholder="Explica por qué el usuario la considera aplicable"></textarea>
+              </label>
+            </template>
+
             <template v-if="selectedCatalogItem">
               <p class="card-section-label">Detalle</p>
               <p>{{ selectedCatalogItem.description }}</p>
@@ -476,6 +522,16 @@ onMounted(refresh);
                 <div v-if="selectedDetailView.kind === 'feat' && selectedDetailView.acquisitionCause">
                   <dt>Causa</dt>
                   <dd>{{ selectedDetailView.acquisitionCause }}</dd>
+                </div>
+                <div v-if="selectedDetailView.kind === 'feat'">
+                  <dt>Manual</dt>
+                  <dd>
+                    {{ selectedDetailView.manualApplies === null ? "No aplica" : (selectedDetailView.manualApplies ? "Sí" : "No") }}
+                  </dd>
+                </div>
+                <div v-if="selectedDetailView.kind === 'feat' && selectedDetailView.manualAppliesReason">
+                  <dt>Motivo manual</dt>
+                  <dd>{{ selectedDetailView.manualAppliesReason }}</dd>
                 </div>
               </dl>
             </section>
@@ -656,6 +712,7 @@ onMounted(refresh);
   padding: 0.65rem 0.95rem;
   border: 1px solid #cbd5e1;
   background: white;
+  cursor: pointer;
 }
 
 .ghost-button {
@@ -750,6 +807,10 @@ onMounted(refresh);
 
 .modal--detail {
   width: min(760px, 100%);
+  max-height: min(90vh, 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .detail-section {
@@ -800,11 +861,13 @@ onMounted(refresh);
 
 .search-input,
 select,
-input {
+input,
+textarea {
   width: 100%;
   border-radius: 0.75rem;
   border: 1px solid #cbd5e1;
   padding: 0.7rem 0.85rem;
+  font: inherit;
 }
 
 input[type="checkbox"] {
@@ -825,6 +888,10 @@ input[type="checkbox"] {
 .modal {
   width: min(720px, 100%);
   padding: 1.25rem;
+  max-height: min(90vh, 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .modal__header,
@@ -839,6 +906,9 @@ input[type="checkbox"] {
   display: grid;
   gap: 0.9rem;
   margin: 1rem 0;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 0.25rem;
 }
 
 .modal__body label {

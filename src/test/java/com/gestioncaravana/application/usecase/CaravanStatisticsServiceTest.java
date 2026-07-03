@@ -148,6 +148,9 @@ class CaravanStatisticsServiceTest {
         null,
         "Mesa",
         1,
+        true,
+        null,
+        null,
         Instant.parse("2026-01-01T00:00:00Z")));
     featRepository.save(CaravanFeat.create(
         UUID.randomUUID(),
@@ -157,11 +160,16 @@ class CaravanStatisticsServiceTest {
         null,
         "Mesa",
         1,
+        true,
+        null,
+        null,
         Instant.parse("2026-01-01T00:00:00Z")).updateAcquisition(
             CaravanFeatAcquisitionSourceType.OTHER,
             null,
             "Mesa",
             false,
+            null,
+            null,
             Instant.parse("2026-01-01T00:00:00Z")));
 
     var statistics = service.getById(caravan.id());
@@ -190,6 +198,8 @@ class CaravanStatisticsServiceTest {
         "Mesa",
         1,
         true,
+        null,
+        null,
         Instant.parse("2026-01-01T00:00:00Z")));
 
     var statistics = service.getById(caravan.id());

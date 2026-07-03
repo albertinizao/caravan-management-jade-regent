@@ -59,6 +59,8 @@ public class CaravanFeatRepositoryAdapter implements CaravanFeatRepositoryPort {
     entity.setAcquisitionCause(feat.acquisitionCause());
     entity.setSelectionIndex(feat.selectionIndex());
     entity.setActive(feat.active());
+    entity.setManualApplies(feat.manualApplies());
+    entity.setManualAppliesReason(feat.manualAppliesReason());
     entity.setCreatedAt(feat.createdAt());
     entity.setUpdatedAt(feat.updatedAt());
     return entity;
@@ -74,6 +76,8 @@ public class CaravanFeatRepositoryAdapter implements CaravanFeatRepositoryPort {
         entity.getAcquisitionCause(),
         entity.getSelectionIndex(),
         entity.getActive() == null ? true : entity.getActive(),
+        entity.getManualApplies(),
+        entity.getManualAppliesReason(),
         entity.getCreatedAt(),
         entity.getUpdatedAt());
   }

@@ -56,6 +56,8 @@ final class CaravanWagonResponseMapper {
         view.draftBeasts().stream().map(CaravanBeastResponseMapper::toResponse).toList(),
         view.draftStrength(),
         view.draftRequiredStrength(),
+        view.carreteroId(),
+        view.carreteroName(),
         view.improvements().stream().map(CaravanWagonResponseMapper::toResponse).toList(),
         view.createdAt(),
         view.updatedAt());

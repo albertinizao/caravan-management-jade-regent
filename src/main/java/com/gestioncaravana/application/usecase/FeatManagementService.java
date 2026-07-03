@@ -128,7 +128,9 @@ public class FeatManagementService
             command.acquisitionLevel(),
             command.acquisitionCause(),
             selectionIndex,
-            command.active() == null ? true : command.active(),
+            resolveActive(featType, command.active(), command.manualApplies()),
+            resolveManualApplies(featType, command.manualApplies(), command.active()),
+            resolveManualAppliesReason(featType, command.manualAppliesReason()),
             clock.instant());
     var saved = featRepository.save(created);
     var refreshedOwned = featRepository.findAllByCaravanId(caravanId);
@@ -148,12 +150,15 @@ public class FeatManagementService
         featRepository
             .findById(caravanId, featId)
             .orElseThrow(() -> new IllegalArgumentException("Feat not found: " + featId));
+    var featType = requireFeatType(existing.featTypeCode());
     var updated =
         existing.updateAcquisition(
             command.acquisitionSourceType(),
             command.acquisitionLevel(),
             command.acquisitionCause(),
-            command.active(),
+            resolveActive(featType, command.active(), command.manualApplies()),
+            resolveManualApplies(featType, command.manualApplies(), command.active()),
+            resolveManualAppliesReason(featType, command.manualAppliesReason()),
             clock.instant());
     var saved = featRepository.save(updated);
     var stats = statisticsUseCase.getById(caravanId);
@@ -219,6 +224,9 @@ public class FeatManagementService
         featType.repeatable(),
         featType.selectionLimit(),
         featType.minimumLevel(),
+        featType.automationMode(),
+        featType.automationStateInputs(),
+        featType.automationExactAutomation(),
         ownedCount,
         blockedReason == null,
         blockedReason);
@@ -231,6 +239,8 @@ public class FeatManagementService
       CaravanStatisticsView stats) {
     var featType = requireFeatType(feat.featTypeCode());
     var blockedReason = calculateOwnedBlockedReason(caravan, featType, owned, stats, feat.id());
+    var manualBlockedReason = calculateManualBlockedReason(feat, featType);
+    var active = feat.active() && blockedReason == null && manualBlockedReason == null;
     return new CaravanFeatView(
         feat.id(),
         feat.caravanId(),
@@ -245,8 +255,13 @@ public class FeatManagementService
         feat.acquisitionLevel(),
         feat.acquisitionCause(),
         feat.selectionIndex(),
-        feat.active() && blockedReason == null,
-        blockedReason,
+        active,
+        manualBlockedReason != null ? manualBlockedReason : blockedReason,
+        feat.manualApplies(),
+        feat.manualAppliesReason(),
+        featType.automationMode(),
+        featType.automationStateInputs(),
+        featType.automationExactAutomation(),
         feat.createdAt(),
         feat.updatedAt());
   }
@@ -269,6 +284,46 @@ public class FeatManagementService
       return "Repeat limit reached";
     }
     return null;
+  }
+
+  private Boolean resolveManualApplies(CaravanFeatType featType, Boolean manualApplies, Boolean active) {
+    if (!isManualContract(featType)) {
+      return null;
+    }
+    if (manualApplies != null) {
+      return manualApplies;
+    }
+    return active == null ? true : active;
+  }
+
+  private boolean resolveActive(CaravanFeatType featType, Boolean active, Boolean manualApplies) {
+    if (isManualContract(featType)) {
+      if (manualApplies != null) {
+        return manualApplies;
+      }
+      if (active != null) {
+        return active;
+      }
+      return true;
+    }
+    return active == null ? true : active;
+  }
+
+  private String resolveManualAppliesReason(CaravanFeatType featType, String manualAppliesReason) {
+    if (!isManualContract(featType)) {
+      return null;
+    }
+    return normalizeManualReason(manualAppliesReason);
+  }
+
+  private String calculateManualBlockedReason(CaravanFeat feat, CaravanFeatType featType) {
+    if (!isManualContract(featType)) {
+      return null;
+    }
+    if (Boolean.TRUE.equals(feat.manualApplies())) {
+      return null;
+    }
+    return feat.manualAppliesReason() == null ? "manualApplies=false" : feat.manualAppliesReason();
   }
 
   private String calculateOwnedBlockedReason(
@@ -385,6 +440,18 @@ public class FeatManagementService
 
   private int ownedCount(List<CaravanFeat> owned, String featTypeCode) {
     return (int) owned.stream().filter(feat -> feat.featTypeCode().equals(featTypeCode)).count();
+  }
+
+  private boolean isManualContract(CaravanFeatType featType) {
+    var automationMode = featType.automationMode();
+    return automationMode != null && automationMode.toLowerCase(Locale.ROOT).contains("manual");
+  }
+
+  private String normalizeManualReason(String reason) {
+    if (reason == null || reason.isBlank()) {
+      return null;
+    }
+    return reason.trim();
   }
 
   private Integer extractNumber(String text) {

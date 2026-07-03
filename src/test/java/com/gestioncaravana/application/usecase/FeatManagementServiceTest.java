@@ -66,7 +66,9 @@ class FeatManagementServiceTest {
             CaravanFeatAcquisitionSourceType.LEVEL_UP,
             2,
             null,
-            true));
+            true,
+            null,
+            null));
 
     assertThat(created.name()).isEqualTo("Caravana Mejorada");
     assertThat(created.acquisitionLevel()).isEqualTo(2);
@@ -79,11 +81,33 @@ class FeatManagementServiceTest {
             CaravanFeatAcquisitionSourceType.OTHER,
             null,
             "recompensa de campaña",
-            false));
+            false,
+            null,
+            null));
 
     assertThat(updated.acquisitionSourceType()).isEqualTo(CaravanFeatAcquisitionSourceType.OTHER);
     assertThat(updated.acquisitionCause()).isEqualTo("recompensa de campaña");
     assertThat(updated.active()).isFalse();
+  }
+
+  @Test
+  void persistsManualAppliesStateForManualFeats() {
+    var caravan = createCaravan(2);
+
+    var created = service.execute(
+        caravan.id(),
+        new com.gestioncaravana.application.port.in.AddCaravanFeatUseCase.AddCaravanFeatCommand(
+            "caravana-santificada",
+            CaravanFeatAcquisitionSourceType.OTHER,
+            null,
+            "ritual",
+            true,
+            false,
+            "pendiente de altar"));
+
+    assertThat(created.manualApplies()).isFalse();
+    assertThat(created.manualAppliesReason()).isEqualTo("pendiente de altar");
+    assertThat(created.active()).isFalse();
   }
 
   @Test
@@ -97,7 +121,9 @@ class FeatManagementServiceTest {
             CaravanFeatAcquisitionSourceType.LEVEL_UP,
             2,
             null,
-            true)))
+            true,
+            null,
+            null)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("acquisitionLevel cannot be greater than caravan level");
   }
@@ -113,7 +139,9 @@ class FeatManagementServiceTest {
             CaravanFeatAcquisitionSourceType.OTHER,
             null,
             "campaña",
-            true));
+            true,
+            null,
+            null));
     var second = service.execute(
         caravan.id(),
         new com.gestioncaravana.application.port.in.AddCaravanFeatUseCase.AddCaravanFeatCommand(
@@ -121,7 +149,9 @@ class FeatManagementServiceTest {
             CaravanFeatAcquisitionSourceType.OTHER,
             null,
             "campaña",
-            true));
+            true,
+            null,
+            null));
 
     assertThat(first.selectionIndex()).isEqualTo(1);
     assertThat(second.selectionIndex()).isEqualTo(2);
@@ -149,6 +179,8 @@ class FeatManagementServiceTest {
         "campaña",
         1,
         true,
+        null,
+        null,
         Instant.parse("2026-01-01T00:00:00Z")));
 
     var feats = service.list(caravan.id());
@@ -257,7 +289,10 @@ class FeatManagementServiceTest {
             null,
             true,
             999,
-            2),
+            2,
+            "selection-based passive",
+            "selectedMainStats[]",
+            "Each selection chooses exactly two main stats. Increment each chosen stat by 1, cap each at +10, persist the chosen pair on the owned feat instance, and recalculate caravan stats after every selection."),
         new CaravanFeatType(
             "caravana-santificada",
             "Caravana Santificada",
@@ -268,7 +303,10 @@ class FeatManagementServiceTest {
             null,
             true,
             999,
-            null),
+            null,
+            "manual plus passive calculation",
+            "manualApplies:boolean, selectedDeityCode, selectedAltars[]",
+            "The user marks whether the relationship conditions currently hold. When manualApplies=true, apply +3 effective caster level to divine spells cast by that deity’s clerics within 200 feet of the caravan."),
         new CaravanFeatType(
             "carros-adicionales",
             "Carros Adicionales",
@@ -279,7 +317,10 @@ class FeatManagementServiceTest {
             null,
             true,
             999,
-            null));
+            null,
+            "passive / selection-based",
+            "selectionCount:int",
+            "Increase the wagon limit by the caravan level per selection. The bonus stacks with repeated selections."));
 
     @Override
     public List<CaravanFeatType> all() {

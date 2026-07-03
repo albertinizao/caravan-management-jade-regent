@@ -4,6 +4,7 @@ import { RouterLink } from "vue-router";
 
 import { useToast } from "@/composables/useToast";
 import { getActiveCaravan, listCaravans } from "@/services/caravans";
+import { listCaravanBeasts } from "@/services/beasts";
 import { listCaravanWagons } from "@/services/wagons";
 import {
   addCaravanTraveler,
@@ -12,16 +13,17 @@ import {
   listCaravanTravelers,
   listTravelerRoleCatalog,
   updateCaravanTraveler,
-  updateCaravanTravelerRole,
   updateCaravanTravelerWagon,
 } from "@/services/travelers";
 import type { Caravan } from "@/types/caravan";
+import type { CaravanBeast } from "@/types/beast";
 import type { CaravanTraveler, TravelerRoleCatalogItem } from "@/types/traveler";
 import type { CaravanWagon } from "@/types/wagon";
 
 const caravans = ref<Caravan[]>([]);
 const activeCaravan = ref<Caravan | null>(null);
 const travelers = ref<CaravanTraveler[]>([]);
+const beasts = ref<CaravanBeast[]>([]);
 const wagons = ref<CaravanWagon[]>([]);
 const roleCatalog = ref<TravelerRoleCatalogItem[]>([]);
 const loading = ref(true);
@@ -37,6 +39,7 @@ const selectedModalError = ref<string | null>(null);
 const selectedFullName = ref("");
 const selectedDescription = ref("");
 const selectedWagonId = ref("");
+const selectedDrivingWagonId = ref("");
 const selectedAvailableRoleCodes = ref<string[]>([]);
 const selectedRoleCodes = ref<string[]>([]);
 const selectedMaxActiveRoleCount = ref(1);
@@ -54,6 +57,8 @@ const createMaxActiveRoleCount = ref(1);
 const createSalary = ref("");
 const createContractConditions = ref("");
 const createConsumption = ref("1");
+const createWagonId = ref("");
+const createDrivingWagonId = ref("");
 const createServedTravelerId = ref("");
 const { showToast } = useToast();
 const gpFormatter = new Intl.NumberFormat("es-ES", {
@@ -79,11 +84,13 @@ const selectedTargetRole = computed(
 const createTargetRole = computed(
   () => createActiveRoleCodes.value.map((code) => roleCatalogByCode.value[code]).find((role) => role?.requiresTargetTraveler) ?? null,
 );
+const carreteroRoleCode = "carretero";
 
 function syncSelectedTravelerDraft(traveler: CaravanTraveler) {
   selectedFullName.value = traveler.fullName;
   selectedDescription.value = traveler.description ?? "";
   selectedWagonId.value = traveler.wagonId ?? "";
+  selectedDrivingWagonId.value = traveler.drivingWagonId ?? "";
   selectedAvailableRoleCodes.value = [...traveler.availableRoleCodes];
   selectedRoleCodes.value = [...traveler.activeRoleCodes];
   selectedMaxActiveRoleCount.value = traveler.maxActiveRoleCount;
@@ -130,6 +137,76 @@ const selectedTargetTravelerOptions = computed(() =>
   ),
 );
 
+function selectedTravelerWagonCapacity(wagonId: string, excludedTravelerId?: string | null) {
+  const wagon = wagons.value.find((item) => item.id === wagonId);
+  if (!wagon) {
+    return 0;
+  }
+
+  const travelerCount = travelers.value.filter((traveler) => traveler.wagonId === wagonId && traveler.id !== excludedTravelerId).length;
+  const beastCount = beasts.value.filter((beast) => beast.assignmentType === "TRAVELER" && beast.assignedWagonId === wagonId).length;
+  return Math.max(0, wagon.travelerCapacity - travelerCount - beastCount);
+}
+
+function wagonHasAnotherCarretero(wagonId: string, excludedTravelerId?: string | null) {
+  return travelers.value.some((traveler) =>
+    traveler.id !== excludedTravelerId
+    && traveler.drivingWagonId === wagonId
+    && traveler.activeRoleCodes.includes(carreteroRoleCode),
+  );
+}
+
+function validSleepingWagonOptionsForTraveler(excludedTravelerId?: string | null) {
+  return wagons.value.filter((wagon) => {
+    return selectedTravelerWagonCapacity(wagon.id, excludedTravelerId) > 0
+      || wagon.id === (excludedTravelerId ? travelers.value.find((traveler) => traveler.id === excludedTravelerId)?.wagonId : null);
+  });
+}
+
+function validDrivingWagonOptionsForTraveler(excludedTravelerId?: string | null) {
+  return wagons.value.filter((wagon) => !wagonHasAnotherCarretero(wagon.id, excludedTravelerId));
+}
+
+const selectedWagonOptions = computed(() =>
+  validSleepingWagonOptionsForTraveler(selectedTraveler.value?.id),
+);
+
+const selectedDrivingWagonOptions = computed(() =>
+  selectedRoleCodes.value.includes(carreteroRoleCode)
+    ? validDrivingWagonOptionsForTraveler(selectedTraveler.value?.id)
+    : [],
+);
+
+const createWagonOptions = computed(() =>
+  validSleepingWagonOptionsForTraveler(),
+);
+
+const createDrivingWagonOptions = computed(() =>
+  createActiveRoleCodes.value.includes(carreteroRoleCode)
+    ? validDrivingWagonOptionsForTraveler()
+    : [],
+);
+
+const selectedWagonHelperText = computed(() =>
+  "Este es el carro en el que viaja y duerme el viajero.",
+);
+
+const createWagonHelperText = computed(() =>
+  "Este es el carro en el que viajará y dormirá el viajero.",
+);
+
+const selectedDrivingWagonHelperText = computed(() =>
+  selectedRoleCodes.value.includes(carreteroRoleCode)
+    ? "Solo se muestran carros válidos para conducir."
+    : "Selecciona primero el rol carretero para poder elegir el carro que conduce.",
+);
+
+const createDrivingWagonHelperText = computed(() =>
+  createActiveRoleCodes.value.includes(carreteroRoleCode)
+    ? "Solo se muestran carros válidos para conducir."
+    : "Selecciona primero el rol carretero para poder elegir el carro que conduce.",
+);
+
 const roleFilterOptions = computed(() => roleCatalog.value);
 
 const passengerRoleCode = "pasajero";
@@ -170,6 +247,28 @@ watch(selectedAvailableRoleCodes, () => {
   }
 }, { deep: true });
 
+watch([selectedRoleCodes, selectedTraveler, wagons, travelers, beasts], () => {
+  if (!selectedRoleCodes.value.includes(carreteroRoleCode)) {
+    selectedDrivingWagonId.value = "";
+    return;
+  }
+
+  if (selectedDrivingWagonId.value && !selectedDrivingWagonOptions.value.some((wagon) => wagon.id === selectedDrivingWagonId.value)) {
+    selectedDrivingWagonId.value = "";
+  }
+}, { deep: true });
+
+watch([createActiveRoleCodes, wagons, travelers, beasts], () => {
+  if (!createActiveRoleCodes.value.includes(carreteroRoleCode)) {
+    createDrivingWagonId.value = "";
+    return;
+  }
+
+  if (createDrivingWagonId.value && !createDrivingWagonOptions.value.some((wagon) => wagon.id === createDrivingWagonId.value)) {
+    createDrivingWagonId.value = "";
+  }
+}, { deep: true });
+
 async function refresh() {
   const previousAction = pendingAction.value;
   const trackRefresh = previousAction === null;
@@ -187,12 +286,14 @@ async function refresh() {
     activeCaravan.value = activeResponse.caravan;
 
     if (activeResponse.caravan) {
-      const [travelerList, wagonList, roleList] = await Promise.all([
+      const [travelerList, beastList, wagonList, roleList] = await Promise.all([
         listCaravanTravelers(activeResponse.caravan.id),
+        listCaravanBeasts(activeResponse.caravan.id),
         listCaravanWagons(activeResponse.caravan.id),
         listTravelerRoleCatalog(activeResponse.caravan.id),
       ]);
       travelers.value = travelerList;
+      beasts.value = beastList;
       wagons.value = wagonList;
       roleCatalog.value = roleList;
 
@@ -206,6 +307,7 @@ async function refresh() {
       }
     } else {
       travelers.value = [];
+      beasts.value = [];
       wagons.value = [];
       roleCatalog.value = [];
       selectedTraveler.value = null;
@@ -214,6 +316,7 @@ async function refresh() {
       selectedFullName.value = "";
       selectedDescription.value = "";
       selectedWagonId.value = "";
+      selectedDrivingWagonId.value = "";
       selectedAvailableRoleCodes.value = [];
       selectedRoleCodes.value = [];
       selectedMaxActiveRoleCount.value = 1;
@@ -241,12 +344,16 @@ function openCreateModal() {
   createSalary.value = "";
   createContractConditions.value = "";
   createConsumption.value = "1";
+  createWagonId.value = "";
+  createDrivingWagonId.value = "";
   createServedTravelerId.value = "";
 }
 
 function closeCreateModal() {
   createModalOpen.value = false;
   createModalError.value = null;
+  createWagonId.value = "";
+  createDrivingWagonId.value = "";
 }
 
 async function handleCreateTraveler() {
@@ -284,6 +391,16 @@ async function handleCreateTraveler() {
     return;
   }
 
+  if (createActiveRoleCodes.value.includes(carreteroRoleCode) && !createWagonId.value) {
+    createModalError.value = "Debes seleccionar el carro de este carretero";
+    return;
+  }
+
+  if (createActiveRoleCodes.value.includes(carreteroRoleCode) && !createDrivingWagonId.value) {
+    createModalError.value = "Debes seleccionar el carro que conduce este carretero";
+    return;
+  }
+
   submitting.value = true;
   pendingAction.value = "create";
   error.value = null;
@@ -316,6 +433,8 @@ async function handleCreateTraveler() {
       salary: parsedSalary,
       contractConditions: createContractConditions.value.trim() || null,
       consumption: parsedConsumption,
+      wagonId: createWagonId.value || null,
+      drivingWagonId: createDrivingWagonId.value || null,
       servedTravelerId: createServedTravelerId.value || null,
     });
     closeCreateModal();
@@ -352,6 +471,7 @@ function closeTraveler() {
   selectedFullName.value = "";
   selectedDescription.value = "";
   selectedWagonId.value = "";
+  selectedDrivingWagonId.value = "";
   selectedAvailableRoleCodes.value = [];
   selectedRoleCodes.value = [];
   selectedMaxActiveRoleCount.value = 1;
@@ -458,6 +578,11 @@ async function handleSaveTravelerChanges() {
     return;
   }
 
+  if (selectedRoleCodes.value.includes(carreteroRoleCode) && !selectedDrivingWagonId.value) {
+    selectedModalError.value = "Debes seleccionar el carro que conduce este carretero";
+    return;
+  }
+
   const salaryText = String(selectedSalary.value).trim().replace(",", ".");
   const consumptionText = String(selectedConsumption.value).trim();
   const parsedSalary = salaryText ? Number(salaryText) : null;
@@ -491,6 +616,7 @@ async function handleSaveTravelerChanges() {
       activeRoleCode: selectedRoleCodes.value.length === 0 ? passengerRoleCode : selectedPrimaryRoleCode.value,
       maxActiveRoleCount: selectedMaxActiveRoleCount.value,
       wagonId: selectedWagonId.value || null,
+      drivingWagonId: selectedDrivingWagonId.value || null,
       salary: parsedSalary,
       contractConditions: selectedContractConditions.value.trim() || null,
       consumption: parsedConsumption,
@@ -509,43 +635,6 @@ async function handleSaveTravelerChanges() {
   }
 }
 
-async function handleUpdateRole() {
-  if (!activeCaravan.value || !selectedTraveler.value) {
-    return;
-  }
-
-  if (selectedRoleCodes.value.length === 0) {
-    selectedRoleTargetTravelerId.value = "";
-  }
-
-  const targetRole = selectedTargetRole.value;
-  if (targetRole?.requiresTargetTraveler && !selectedRoleTargetTravelerId.value) {
-    selectedModalError.value = "Debes seleccionar el viajero al que sirve";
-    return;
-  }
-
-  submitting.value = true;
-  pendingAction.value = "update-role";
-  error.value = null;
-
-  try {
-    const updated = await updateCaravanTravelerRole(activeCaravan.value.id, selectedTraveler.value.id, {
-      activeRoleCodes: selectedRoleCodes.value.length === 0
-        ? [passengerRoleCode]
-        : selectedRoleCodes.value,
-      activeRoleCode: selectedRoleCodes.value.length === 0 ? passengerRoleCode : selectedPrimaryRoleCode.value,
-      maxActiveRoleCount: selectedMaxActiveRoleCount.value,
-      servedTravelerId: targetRole?.requiresTargetTraveler ? selectedRoleTargetTravelerId.value : null,
-    });
-    selectedTraveler.value = updated;
-    await refresh();
-  } catch (cause) {
-    selectedModalError.value = cause instanceof Error ? cause.message : "Failed to update traveler role";
-  } finally {
-    submitting.value = false;
-    pendingAction.value = null;
-  }
-}
 
 async function handleRoleSelection(roleCode: string) {
   if (!selectedTraveler.value) {
@@ -676,6 +765,10 @@ function travelerAssignmentLabel(traveler: CaravanTraveler): string {
   return traveler.wagonName ?? "Sin carro";
 }
 
+function travelerDrivingAssignmentLabel(traveler: CaravanTraveler): string {
+  return traveler.drivingWagonName ?? "Sin carro de conducción";
+}
+
 function roleCountLabel(activeCount: number, maxCount: number) {
   return `${activeCount} / ${maxCount}`;
 }
@@ -784,7 +877,8 @@ onMounted(refresh);
                 <tr>
                   <th>Viajero</th>
                   <th>Rol activo</th>
-                  <th>Carro</th>
+                  <th>Carro de viaje</th>
+                  <th>Carro que conduce</th>
                 </tr>
               </thead>
               <tbody>
@@ -805,6 +899,11 @@ onMounted(refresh);
                   <td>
                     <span class="assignment-badge" :class="{ 'assignment-badge--warning': !traveler.wagonId }">
                       {{ travelerAssignmentLabel(traveler) }}
+                    </span>
+                  </td>
+                  <td>
+                    <span class="assignment-badge" :class="{ 'assignment-badge--warning': !traveler.drivingWagonId }">
+                      {{ travelerDrivingAssignmentLabel(traveler) }}
                     </span>
                   </td>
                 </tr>
@@ -876,7 +975,8 @@ onMounted(refresh);
                   <dt>Roles posibles</dt>
                   <dd>{{ roleSummary(selectedTraveler.availableRoleCodes) }}</dd>
                 </div>
-                <div><dt>Carro</dt><dd>{{ selectedTraveler.wagonName ?? "Sin carro" }}</dd></div>
+                <div><dt>Carro de viaje</dt><dd>{{ selectedTraveler.wagonName ?? "Sin carro" }}</dd></div>
+                <div><dt>Carro que conduce</dt><dd>{{ selectedTraveler.drivingWagonName ?? "Sin carro de conducción" }}</dd></div>
                 <div><dt>Consumo</dt><dd>{{ selectedTraveler.consumption }}</dd></div>
               </dl>
               <p v-if="selectedTraveler.servedTravelerName" class="muted">
@@ -985,13 +1085,25 @@ onMounted(refresh);
 
               <div class="two-columns">
                 <label>
-                  <span>Carro</span>
+                  <span>Carro de viaje y descanso</span>
                   <select v-model="selectedWagonId" :disabled="loading || submitting">
                     <option value="">Selecciona un carro</option>
-                    <option v-for="wagon in wagons" :key="wagon.id" :value="wagon.id">
+                    <option v-for="wagon in selectedWagonOptions" :key="wagon.id" :value="wagon.id">
                       {{ wagon.name }}
                     </option>
                   </select>
+                  <small class="muted">{{ selectedWagonHelperText }}</small>
+                </label>
+
+                <label v-if="selectedRoleCodes.includes(carreteroRoleCode)">
+                  <span>Carro que conduce</span>
+                  <select v-model="selectedDrivingWagonId" :disabled="loading || submitting">
+                    <option value="">Selecciona un carro</option>
+                    <option v-for="wagon in selectedDrivingWagonOptions" :key="wagon.id" :value="wagon.id">
+                      {{ wagon.name }}
+                    </option>
+                  </select>
+                  <small class="muted">{{ selectedDrivingWagonHelperText }}</small>
                 </label>
 
                 <label>
@@ -1123,26 +1235,48 @@ onMounted(refresh);
               </div>
             </section>
 
-            <div class="two-columns">
-              <label v-if="createTargetRole?.requiresTargetTraveler">
-                <span>Viajero al que sirve</span>
-                <select v-model="createServedTravelerId">
-                  <option value="">Selecciona un viajero</option>
+              <div class="two-columns">
+                <label v-if="createTargetRole?.requiresTargetTraveler">
+                  <span>Viajero al que sirve</span>
+                  <select v-model="createServedTravelerId">
+                    <option value="">Selecciona un viajero</option>
                   <option v-for="traveler in createTargetTravelerOptions" :key="traveler.id" :value="traveler.id">
                     {{ traveler.fullName }}
                   </option>
                 </select>
+                </label>
+
+                <div class="role-limit-summary">
+                  <span>Roles simultáneos máximos</span>
+                  <strong>{{ createMaxActiveRoleCount }}</strong>
+                </div>
+              </div>
+
+              <label>
+                <span>Carro de viaje y descanso</span>
+                <select v-model="createWagonId" :disabled="loading || submitting">
+                  <option value="">Selecciona un carro</option>
+                  <option v-for="wagon in createWagonOptions" :key="wagon.id" :value="wagon.id">
+                    {{ wagon.name }}
+                  </option>
+                </select>
+                <small class="muted">{{ createWagonHelperText }}</small>
               </label>
 
-              <div class="role-limit-summary">
-                <span>Roles simultáneos máximos</span>
-                <strong>{{ createMaxActiveRoleCount }}</strong>
-              </div>
-            </div>
+              <label v-if="createActiveRoleCodes.includes(carreteroRoleCode)">
+                <span>Carro que conduce</span>
+                <select v-model="createDrivingWagonId" :disabled="loading || submitting">
+                  <option value="">Selecciona un carro</option>
+                  <option v-for="wagon in createDrivingWagonOptions" :key="wagon.id" :value="wagon.id">
+                    {{ wagon.name }}
+                  </option>
+                </select>
+                <small class="muted">{{ createDrivingWagonHelperText }}</small>
+              </label>
 
-            <div class="two-columns">
-              <label>
-                <span>Sueldo</span>
+              <div class="two-columns">
+                <label>
+                  <span>Sueldo</span>
                 <input
                   v-model="createSalary"
                   type="number"

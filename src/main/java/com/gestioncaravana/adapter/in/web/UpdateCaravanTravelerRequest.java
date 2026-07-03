@@ -13,6 +13,7 @@ public record UpdateCaravanTravelerRequest(
     String activeRoleCode,
     Integer maxActiveRoleCount,
     UUID wagonId,
+    UUID drivingWagonId,
     BigDecimal salary,
     String contractConditions,
     Integer consumption,

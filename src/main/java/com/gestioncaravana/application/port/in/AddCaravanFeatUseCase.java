@@ -13,5 +13,7 @@ public interface AddCaravanFeatUseCase {
       CaravanFeatAcquisitionSourceType acquisitionSourceType,
       Integer acquisitionLevel,
       String acquisitionCause,
-      Boolean active) {}
+      Boolean active,
+      Boolean manualApplies,
+      String manualAppliesReason) {}
 }

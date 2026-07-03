@@ -16,4 +16,6 @@ public record AddCaravanTravelerRequest(
     BigDecimal salary,
     String contractConditions,
     Integer consumption,
+    UUID wagonId,
+    UUID drivingWagonId,
     UUID servedTravelerId) {}

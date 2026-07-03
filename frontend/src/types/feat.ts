@@ -11,6 +11,9 @@ export interface CaravanFeatCatalogItem {
   repeatable: boolean;
   selectionLimit: number;
   minimumLevel: number | null;
+  automationMode: string | null;
+  automationStateInputs: string | null;
+  automationExactAutomation: string | null;
   ownedCount: number;
   available: boolean;
   blockedReason: string | null;
@@ -32,6 +35,11 @@ export interface CaravanFeat {
   selectionIndex: number;
   active: boolean;
   blockedReason: string | null;
+  manualApplies: boolean | null;
+  manualAppliesReason: string | null;
+  automationMode: string | null;
+  automationStateInputs: string | null;
+  automationExactAutomation: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -42,6 +50,8 @@ export interface AddCaravanFeatPayload {
   acquisitionLevel?: number | null;
   acquisitionCause?: string | null;
   active?: boolean | null;
+  manualApplies?: boolean | null;
+  manualAppliesReason?: string | null;
 }
 
 export interface UpdateCaravanFeatPayload {
@@ -49,4 +59,6 @@ export interface UpdateCaravanFeatPayload {
   acquisitionLevel?: number | null;
   acquisitionCause?: string | null;
   active?: boolean | null;
+  manualApplies?: boolean | null;
+  manualAppliesReason?: string | null;
 }

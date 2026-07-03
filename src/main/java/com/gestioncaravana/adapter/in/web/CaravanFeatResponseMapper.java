@@ -19,6 +19,9 @@ final class CaravanFeatResponseMapper {
         view.repeatable(),
         view.selectionLimit(),
         view.minimumLevel(),
+        view.automationMode(),
+        view.automationStateInputs(),
+        view.automationExactAutomation(),
         view.ownedCount(),
         view.available(),
         view.blockedReason());
@@ -41,6 +44,11 @@ final class CaravanFeatResponseMapper {
         view.selectionIndex(),
         view.active(),
         view.blockedReason(),
+        view.manualApplies(),
+        view.manualAppliesReason(),
+        view.automationMode(),
+        view.automationStateInputs(),
+        view.automationExactAutomation(),
         view.createdAt(),
         view.updatedAt());
   }

@@ -67,15 +67,15 @@ class TravelerManagementServiceTest {
     var created = service.execute(
         caravan.id(),
         new AddCaravanTravelerCommand(
-            "María",
-            "Description",
-            List.of("pasajero"),
-            List.of("pasajero"),
-            null,
-            1,
-            BigDecimal.valueOf(120),
-            "Contract",
-            null,
+            "María", 
+            "Description", 
+            List.of("pasajero"), 
+            List.of("pasajero"), 
+            null, 
+            1, 
+            BigDecimal.valueOf(120), 
+            "Contract", 
+            null, null, 
             null));
 
     service.execute(caravan.id(), created.id(), new UpdateCaravanTravelerWagonCommand(wagon.id()));
@@ -89,23 +89,147 @@ class TravelerManagementServiceTest {
   }
 
   @Test
+  void createsCarreteroOnlyWhenItHasAValidWagon() {
+    var caravan = createCaravan();
+    var sleepingWagon = createWagon(caravan.id(), "carro-cubierto");
+    var drivingWagon = createWagon(caravan.id(), "carro-de-viajeros");
+
+    var created = service.execute(
+        caravan.id(),
+        new AddCaravanTravelerCommand(
+            "Carretero",
+            null,
+            List.of("pasajero", "carretero"),
+            List.of("carretero"),
+            "carretero",
+            1,
+            null,
+            null,
+            1,
+            sleepingWagon.id(),
+            drivingWagon.id(),
+            null));
+
+    assertThat(created.wagonId()).isEqualTo(sleepingWagon.id());
+    assertThat(created.drivingWagonId()).isEqualTo(drivingWagon.id());
+    assertThat(created.activeRoleCode()).isEqualTo("carretero");
+    assertThat(created.wagonName()).isEqualTo("Carro Cubierto");
+    assertThat(created.drivingWagonName()).isEqualTo("Carro De Viajeros");
+  }
+
+  @Test
+  void rejectsCarreteroCreationWithoutWagon() {
+    var caravan = createCaravan();
+
+    assertThatThrownBy(() -> service.execute(
+        caravan.id(),
+        new AddCaravanTravelerCommand(
+            "Carretero",
+            null,
+            List.of("pasajero", "carretero"),
+            List.of("carretero"),
+            "carretero",
+            1,
+            null,
+            null,
+            1,
+            null,
+            null)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("wagonId is required for role carretero");
+  }
+
+  @Test
+  void rejectsASecondCarreteroOnTheSameWagon() {
+    var caravan = createCaravan();
+    var sleepingWagonA = createWagon(caravan.id(), "carro-cubierto");
+    var sleepingWagonB = createWagon(caravan.id(), "carro-cubierto");
+    var drivingWagon = createWagon(caravan.id(), "carro-de-viajeros");
+
+    service.execute(
+        caravan.id(),
+        new AddCaravanTravelerCommand(
+            "Carretero 1",
+            null,
+            List.of("pasajero", "carretero"),
+            List.of("carretero"),
+            "carretero",
+            1,
+            null,
+            null,
+            1,
+            sleepingWagonA.id(),
+            drivingWagon.id(),
+            null));
+
+    assertThatThrownBy(() -> service.execute(
+        caravan.id(),
+        new AddCaravanTravelerCommand(
+            "Carretero 2",
+            null,
+            List.of("pasajero", "carretero"),
+            List.of("carretero"),
+            "carretero",
+            1,
+            null,
+            null,
+            1,
+            sleepingWagonB.id(),
+            drivingWagon.id(),
+            null)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("already has a carretero assigned");
+  }
+
+  @Test
+  void rejectsClearingTheWagonFromACarretero() {
+    var caravan = createCaravan();
+    var sleepingWagon = createWagon(caravan.id(), "carro-cubierto");
+    var drivingWagon = createWagon(caravan.id(), "carro-de-viajeros");
+
+    var traveler = service.execute(
+        caravan.id(),
+        new AddCaravanTravelerCommand(
+            "Carretero",
+            null,
+            List.of("pasajero", "carretero"),
+            List.of("carretero"),
+            "carretero",
+            1,
+            null,
+            null,
+            1,
+            sleepingWagon.id(),
+            drivingWagon.id(),
+            null));
+
+    var updated = service.execute(
+        caravan.id(),
+        traveler.id(),
+        new UpdateCaravanTravelerWagonCommand(null));
+
+    assertThat(updated.wagonId()).isNull();
+    assertThat(updated.drivingWagonId()).isEqualTo(drivingWagon.id());
+  }
+
+  @Test
   void changesTravelerRoleAndRequiresTargetForServant() {
     var caravan = createCaravan();
     var target = service.execute(
         caravan.id(),
-        new AddCaravanTravelerCommand("Objetivo", null, List.of("pasajero"), List.of("pasajero"), null, 1, null, null, 1, null));
+        new AddCaravanTravelerCommand("Objetivo",  null,  List.of("pasajero"),  List.of("pasajero"),  null,  1,  null,  null,  1, null,  null));
     var traveler = service.execute(
         caravan.id(),
         new AddCaravanTravelerCommand(
-            "Sirviente",
-            null,
-            List.of("pasajero", "sirviente"),
-            List.of("pasajero"),
-            null,
-            2,
-            null,
-            null,
-            1,
+            "Sirviente", 
+            null, 
+            List.of("pasajero", "sirviente"), 
+            List.of("pasajero"), 
+            null, 
+            2, 
+            null, 
+            null, 
+            1, null, 
             null));
 
     var updated = service.execute(
@@ -129,33 +253,33 @@ class TravelerManagementServiceTest {
     var caravan = createCaravan();
     var target = service.execute(
         caravan.id(),
-        new AddCaravanTravelerCommand("Objetivo", null, List.of("pasajero"), List.of("pasajero"), null, 1, null, null, 1, null));
+        new AddCaravanTravelerCommand("Objetivo",  null,  List.of("pasajero"),  List.of("pasajero"),  null,  1,  null,  null,  1, null,  null));
     service.execute(
         caravan.id(),
         new AddCaravanTravelerCommand(
-            "Sirviente 1",
-            null,
-            List.of("pasajero", "sirviente"),
-            List.of("sirviente"),
-            "sirviente",
-            1,
-            null,
-            null,
-            1,
+            "Sirviente 1", 
+            null, 
+            List.of("pasajero", "sirviente"), 
+            List.of("sirviente"), 
+            "sirviente", 
+            1, 
+            null, 
+            null, 
+            1, null, 
             target.id()));
 
     assertThatThrownBy(() -> service.execute(
         caravan.id(),
         new AddCaravanTravelerCommand(
-            "Sirviente 2",
-            null,
-            List.of("pasajero", "sirviente"),
-            List.of("sirviente"),
-            "sirviente",
-            1,
-            null,
-            null,
-            1,
+            "Sirviente 2", 
+            null, 
+            List.of("pasajero", "sirviente"), 
+            List.of("sirviente"), 
+            "sirviente", 
+            1, 
+            null, 
+            null, 
+            1, null, 
             target.id())))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("already assigned");
@@ -167,7 +291,7 @@ class TravelerManagementServiceTest {
 
     assertThatThrownBy(() -> service.execute(
         caravan.id(),
-        new AddCaravanTravelerCommand("Tester", null, List.of("unknown-role"), List.of("unknown-role"), null, 1, null, null, 1, null)))
+        new AddCaravanTravelerCommand("Tester",  null,  List.of("unknown-role"),  List.of("unknown-role"),  null,  1,  null,  null,  1, null,  null)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("known traveler role codes");
   }
@@ -177,10 +301,10 @@ class TravelerManagementServiceTest {
     var caravan = createCaravan();
     var target = service.execute(
         caravan.id(),
-        new AddCaravanTravelerCommand("Objetivo", null, List.of("pasajero"), List.of("pasajero"), null, 1, null, null, 1, null));
+        new AddCaravanTravelerCommand("Objetivo",  null,  List.of("pasajero"),  List.of("pasajero"),  null,  1,  null,  null,  1, null,  null));
     var dependent = service.execute(
         caravan.id(),
-        new AddCaravanTravelerCommand("Dependiente", null, List.of("pasajero"), List.of("pasajero"), null, 1, null, null, 1, null));
+        new AddCaravanTravelerCommand("Dependiente",  null,  List.of("pasajero"),  List.of("pasajero"),  null,  1,  null,  null,  1, null,  null));
     travelerRepository.save(new CaravanTraveler(
         dependent.id(),
         caravan.id(),

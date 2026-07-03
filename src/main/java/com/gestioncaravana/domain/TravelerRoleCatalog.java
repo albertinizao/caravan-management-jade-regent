@@ -6,6 +6,7 @@ import java.util.Optional;
 public final class TravelerRoleCatalog {
 
   public static final String PASSENGER_CODE = "pasajero";
+  public static final String CARRETERO_CODE = "carretero";
 
   private static final List<TravelerRoleCatalogItem> ITEMS = List.of(
       new TravelerRoleCatalogItem("adivino", "Adivino", "Consejero espiritual y guía de la caravana.", "Ser capaz de lanzar conjuros de adivinación.", false),
@@ -16,7 +17,7 @@ public final class TravelerRoleCatalog {
       new TravelerRoleCatalogItem("batidor", "Batidor", "Explora o caza lejos de la caravana.", "1 rango en supervivencia.", false),
       new TravelerRoleCatalogItem("boticario", "Boticario", "Produce artículos curativos y apoya el descanso.", "1 rango en saber (naturaleza) o artesanía (alquimia).", false),
       new TravelerRoleCatalogItem("carrero", "Carrero", "Realiza reparaciones sobre la marcha.", "1 rango en artesanía (carpintería) o profesión (ingeniero o carrero).", false),
-      new TravelerRoleCatalogItem("carretero", "Carretero", "Controla los carros durante el viaje.", "1 rango en profesión (carretero) o trato con animales.", false),
+      new TravelerRoleCatalogItem(CARRETERO_CODE, "Carretero", "Controla los carros durante el viaje.", "1 rango en profesión (carretero) o trato con animales.", false),
       new TravelerRoleCatalogItem("cocinero", "Cocinero", "Mejora el rendimiento de los suministros.", "1 rango en una profesión culinaria relacionada.", false, TravelerRoleHelperBenefitMode.DAILY, null),
       new TravelerRoleCatalogItem("comediante", "Comediante", "Mejora la determinación de la caravana.", "1 rango en interpretar.", false),
       new TravelerRoleCatalogItem("comerciante", "Comerciante", "Facilita transacciones comerciales.", "1 rango en Diplomacia, engañar o Profesión (mercader).", false),

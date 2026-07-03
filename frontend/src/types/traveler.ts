@@ -19,6 +19,8 @@ export interface CaravanTraveler {
   activeRoleName: string;
   wagonId: string | null;
   wagonName: string | null;
+  drivingWagonId: string | null;
+  drivingWagonName: string | null;
   maxActiveRoleCount: number;
   salary: number | null;
   contractConditions: string | null;
@@ -39,6 +41,8 @@ export interface AddCaravanTravelerPayload {
   salary?: number | null;
   contractConditions?: string | null;
   consumption?: number | null;
+  wagonId?: string | null;
+  drivingWagonId?: string | null;
   servedTravelerId?: string | null;
 }
 
@@ -61,6 +65,7 @@ export interface UpdateCaravanTravelerPayload {
   activeRoleCode: string;
   maxActiveRoleCount?: number | null;
   wagonId?: string | null;
+  drivingWagonId?: string | null;
   salary?: number | null;
   contractConditions?: string | null;
   consumption?: number | null;

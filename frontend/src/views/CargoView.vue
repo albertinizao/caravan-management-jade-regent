@@ -37,6 +37,7 @@ const submitting = ref(false);
 const pendingAction = ref<string | null>(null);
 const error = ref<string | null>(null);
 const search = ref("");
+const catalogSearch = ref("");
 const sourceFilter = ref<"all" | "CATALOG" | "CUSTOM">("all");
 const categoryFilter = ref("all");
 const wagonFilter = ref("all");
@@ -94,6 +95,14 @@ const catalogByCode = computed(() =>
 const selectedCatalogItem = computed(() =>
   selectedCatalogCode.value ? catalogByCode.value[selectedCatalogCode.value] ?? null : null,
 );
+const filteredCatalog = computed(() => {
+  const query = catalogSearch.value.trim().toLowerCase();
+  if (!query) {
+    return catalog.value;
+  }
+
+  return catalog.value.filter((item) => item.name.toLowerCase().includes(query));
+});
 const selectedCatalogRequiredMetadataKeys = computed(
   () => selectedCatalogItem.value?.requiredMetadataKeys ?? [],
 );
@@ -238,6 +247,7 @@ async function refresh() {
 }
 
 function openCatalogModal() {
+  catalogSearch.value = "";
   if (!selectedCatalogCode.value) {
     selectedCatalogCode.value = catalog.value[0]?.code ?? "";
   }
@@ -249,6 +259,7 @@ function openCatalogModal() {
 function closeCatalogModal() {
   catalogModalOpen.value = false;
   catalogModalError.value = null;
+  catalogSearch.value = "";
 }
 
 function resetCatalogForm() {
@@ -783,6 +794,21 @@ watch([selectedCargo, selectedCargoAvailableWagons], () => {
   syncCargoWagonSelection();
 });
 
+watch([catalogSearch, filteredCatalog, catalogModalOpen], () => {
+  if (!catalogModalOpen.value) {
+    return;
+  }
+
+  if (filteredCatalog.value.length === 0) {
+    selectedCatalogCode.value = "";
+    return;
+  }
+
+  if (!filteredCatalog.value.some((item) => item.code === selectedCatalogCode.value)) {
+    selectedCatalogCode.value = filteredCatalog.value[0].code;
+  }
+});
+
 onMounted(refresh);
 </script>
 
@@ -922,10 +948,15 @@ onMounted(refresh);
 
           <p v-if="catalogModalError" class="error">{{ catalogModalError }}</p>
 
+          <label class="catalog-search">
+            <span>Buscar por nombre</span>
+            <input v-model="catalogSearch" type="search" placeholder="Escribe para filtrar el catálogo" />
+          </label>
+
           <div class="catalog-layout">
             <div class="catalog-list">
               <button
-                v-for="item in catalog"
+                v-for="item in filteredCatalog"
                 :key="item.code"
                 type="button"
                 class="catalog-item"
@@ -1439,6 +1470,12 @@ p {
   display: grid;
   grid-template-columns: 0.95fr 1.05fr;
   gap: 1rem;
+}
+
+.catalog-search {
+  display: grid;
+  gap: 0.35rem;
+  max-width: 22rem;
 }
 
 .catalog-list {

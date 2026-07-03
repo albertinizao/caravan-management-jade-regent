@@ -28,6 +28,7 @@ import com.gestioncaravana.domain.CaravanWagonImprovement;
 import com.gestioncaravana.domain.WagonImprovementCatalog;
 import com.gestioncaravana.domain.WagonImprovementType;
 import com.gestioncaravana.domain.WagonCatalog;
+import com.gestioncaravana.domain.TravelerRoleCatalog;
 import com.gestioncaravana.domain.WagonDraftConstraint;
 import com.gestioncaravana.domain.WagonType;
 import java.time.Clock;
@@ -213,8 +214,30 @@ public class WagonManagementService
         .forEach(beast -> beastRepository.save(beast.clearAssignment(clock.instant())));
 
     travelerRepository.findAllByCaravanId(caravanId).stream()
-        .filter(traveler -> wagonId.equals(traveler.wagonId()))
-        .forEach(traveler -> travelerRepository.save(traveler.assignWagon(null, clock.instant())));
+        .filter(traveler -> wagonId.equals(traveler.wagonId()) || wagonId.equals(traveler.drivingWagonId()))
+        .forEach(traveler -> {
+          var now = clock.instant();
+          var updated = traveler;
+          if (wagonId.equals(traveler.wagonId())) {
+            updated = updated.assignWagon(null, now);
+          }
+          if (wagonId.equals(traveler.drivingWagonId())) {
+            var activeRoleCodes = traveler.activeRoleCodes().stream()
+                .filter(code -> !CARRETERO_ROLE_CODE.equals(code))
+                .toList();
+            var activeRoleCode = CARRETERO_ROLE_CODE.equals(traveler.activeRoleCode())
+                ? (activeRoleCodes.isEmpty() ? TravelerRoleCatalog.PASSENGER_CODE : activeRoleCodes.getFirst())
+                : traveler.activeRoleCode();
+            updated = updated.changeRoles(
+                activeRoleCodes,
+                activeRoleCode,
+                traveler.maxActiveRoleCount(),
+                traveler.roleSpecificData(),
+                null,
+                now);
+          }
+          travelerRepository.save(updated);
+        });
 
     wagonRepository.deleteById(caravanId, wagonId);
   }
@@ -228,6 +251,8 @@ public class WagonManagementService
     return wagonRepository.findById(caravanId, wagonId)
         .orElseThrow(() -> new IllegalArgumentException("Wagon not found: " + wagonId));
   }
+
+  private static final String CARRETERO_ROLE_CODE = "carretero";
 
   private WagonCatalogItemView toCatalogView(WagonType wagonType) {
     return new WagonCatalogItemView(
@@ -294,6 +319,10 @@ public class WagonManagementService
     var derived = deriveWagonStats(wagonType, improvements);
     var draftBeasts = draftBeasts(wagon.caravanId(), wagon.id());
     var draftStrength = draftBeasts.stream().mapToInt(this::effectiveDraftStrength).sum();
+    var carretero = travelerRepository.findAllByCaravanId(wagon.caravanId()).stream()
+        .filter(traveler -> wagon.id().equals(traveler.drivingWagonId()) && traveler.hasActiveRole(CARRETERO_ROLE_CODE))
+        .findFirst()
+        .orElse(null);
     var displayName = wagon.displayNameOr(wagonType.name());
     return new CaravanWagonView(
         wagon.id(),
@@ -319,6 +348,8 @@ public class WagonManagementService
         draftBeasts,
         draftStrength,
         derivedDraftStrength(wagonType, improvements),
+        carretero == null ? null : carretero.id(),
+        carretero == null ? null : carretero.fullName(),
         improvements.stream().map(this::toView).sorted(Comparator.comparing(CaravanWagonImprovementView::createdAt)).toList(),
         wagon.createdAt(),
         wagon.updatedAt());

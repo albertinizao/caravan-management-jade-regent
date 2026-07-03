@@ -69,6 +69,7 @@ public class CaravanTravelerRepositoryAdapter implements CaravanTravelerReposito
     entity.setDaysServing(traveler.roleSpecificData() == null ? 0 : traveler.roleSpecificData().daysServing());
     entity.setCreatedAt(traveler.createdAt());
     entity.setUpdatedAt(traveler.updatedAt());
+    entity.setDrivingWagonId(traveler.drivingWagonId() == null ? null : traveler.drivingWagonId().toString());
     return entity;
   }
 
@@ -103,6 +104,7 @@ public class CaravanTravelerRepositoryAdapter implements CaravanTravelerReposito
             Boolean.TRUE.equals(entity.getGeneratingFood()),
             entity.getDaysServing() == null ? 0 : entity.getDaysServing()),
         entity.getWagonId() == null ? null : UUID.fromString(entity.getWagonId()),
+        entity.getDrivingWagonId() == null ? null : UUID.fromString(entity.getDrivingWagonId()),
         entity.getSalary() == null && normalize(entity.getContractConditions()) == null
             ? null
             : new TravelerContract(entity.getSalary(), normalize(entity.getContractConditions()), entity.getCreatedAt(), null),

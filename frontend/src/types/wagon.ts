@@ -89,6 +89,8 @@ export interface CaravanWagon {
   draftBeasts: CaravanBeast[];
   draftStrength: number;
   draftRequiredStrength: number;
+  carreteroId: string | null;
+  carreteroName: string | null;
   improvements: CaravanWagonImprovement[];
   createdAt: string;
   updatedAt: string;

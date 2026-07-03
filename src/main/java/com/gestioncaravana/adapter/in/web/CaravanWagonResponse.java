@@ -28,6 +28,8 @@ public record CaravanWagonResponse(
     List<CaravanBeastResponse> draftBeasts,
     int draftStrength,
     int draftRequiredStrength,
+    UUID carreteroId,
+    String carreteroName,
     List<CaravanWagonImprovementResponse> improvements,
     Instant createdAt,
     Instant updatedAt) {}

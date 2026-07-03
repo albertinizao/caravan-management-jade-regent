@@ -171,6 +171,38 @@ class WagonManagementServiceTest {
   }
 
   @Test
+  void deletesWagonAndRemovesCarreteroRoleFromAssignedTravelers() {
+    var caravan = createCaravan();
+    var sleepingWagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto", null));
+    var drivingWagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto", null));
+
+    var traveler = travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Viajero",
+        null,
+        List.of("pasajero", "carretero"),
+        List.of("carretero"),
+        "carretero",
+        1,
+        TravelerRoleData.empty(),
+        sleepingWagon.id(),
+        drivingWagon.id(),
+        null,
+        1,
+        Instant.parse("2026-01-01T00:00:00Z")));
+
+    service.delete(caravan.id(), drivingWagon.id());
+
+    assertThat(travelerRepository.findById(caravan.id(), traveler.id())).hasValueSatisfying(updated -> {
+      assertThat(updated.wagonId()).isEqualTo(sleepingWagon.id());
+      assertThat(updated.drivingWagonId()).isNull();
+      assertThat(updated.activeRoleCodes()).doesNotContain("carretero");
+      assertThat(updated.activeRoleCode()).isEqualTo("pasajero");
+    });
+  }
+
+  @Test
   void addsAndRemovesImprovementAndUpdatesDerivedStats() {
     var caravan = createCaravan();
     var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto", null));

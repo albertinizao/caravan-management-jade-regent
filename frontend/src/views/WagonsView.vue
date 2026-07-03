@@ -8,6 +8,7 @@ import {
   addCustomCargo,
   deleteCaravanCargo,
   listCaravanCargo,
+  listCaravanCargoSummary,
   listCargoCatalog,
 } from "@/services/cargo";
 import { listCaravanBeasts, updateCaravanBeastAssignment, clearCaravanBeastAssignment } from "@/services/beasts";
@@ -25,7 +26,7 @@ import {
 import { listCaravanTravelers, updateCaravanTravelerWagon } from "@/services/travelers";
 import type { Caravan } from "@/types/caravan";
 import type { CaravanBeast } from "@/types/beast";
-import type { CaravanCargo, CargoCatalogItem } from "@/types/cargo";
+import type { CaravanCargo, CaravanCargoSummary, CargoCatalogItem } from "@/types/cargo";
 import type { CaravanTraveler } from "@/types/traveler";
 import type {
   CaravanWagon,
@@ -40,6 +41,7 @@ const catalog = ref<WagonCatalogItem[]>([]);
 const wagons = ref<CaravanWagon[]>([]);
 const travelers = ref<CaravanTraveler[]>([]);
 const beasts = ref<CaravanBeast[]>([]);
+const cargoSummary = ref<CaravanCargoSummary[]>([]);
 const loading = ref(true);
 const submitting = ref(false);
 const pendingAction = ref<string | null>(null);
@@ -68,7 +70,10 @@ const specificCommodityOptions = [
 const addWagonSpecificCommodityOption = ref("");
 const addWagonSpecificCommodityCustom = ref("");
 const selectedWagon = ref<CaravanWagon | null>(null);
+const wagonAlertsModalOpen = ref(false);
+const wagonAlertsModalTarget = ref<CaravanWagon | null>(null);
 const wagonNameDraft = ref("");
+const wagonNameEditorOpen = ref(false);
 const selectedWagonCargo = ref<CaravanCargo[]>([]);
 const wagonCargoCatalog = ref<CargoCatalogItem[]>([]);
 const assignmentModalOpen = ref(false);
@@ -102,6 +107,7 @@ const improvementSearch = ref("");
 const wagonsTypeFilter = ref<"all" | "viajeros" | "mercancias" | "especiales">("all");
 const wagonsSearch = ref("");
 const draftMediumSlotsPerLargeBeast = 4;
+const carreteroRoleCode = "carretero";
 const { showToast } = useToast();
 
 function isPending(action: string) {
@@ -118,6 +124,46 @@ interface DraftStrengthState {
   className: string;
   label: string;
   description: string;
+}
+
+interface WagonDraftRequirement {
+  maxLargeBeasts: number;
+  maxMediumBeasts: number;
+  minimumStrength: number;
+}
+
+interface WagonDraftBand {
+  label: string;
+  className: string;
+  startPercent: number;
+  endPercent: number;
+  widthPercent: number;
+}
+
+interface WagonAlert {
+  kind: "danger" | "warning" | "info";
+  title: string;
+  description: string;
+}
+
+interface WagonRowSummary {
+  wagon: CaravanWagon;
+  travelerCount: number;
+  travelerBeastCount: number;
+  travelerCapacity: number;
+  cargoLoad: number;
+  cargoCapacity: number;
+  draftLargeCount: number;
+  draftMediumCount: number;
+  draftLargeCapacity: number;
+  draftMediumCapacity: number;
+  draftRequirement: WagonDraftRequirement | null;
+  draftStrength: number;
+  draftBands: WagonDraftBand[];
+  speed: number;
+  totalConsumption: number;
+  hasCarretero: boolean;
+  alerts: WagonAlert[];
 }
 
 interface DraftBeastGroup {
@@ -211,10 +257,221 @@ const visibleWagons = computed(() =>
   wagons.value.filter((item) => matchesTypeFilter(item.category, wagonsTypeFilter.value))
     .filter((item) => matchesSearch(item.name, wagonsSearch.value))
 );
+const cargoSummaryByWagonId = computed(() =>
+  Object.fromEntries(cargoSummary.value.map((item) => [item.wagonId, item] as const)),
+);
+
+function wagonTravelersFor(wagonId: string) {
+  return travelers.value.filter((traveler) => traveler.wagonId === wagonId);
+}
+
+function wagonTravelerBeastsFor(wagonId: string) {
+  return beasts.value.filter((beast) => beast.assignmentType === "TRAVELER" && beast.assignedWagonId === wagonId);
+}
+
+function wagonDraftBeastsFor(wagonId: string) {
+  return beasts.value.filter((beast) => beast.assignmentType === "DRAFT" && beast.assignedWagonId === wagonId);
+}
+
+function wagonCarreteroFor(wagonId: string) {
+  return travelers.value.find((traveler) =>
+    traveler.drivingWagonId === wagonId
+    && (traveler.activeRoleCodes.includes(carreteroRoleCode) || traveler.activeRoleCode === carreteroRoleCode),
+  ) ?? null;
+}
+
+function wagonCargoLoadFor(wagonId: string) {
+  return cargoSummaryByWagonId.value[wagonId]?.usedCargoUnits ?? 0;
+}
+
+function wagonCargoCapacityFor(wagonId: string) {
+  return cargoSummaryByWagonId.value[wagonId]?.cargoCapacity ?? 0;
+}
+
+function wagonDraftRequirementFor(wagon: CaravanWagon): WagonDraftRequirement | null {
+  const requirement = parseDraftRequirement(wagon.propulsion);
+  if (!requirement) {
+    return null;
+  }
+
+  return requirement;
+}
+
+function draftBandsForRequirement(required: number, total: number): WagonDraftBand[] {
+  if (required <= 0) {
+    return [
+      {
+        label: "Sin requisito",
+        className: "draft-band--neutral",
+        startPercent: 0,
+        endPercent: 100,
+        widthPercent: 100,
+      },
+    ];
+  }
+
+  const thresholds = [required, Math.ceil(required * 1.5), required * 2, Math.max(total, required * 2)];
+  const max = Math.max(...thresholds, 1);
+  const points = [0, required, Math.ceil(required * 1.5), required * 2, max].filter((value, index, array) => index === 0 || value > array[index - 1]);
+  const bands: WagonDraftBand[] = [];
+  const classes = ["draft-band--danger", "draft-band--warning", "draft-band--success", "draft-band--boost"];
+  const labels = [
+    `Necesita ${required}`,
+    `Umbral +50% (${Math.ceil(required * 1.5)})`,
+    `Umbral +100% (${required * 2})`,
+    `Excedente`,
+  ];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const start = points[index - 1];
+    const end = points[index];
+    if (end <= start) {
+      continue;
+    }
+
+    bands.push({
+      label: labels[index - 1] ?? `Tramo ${index}`,
+      className: classes[index - 1] ?? "draft-band--boost",
+      startPercent: (start / max) * 100,
+      endPercent: (end / max) * 100,
+      widthPercent: ((end - start) / max) * 100,
+    });
+  }
+
+  return bands;
+}
+
+function wagonDraftStrengthFor(wagon: CaravanWagon) {
+  return Math.max(0, wagon.draftStrength);
+}
+
+function wagonSpeedFor(wagon: CaravanWagon) {
+  const draftBeasts = wagonDraftBeastsFor(wagon.id);
+  const carretero = wagonCarreteroFor(wagon.id);
+  const requirement = wagonDraftRequirementFor(wagon);
+  const requiredStrength = requirement?.minimumStrength ?? 0;
+  const totalStrength = wagonDraftStrengthFor(wagon);
+
+  if (draftBeasts.length === 0 || !carretero || (requiredStrength > 0 && totalStrength < requiredStrength)) {
+    return 0;
+  }
+
+  const slowestBeastSpeed = Math.min(...draftBeasts.map((beast) => beast.speed));
+  return Number.isFinite(slowestBeastSpeed) ? Math.max(0, slowestBeastSpeed) : 0;
+}
+
+function wagonAlertsFor(wagon: CaravanWagon): WagonAlert[] {
+  const alerts: WagonAlert[] = [];
+  const requirement = wagonDraftRequirementFor(wagon);
+  const draftBeasts = wagonDraftBeastsFor(wagon.id);
+  const carretero = wagonCarreteroFor(wagon.id);
+  const travelersCount = wagonTravelersFor(wagon.id).length;
+  const travelerBeastsCount = wagonTravelerBeastsFor(wagon.id).length;
+  const travelerCapacity = wagon.travelerCapacity;
+  const cargoLoad = wagonCargoLoadFor(wagon.id);
+  const cargoCapacity = wagonCargoCapacityFor(wagon.id);
+  const totalStrength = wagonDraftStrengthFor(wagon);
+  const requiredStrength = requirement?.minimumStrength ?? 0;
+
+  if (!carretero) {
+    alerts.push({
+      kind: "warning",
+      title: "Sin carretero asignado",
+      description: "El carro no tiene un viajero con rol carretero asignado a su tiro.",
+    });
+  }
+
+  if (draftBeasts.length === 0) {
+    alerts.push({
+      kind: "warning",
+      title: "Tiro vacío",
+      description: "No hay bestias asignadas al tiro de este carro.",
+    });
+  } else if (requirement && totalStrength < requiredStrength) {
+    alerts.push({
+      kind: "danger",
+      title: "Tiro insuficiente",
+      description: `La fuerza efectiva del tiro (${totalStrength}) no alcanza la requerida (${requiredStrength}).`,
+    });
+  }
+
+  if (travelersCount + travelerBeastsCount > travelerCapacity) {
+    alerts.push({
+      kind: "danger",
+      title: "Capacidad de viajeros superada",
+      description: `Transporta ${travelersCount + travelerBeastsCount} ocupantes para una capacidad máxima de ${travelerCapacity}.`,
+    });
+  }
+
+  if (cargoLoad > cargoCapacity) {
+    alerts.push({
+      kind: "danger",
+      title: "Carga superada",
+      description: `Lleva ${cargoLoad} unidades de carga para una capacidad máxima de ${cargoCapacity}.`,
+    });
+  }
+
+  return alerts;
+}
+
+function buildWagonRowSummary(wagon: CaravanWagon): WagonRowSummary {
+  const draftRequirement = wagonDraftRequirementFor(wagon);
+  const draftBeasts = wagonDraftBeastsFor(wagon.id);
+  const travelerCount = wagonTravelersFor(wagon.id).length;
+  const travelerBeastCount = wagonTravelerBeastsFor(wagon.id).length;
+  const travelerCapacity = wagon.travelerCapacity;
+  const cargoLoad = wagonCargoLoadFor(wagon.id);
+  const cargoCapacity = wagonCargoCapacityFor(wagon.id);
+  const draftLargeCount = draftBeasts.filter((beast) => beast.size.toUpperCase() === "G").length;
+  const draftMediumCount = draftBeasts.filter((beast) => beast.size.toUpperCase() === "M").length;
+  const draftLargeCapacity = draftRequirement?.maxLargeBeasts ?? 0;
+  const draftMediumCapacity = draftRequirement?.maxMediumBeasts ?? 0;
+  const draftStrength = wagonDraftStrengthFor(wagon);
+  const totalConsumption = wagon.consumption
+    + wagonTravelersFor(wagon.id).reduce((total, traveler) => total + traveler.consumption, 0);
+  const hasCarretero = wagonCarreteroFor(wagon.id) !== null;
+  const speed = wagonSpeedFor(wagon);
+
+  return {
+    wagon,
+    travelerCount,
+    travelerBeastCount,
+    travelerCapacity,
+    cargoLoad,
+    cargoCapacity,
+    draftLargeCount,
+    draftMediumCount,
+    draftLargeCapacity,
+    draftMediumCapacity,
+    draftRequirement,
+    draftStrength,
+    draftBands: draftBandsForRequirement(draftRequirement?.minimumStrength ?? 0, draftStrength),
+    speed,
+    totalConsumption,
+    hasCarretero,
+    alerts: wagonAlertsFor(wagon),
+  };
+}
+
+const visibleWagonRows = computed(() => visibleWagons.value.map((wagon) => buildWagonRowSummary(wagon)));
+const wagonAlertsSummary = computed<WagonRowSummary | null>(() =>
+  wagonAlertsModalTarget.value ? buildWagonRowSummary(wagonAlertsModalTarget.value) : null,
+);
 
 const selectedWagonTravelers = computed(() =>
   selectedWagon.value ? travelers.value.filter((traveler) => traveler.wagonId === selectedWagon.value?.id) : []
 );
+
+const selectedWagonCarreteros = computed(() =>
+  selectedWagon.value
+    ? travelers.value.filter((traveler) =>
+      traveler.drivingWagonId === selectedWagon.value?.id
+      && (traveler.activeRoleCodes.includes(carreteroRoleCode) || traveler.activeRoleCode === carreteroRoleCode),
+    )
+    : [],
+);
+
+const selectedWagonCarretero = computed(() => selectedWagonCarreteros.value[0] ?? null);
 
 const selectedWagonTravelerBeasts = computed(() =>
   selectedWagon.value
@@ -467,12 +724,13 @@ async function refresh() {
     activeCaravan.value = activeResponse.caravan;
 
     if (activeResponse.caravan) {
-      const [catalogResponse, wagonsResponse, travelerResponse, beastResponse, cargoCatalogResponse] = await Promise.all([
+      const [catalogResponse, wagonsResponse, travelerResponse, beastResponse, cargoCatalogResponse, cargoSummaryResponse] = await Promise.all([
         listWagonCatalog(activeResponse.caravan.id),
         listCaravanWagons(activeResponse.caravan.id),
         listCaravanTravelers(activeResponse.caravan.id),
         listCaravanBeasts(activeResponse.caravan.id),
         listCargoCatalog(activeResponse.caravan.id),
+        listCaravanCargoSummary(activeResponse.caravan.id),
       ]);
 
       catalog.value = catalogResponse;
@@ -480,6 +738,7 @@ async function refresh() {
       travelers.value = travelerResponse;
       beasts.value = beastResponse;
       wagonCargoCatalog.value = cargoCatalogResponse;
+      cargoSummary.value = cargoSummaryResponse;
 
       if (
         catalogResponse.length > 0
@@ -504,6 +763,7 @@ async function refresh() {
       travelers.value = [];
       beasts.value = [];
       wagonCargoCatalog.value = [];
+      cargoSummary.value = [];
       selectedWagonCargo.value = [];
       selectedCatalogCode.value = null;
       closeModal();
@@ -578,6 +838,7 @@ async function openWagonDetails(wagon: CaravanWagon) {
   try {
     selectedWagon.value = await getCaravanWagon(activeCaravan.value.id, wagon.id);
     wagonNameDraft.value = selectedWagon.value.name;
+    wagonNameEditorOpen.value = false;
     await loadSelectedWagonCargo(activeCaravan.value.id, wagon.id);
     improvementModalOpen.value = false;
     selectedImprovementCode.value = null;
@@ -585,6 +846,16 @@ async function openWagonDetails(wagon: CaravanWagon) {
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to load wagon details";
   }
+}
+
+function openWagonAlerts(wagon: CaravanWagon) {
+  wagonAlertsModalTarget.value = wagon;
+  wagonAlertsModalOpen.value = true;
+}
+
+function closeWagonAlertsModal() {
+  wagonAlertsModalOpen.value = false;
+  wagonAlertsModalTarget.value = null;
 }
 
 function openAssignmentModal(mode: "traveler" | "beast-traveler" | "beast-draft") {
@@ -663,7 +934,9 @@ async function handleDeleteSelectedWagon() {
 function closeModal() {
   selectedWagon.value = null;
   wagonNameDraft.value = "";
+  wagonNameEditorOpen.value = false;
   selectedWagonCargo.value = [];
+  closeWagonAlertsModal();
   closeCargoModal();
   closeAssignmentModal();
   improvementModalOpen.value = false;
@@ -694,10 +967,11 @@ async function handleRenameSelectedWagon() {
   try {
     const updatedWagon = await updateCaravanWagon(activeCaravan.value.id, selectedWagon.value.id, {
       displayName: wagonNameDraft.value.trim() || null,
-    });
-    selectedWagon.value = updatedWagon;
-    wagonNameDraft.value = updatedWagon.name;
-    replaceWagonInList(updatedWagon);
+      });
+      selectedWagon.value = updatedWagon;
+      wagonNameDraft.value = updatedWagon.name;
+      wagonNameEditorOpen.value = false;
+      replaceWagonInList(updatedWagon);
     showToast(`Nombre actualizado: ${updatedWagon.name}.`);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to rename wagon";
@@ -1530,34 +1804,91 @@ onMounted(refresh);
               <thead>
                 <tr>
                   <th>Carro</th>
-                  <th>Categoría</th>
                   <th>PG</th>
                   <th>Dureza</th>
                   <th>Viajeros</th>
                   <th>Carga</th>
                   <th>Consumo</th>
+                  <th>Velocidad</th>
+                  <th>Tiro</th>
+                  <th>Alertas</th>
                 </tr>
               </thead>
               <tbody>
-                  <tr
-                    v-for="wagon in visibleWagons"
-                    :key="wagon.id"
+                <tr
+                  v-for="row in visibleWagonRows"
+                  :key="row.wagon.id"
                   tabindex="0"
                   role="button"
-                  @click="openWagonDetails(wagon)"
-                  @keyup.enter="openWagonDetails(wagon)"
+                  @click="openWagonDetails(row.wagon)"
+                  @keyup.enter="openWagonDetails(row.wagon)"
                 >
-                    <td>
-                      <strong>{{ wagon.name }}</strong>
-                      <p v-if="wagon.specificCommodity" class="muted">Mercancía específica: {{ wagon.specificCommodity }}</p>
-                      <p class="muted">{{ wagon.specialBenefit }}</p>
-                    </td>
-                  <td>{{ wagon.category }}</td>
-                  <td>{{ wagon.hitPoints }}</td>
-                  <td>{{ wagon.hardness }}</td>
-                  <td>{{ wagon.travelerCapacity }}</td>
-                  <td>{{ wagon.cargoCapacity }}</td>
-                  <td>{{ wagon.consumption }}</td>
+                  <td>
+                    <strong>{{ row.wagon.name }}</strong>
+                    <p v-if="row.wagon.specificCommodity" class="muted">Mercancía específica: {{ row.wagon.specificCommodity }}</p>
+                    <p class="muted">{{ row.wagon.specialBenefit }}</p>
+                  </td>
+                  <td>{{ row.wagon.hitPoints }}</td>
+                  <td>{{ row.wagon.hardness }}</td>
+                  <td>
+                    <strong>{{ row.travelerCount + row.travelerBeastCount }} / {{ row.travelerCapacity }}</strong>
+                    <p class="muted">{{ row.travelerCount }} viajeros · {{ row.travelerBeastCount }} bestias viajeras</p>
+                  </td>
+                  <td>
+                    <strong>{{ row.cargoLoad }} / {{ row.cargoCapacity }}</strong>
+                    <p class="muted">unidades</p>
+                  </td>
+                  <td>
+                    <strong>{{ row.totalConsumption }}</strong>
+                    <p class="muted">consumo total</p>
+                  </td>
+                  <td>
+                    <strong>{{ row.speed }} mi/día</strong>
+                    <p class="muted">{{ row.hasCarretero ? "Con carretero" : "Sin carretero" }}</p>
+                  </td>
+                  <td>
+                    <div class="draft-summary-cell">
+                      <p class="draft-summary-line">
+                        <strong>{{ row.draftLargeCount }}</strong>/<span>{{ row.draftLargeCapacity }}</span> grandes ·
+                        <strong>{{ row.draftMediumCount }}</strong>/<span>{{ row.draftMediumCapacity }}</span> medianas
+                      </p>
+                      <p v-if="row.draftRequirement === null" class="muted">Este carro no requiere tiro.</p>
+                      <div class="draft-strength-meter" :aria-label="`Fuerza de tiro ${row.draftStrength} de ${row.draftRequirement?.minimumStrength ?? 0}`">
+                        <div class="draft-strength-track">
+                          <span
+                            v-for="band in row.draftBands"
+                            :key="`${row.wagon.id}-${band.label}`"
+                            class="draft-band"
+                            :class="band.className"
+                            :style="{ width: `${band.widthPercent}%` }"
+                            :title="band.label"
+                          ></span>
+                          <span
+                            class="draft-strength-marker"
+                            :style="{ left: `${Math.min(100, row.draftRequirement?.minimumStrength ? (row.draftStrength / Math.max(row.draftRequirement.minimumStrength * 2, row.draftStrength, 1)) * 100 : 0)}%` }"
+                          ></span>
+                        </div>
+                        <div class="draft-strength-labels">
+                          <span>0</span>
+                          <span>{{ row.draftRequirement?.minimumStrength ?? 0 }}</span>
+                          <span>{{ row.draftRequirement ? Math.ceil(row.draftRequirement.minimumStrength * 1.5) : 0 }}</span>
+                          <span>{{ row.draftRequirement ? row.draftRequirement.minimumStrength * 2 : 0 }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <button
+                      v-if="row.alerts.length > 0"
+                      class="alert-button"
+                      type="button"
+                      :class="{ danger: row.alerts.some((alert) => alert.kind === 'danger') }"
+                      @click.stop="openWagonAlerts(row.wagon)"
+                    >
+                      {{ row.alerts.length }} alerta{{ row.alerts.length > 1 ? "s" : "" }}
+                    </button>
+                    <span v-else class="muted">Sin alertas</span>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -1733,11 +2064,23 @@ onMounted(refresh);
       </div>
 
       <div v-if="selectedWagon" class="modal-backdrop" @click.self="closeModal">
-        <div class="modal">
+          <div class="modal">
             <div class="modal-header">
               <div>
                 <p class="eyebrow">Detalle del carro</p>
-                <h2>{{ selectedWagon.name }}</h2>
+                <div class="wagon-title-row">
+                  <h2>{{ selectedWagon.name }}</h2>
+                  <button
+                    class="ghost-button name-edit-button"
+                    type="button"
+                    :disabled="loading || submitting"
+                    :aria-expanded="wagonNameEditorOpen"
+                    aria-label="Editar nombre"
+                    @click="wagonNameEditorOpen = true"
+                  >
+                    ✏️
+                  </button>
+                </div>
                 <p v-if="selectedWagonSpecificCommodityLabel" class="muted">
                   Mercancía específica: {{ selectedWagonSpecificCommodityLabel }}
                 </p>
@@ -1759,11 +2102,10 @@ onMounted(refresh);
             </div>
           </div>
 
-          <div class="name-editor-card">
+          <div v-if="wagonNameEditorOpen" class="name-editor-card">
             <div class="name-editor-header">
               <div>
-                <p class="eyebrow">Nombre visible</p>
-                <p class="muted">Este nombre se usará en los listados y combos seleccionables.</p>
+                <p class="eyebrow">Nombre</p>
               </div>
               <button
                 class="primary-button"
@@ -1780,11 +2122,11 @@ onMounted(refresh);
             </div>
 
             <label class="name-editor-field">
-              <span>Nombre para mostrar</span>
+              <span>Nombre</span>
               <input
                 v-model="wagonNameDraft"
                 type="text"
-                placeholder="Vacío usa el nombre del tipo"
+                placeholder="Nombre del carro"
               />
             </label>
           </div>
@@ -1800,6 +2142,26 @@ onMounted(refresh);
             <div><dt>Límite</dt><dd>{{ selectedWagon.limit }}</dd></div>
             <div><dt>Consumo</dt><dd>{{ selectedWagon.consumption }}</dd></div>
           </dl>
+
+          <section class="info-block">
+            <div class="section-header">
+              <div>
+                <h3>Carretero del carro</h3>
+                <p class="muted">El viajero que debe estar asignado a este carro para moverlo.</p>
+              </div>
+            </div>
+
+            <div v-if="selectedWagonCarretero || selectedWagon.carreteroName" class="assignment-item assignment-item--stacked">
+              <div>
+                <strong>{{ selectedWagonCarretero?.fullName ?? selectedWagon.carreteroName }}</strong>
+                <p class="muted">{{ selectedWagonCarretero?.activeRoleName ?? "Carretero asignado" }}</p>
+              </div>
+              <span class="pill">Carretero</span>
+            </div>
+            <div v-else class="muted">
+              Este carro todavía no tiene un carretero asignado.
+            </div>
+          </section>
 
           <section class="info-block">
             <div class="section-header">
@@ -2157,6 +2519,55 @@ onMounted(refresh);
           <p class="muted meta-line">
             Añadido el {{ new Date(selectedWagon.createdAt).toLocaleString() }}
           </p>
+        </div>
+      </div>
+    </teleport>
+
+    <teleport to="body">
+      <div v-if="wagonAlertsModalOpen && wagonAlertsSummary" class="modal-backdrop" @click.self="closeWagonAlertsModal">
+        <div class="modal modal-alerts">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">Alertas del carro</p>
+              <h2>{{ wagonAlertsSummary.wagon.name }}</h2>
+              <p class="muted">{{ wagonAlertsSummary.alerts.length }} alerta{{ wagonAlertsSummary.alerts.length > 1 ? "s" : "" }} detectada{{ wagonAlertsSummary.alerts.length > 1 ? "s" : "" }}</p>
+            </div>
+            <button class="ghost-button" type="button" @click="closeWagonAlertsModal">Cerrar</button>
+          </div>
+
+          <section class="info-block">
+            <div class="alert-summary-grid">
+              <div>
+                <span>Viajeros</span>
+                <strong>{{ wagonAlertsSummary.travelerCount + wagonAlertsSummary.travelerBeastCount }} / {{ wagonAlertsSummary.travelerCapacity }}</strong>
+              </div>
+              <div><span>Carga</span><strong>{{ wagonAlertsSummary.cargoLoad }} / {{ wagonAlertsSummary.cargoCapacity }}</strong></div>
+              <div><span>Tiro</span><strong>{{ wagonAlertsSummary.draftStrength }} / {{ wagonAlertsSummary.draftRequirement?.minimumStrength ?? 0 }}</strong></div>
+              <div><span>Velocidad</span><strong>{{ wagonAlertsSummary.speed }} mi/día</strong></div>
+            </div>
+          </section>
+
+          <section class="info-block">
+            <h3>Detalle de alertas</h3>
+            <div v-if="wagonAlertsSummary.alerts.length === 0" class="muted">
+              Este carro no tiene alertas activas.
+            </div>
+            <div v-else class="alerts-list">
+              <article
+                v-for="alert in wagonAlertsSummary.alerts"
+                :key="`${wagonAlertsSummary.wagon.id}-${alert.title}`"
+                class="alert-item"
+                :class="alert.kind"
+              >
+                <strong>{{ alert.title }}</strong>
+                <p>{{ alert.description }}</p>
+              </article>
+            </div>
+          </section>
+
+          <div class="modal-actions">
+            <button class="primary-button" type="button" @click="closeWagonAlertsModal">Entendido</button>
+          </div>
         </div>
       </div>
     </teleport>
@@ -2765,6 +3176,148 @@ p {
   border: 1px solid transparent;
 }
 
+.draft-summary-cell {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 260px;
+}
+
+.draft-summary-line {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #334155;
+}
+
+.draft-strength-meter {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.draft-strength-track {
+  position: relative;
+  display: flex;
+  overflow: hidden;
+  height: 0.85rem;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.draft-band {
+  display: block;
+  height: 100%;
+}
+
+.draft-band--neutral {
+  background: #94a3b8;
+}
+
+.draft-band--danger {
+  background: linear-gradient(90deg, #fca5a5, #ef4444);
+}
+
+.draft-band--warning {
+  background: linear-gradient(90deg, #fdba74, #f59e0b);
+}
+
+.draft-band--success {
+  background: linear-gradient(90deg, #86efac, #22c55e);
+}
+
+.draft-band--boost {
+  background: linear-gradient(90deg, #93c5fd, #3b82f6);
+}
+
+.draft-strength-marker {
+  position: absolute;
+  top: -0.2rem;
+  width: 0.2rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: #111827;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+.draft-strength-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.72rem;
+  color: #6b7280;
+}
+
+.alert-button {
+  width: 100%;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.alert-button.danger {
+  border-color: #dc2626;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.modal-alerts {
+  width: min(720px, 100%);
+}
+
+.alert-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.alert-summary-grid div {
+  padding: 0.85rem;
+  border-radius: 0.85rem;
+  background: #f9fafb;
+}
+
+.alert-summary-grid span {
+  display: block;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.alert-summary-grid strong {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.alerts-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.alert-item {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 0.85rem;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+}
+
+.alert-item.warning {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.alert-item.danger {
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+
+.alert-item.info {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
 .draft-collapsed-summary {
   display: flex;
   align-items: center;
@@ -3301,6 +3854,19 @@ dd {
   align-items: center;
 }
 
+.wagon-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.name-edit-button {
+  padding: 0.45rem 0.6rem;
+  min-height: 2.2rem;
+  min-width: 2.2rem;
+  line-height: 1;
+}
+
 .name-editor-card {
   display: grid;
   gap: 0.9rem;
@@ -3451,6 +4017,14 @@ dd {
   .search-action-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .alert-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .draft-summary-cell {
+    min-width: 0;
   }
 }
 

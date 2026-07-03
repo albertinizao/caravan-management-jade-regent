@@ -35,6 +35,12 @@ public class CaravanFeatJpaEntity {
   @Column
   private Boolean active;
 
+  @Column
+  private Boolean manualApplies;
+
+  @Column(length = 1000)
+  private String manualAppliesReason;
+
   @Column(nullable = false)
   private Instant createdAt;
 
@@ -105,6 +111,22 @@ public class CaravanFeatJpaEntity {
 
   public void setActive(Boolean active) {
     this.active = active;
+  }
+
+  public Boolean getManualApplies() {
+    return manualApplies;
+  }
+
+  public void setManualApplies(Boolean manualApplies) {
+    this.manualApplies = manualApplies;
+  }
+
+  public String getManualAppliesReason() {
+    return manualAppliesReason;
+  }
+
+  public void setManualAppliesReason(String manualAppliesReason) {
+    this.manualAppliesReason = manualAppliesReason;
   }
 
   public Instant getCreatedAt() {

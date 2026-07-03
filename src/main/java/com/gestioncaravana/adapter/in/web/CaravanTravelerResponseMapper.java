@@ -19,6 +19,8 @@ final class CaravanTravelerResponseMapper {
         view.activeRoleName(),
         view.wagonId(),
         view.wagonName(),
+        view.drivingWagonId(),
+        view.drivingWagonName(),
         view.maxActiveRoleCount(),
         view.salary(),
         view.contractConditions(),

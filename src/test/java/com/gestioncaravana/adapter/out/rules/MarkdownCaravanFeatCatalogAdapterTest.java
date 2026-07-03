@@ -28,11 +28,15 @@ class MarkdownCaravanFeatCatalogAdapterTest {
                       "Cada día que la caravana pase descansando, la podrá llevar a cabo una prueba especial de Seguridad gastando 1 unidad de suministros. Esta prueba permite recuperar 15 x nivel de la caravana PG a repartir entre las bestias de tiro como se considere.");
               assertThat(feat.specialText()).isNull();
               assertThat(feat.selectionLimit()).isEqualTo(1);
+              assertThat(feat.automationMode()).isEqualTo("rest-day action");
+              assertThat(feat.automationStateInputs()).contains("restCareUsedAt");
+              assertThat(feat.automationExactAutomation()).contains("15 × caravanLevel");
             });
 
     assertThat(featsByCode.get("oferta-gancho").selectionLimit()).isEqualTo(2);
     assertThat(featsByCode.get("organizacion-impecable").selectionLimit()).isEqualTo(2);
     assertThat(featsByCode.get("consumo-eficiente").selectionLimit()).isEqualTo(3);
     assertThat(featsByCode.get("caravana-santificada").selectionLimit()).isEqualTo(999);
+    assertThat(featsByCode.get("caravana-santificada").automationMode()).isEqualTo("manual");
   }
 }

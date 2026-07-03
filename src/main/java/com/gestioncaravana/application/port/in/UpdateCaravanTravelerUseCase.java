@@ -16,8 +16,36 @@ public interface UpdateCaravanTravelerUseCase {
       String activeRoleCode,
       Integer maxActiveRoleCount,
       UUID wagonId,
+      UUID drivingWagonId,
       BigDecimal salary,
       String contractConditions,
       Integer consumption,
-      UUID servedTravelerId) {}
+      UUID servedTravelerId) {
+    public UpdateCaravanTravelerCommand(
+        String fullName,
+        String description,
+        List<String> availableRoleCodes,
+        List<String> activeRoleCodes,
+        String activeRoleCode,
+        Integer maxActiveRoleCount,
+        UUID wagonId,
+        BigDecimal salary,
+        String contractConditions,
+        Integer consumption,
+        UUID servedTravelerId) {
+      this(
+          fullName,
+          description,
+          availableRoleCodes,
+          activeRoleCodes,
+          activeRoleCode,
+          maxActiveRoleCount,
+          wagonId,
+          null,
+          salary,
+          contractConditions,
+          consumption,
+          servedTravelerId);
+    }
+  }
 }

@@ -9,7 +9,9 @@ public record UpdateCaravanFeatRequest(
     @NotNull CaravanFeatAcquisitionSourceType acquisitionSourceType,
     @Positive Integer acquisitionLevel,
     String acquisitionCause,
-    Boolean active) {
+    Boolean active,
+    Boolean manualApplies,
+    String manualAppliesReason) {
 
   @AssertTrue(message = "level-up feats require a positive level and other feats require a non-blank cause")
   public boolean hasValidAcquisitionMetadata() {

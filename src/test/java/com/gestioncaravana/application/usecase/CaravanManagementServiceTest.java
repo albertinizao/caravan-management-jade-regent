@@ -89,6 +89,9 @@ class CaravanManagementServiceTest {
         2,
         null,
         1,
+        true,
+        null,
+        null,
         Instant.parse("2026-01-01T00:00:00Z")));
     service.select(created.id());
 
@@ -117,6 +120,9 @@ class CaravanManagementServiceTest {
         2,
         null,
         1,
+        true,
+        null,
+        null,
         Instant.parse("2026-01-01T00:00:00Z")));
 
     var caravan = service.getById(created.id());
@@ -322,13 +328,17 @@ class CaravanManagementServiceTest {
           new com.gestioncaravana.domain.CaravanFeatType(
               "caravana-mejorada",
               "Caravana Mejorada",
+              "La caravana mejora su rendimiento general.",
               List.of("Nivel 2"),
               "Aumenta en 1 dos de las estadísticas principales hasta una puntuación máxima de +10.",
               "Esta dote puede seleccionarse varias veces.",
               null,
               true,
               999,
-              2));
+              2,
+              null,
+              null,
+              null));
     }
 
     @Override

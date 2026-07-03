@@ -12,7 +12,10 @@ public record CaravanFeatType(
     String notes,
     boolean repeatable,
     int selectionLimit,
-    Integer minimumLevel) {
+    Integer minimumLevel,
+    String automationMode,
+    String automationStateInputs,
+    String automationExactAutomation) {
 
   public CaravanFeatType {
     if (code == null || code.isBlank()) {
@@ -34,5 +37,16 @@ public record CaravanFeatType(
     if (minimumLevel != null && minimumLevel < 1) {
       throw new IllegalArgumentException("minimumLevel must be greater than or equal to 1");
     }
+    automationMode = normalizeText(automationMode);
+    automationStateInputs = normalizeText(automationStateInputs);
+    automationExactAutomation = normalizeText(automationExactAutomation);
+  }
+
+  private static String normalizeText(String text) {
+    if (text == null) {
+      return null;
+    }
+    var trimmed = text.trim();
+    return trimmed.isBlank() ? null : trimmed;
   }
 }

@@ -16,6 +16,8 @@ public record CaravanTravelerResponse(
     String activeRoleName,
     UUID wagonId,
     String wagonName,
+    UUID drivingWagonId,
+    String drivingWagonName,
     int maxActiveRoleCount,
     BigDecimal salary,
     String contractConditions,

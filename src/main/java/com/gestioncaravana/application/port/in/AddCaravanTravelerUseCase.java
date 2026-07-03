@@ -19,5 +19,34 @@ public interface AddCaravanTravelerUseCase {
       BigDecimal salary,
       String contractConditions,
       Integer consumption,
-      UUID servedTravelerId) {}
+      UUID wagonId,
+      UUID drivingWagonId,
+      UUID servedTravelerId) {
+    public AddCaravanTravelerCommand(
+        String fullName,
+        String description,
+        List<String> availableRoleCodes,
+        List<String> activeRoleCodes,
+        String activeRoleCode,
+        Integer maxActiveRoleCount,
+        BigDecimal salary,
+        String contractConditions,
+        Integer consumption,
+        UUID wagonId,
+        UUID servedTravelerId) {
+      this(
+          fullName,
+          description,
+          availableRoleCodes,
+          activeRoleCodes,
+          activeRoleCode,
+          maxActiveRoleCount,
+          salary,
+          contractConditions,
+          consumption,
+          wagonId,
+          null,
+          servedTravelerId);
+    }
+  }
 }

@@ -13,6 +13,9 @@ public record CaravanFeatCatalogItemView(
     boolean repeatable,
     int selectionLimit,
     Integer minimumLevel,
+    String automationMode,
+    String automationStateInputs,
+    String automationExactAutomation,
     int ownedCount,
     boolean available,
     String blockedReason) {}

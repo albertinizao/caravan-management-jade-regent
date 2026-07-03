@@ -46,6 +46,9 @@ public class CaravanTravelerJpaEntity {
   private String wagonId;
 
   @Column
+  private String drivingWagonId;
+
+  @Column
   private BigDecimal salary;
 
   @Column(length = 4000)
@@ -151,6 +154,14 @@ public class CaravanTravelerJpaEntity {
 
   public void setWagonId(String wagonId) {
     this.wagonId = wagonId;
+  }
+
+  public String getDrivingWagonId() {
+    return drivingWagonId;
+  }
+
+  public void setDrivingWagonId(String drivingWagonId) {
+    this.drivingWagonId = drivingWagonId;
   }
 
   public BigDecimal getSalary() {

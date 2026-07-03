@@ -15,10 +15,44 @@ public record CaravanTraveler(
     int maxActiveRoleCount,
     TravelerRoleData roleSpecificData,
     UUID wagonId,
+    UUID drivingWagonId,
     TravelerContract contract,
     int consumption,
     Instant createdAt,
     Instant updatedAt) {
+
+  public CaravanTraveler(
+      UUID id,
+      UUID caravanId,
+      String fullName,
+      String description,
+      List<String> availableRoleCodes,
+      List<String> activeRoleCodes,
+      String activeRoleCode,
+      int maxActiveRoleCount,
+      TravelerRoleData roleSpecificData,
+      UUID wagonId,
+      TravelerContract contract,
+      int consumption,
+      Instant createdAt,
+      Instant updatedAt) {
+    this(
+        id,
+        caravanId,
+        fullName,
+        description,
+        availableRoleCodes,
+        activeRoleCodes,
+        activeRoleCode,
+        maxActiveRoleCount,
+        roleSpecificData,
+        wagonId,
+        null,
+        contract,
+        consumption,
+        createdAt,
+        updatedAt);
+  }
 
   public CaravanTraveler {
     if (id == null) {
@@ -73,6 +107,13 @@ public record CaravanTraveler(
         && (roleSpecificData == null || roleSpecificData.servedTravelerId() == null)) {
       throw new IllegalArgumentException("servedTravelerId is required for role " + activeRoleCode);
     }
+    var carreteroActive = activeRoleCodes.contains(TravelerRoleCatalog.CARRETERO_CODE);
+    if (carreteroActive && drivingWagonId == null) {
+      throw new IllegalArgumentException("drivingWagonId is required for role carretero");
+    }
+    if (!carreteroActive && drivingWagonId != null) {
+      throw new IllegalArgumentException("drivingWagonId can only be assigned when role carretero is active");
+    }
   }
 
   public static CaravanTraveler create(
@@ -86,6 +127,7 @@ public record CaravanTraveler(
       int maxActiveRoleCount,
       TravelerRoleData roleSpecificData,
       UUID wagonId,
+      UUID drivingWagonId,
       TravelerContract contract,
       int consumption,
       Instant now) {
@@ -115,9 +157,41 @@ public record CaravanTraveler(
         maxActiveRoleCount,
         roleSpecificData == null ? TravelerRoleData.empty() : roleSpecificData,
         wagonId,
+        drivingWagonId,
         contract,
         consumption,
         now,
+        now);
+  }
+
+  public static CaravanTraveler create(
+      UUID id,
+      UUID caravanId,
+      String fullName,
+      String description,
+      List<String> availableRoleCodes,
+      List<String> activeRoleCodes,
+      String activeRoleCode,
+      int maxActiveRoleCount,
+      TravelerRoleData roleSpecificData,
+      UUID wagonId,
+      TravelerContract contract,
+      int consumption,
+      Instant now) {
+    return create(
+        id,
+        caravanId,
+        fullName,
+        description,
+        availableRoleCodes,
+        activeRoleCodes,
+        activeRoleCode,
+        maxActiveRoleCount,
+        roleSpecificData,
+        wagonId,
+        null,
+        contract,
+        consumption,
         now);
   }
 
@@ -133,6 +207,26 @@ public record CaravanTraveler(
         maxActiveRoleCount,
         roleSpecificData,
         wagonId,
+        drivingWagonId,
+        contract,
+        consumption,
+        createdAt,
+        now);
+  }
+
+  public CaravanTraveler assignDrivingWagon(UUID drivingWagonId, Instant now) {
+    return new CaravanTraveler(
+        id,
+        caravanId,
+        fullName,
+        description,
+        availableRoleCodes,
+        activeRoleCodes,
+        activeRoleCode,
+        maxActiveRoleCount,
+        roleSpecificData,
+        wagonId,
+        drivingWagonId,
         contract,
         consumption,
         createdAt,
@@ -151,13 +245,20 @@ public record CaravanTraveler(
         maxActiveRoleCount,
         roleData == null ? TravelerRoleData.empty() : roleData,
         wagonId,
+        drivingWagonId,
         contract,
         consumption,
         createdAt,
         now);
   }
 
-  public CaravanTraveler changeRoles(List<String> roleCodes, String roleCode, int newMaxActiveRoleCount, TravelerRoleData roleData, Instant now) {
+  public CaravanTraveler changeRoles(
+      List<String> roleCodes,
+      String roleCode,
+      int newMaxActiveRoleCount,
+      TravelerRoleData roleData,
+      UUID drivingWagonId,
+      Instant now) {
     var normalizedRoles = roleCodes == null ? List.<String>of() : roleCodes.stream().map(String::trim).filter(code -> !code.isBlank()).distinct().toList();
     var normalized = roleCode == null ? null : roleCode.trim();
     return new CaravanTraveler(
@@ -171,10 +272,20 @@ public record CaravanTraveler(
         newMaxActiveRoleCount,
         roleData == null ? TravelerRoleData.empty() : roleData,
         wagonId,
+        drivingWagonId,
         contract,
         consumption,
         createdAt,
         now);
+  }
+
+  public CaravanTraveler changeRoles(
+      List<String> roleCodes,
+      String roleCode,
+      int newMaxActiveRoleCount,
+      TravelerRoleData roleData,
+      Instant now) {
+    return changeRoles(roleCodes, roleCode, newMaxActiveRoleCount, roleData, drivingWagonId, now);
   }
 
   public CaravanTraveler updateDetails(
@@ -186,6 +297,7 @@ public record CaravanTraveler(
       int newMaxActiveRoleCount,
       TravelerRoleData roleData,
       UUID wagonId,
+      UUID drivingWagonId,
       TravelerContract contract,
       int consumption,
       Instant now) {
@@ -219,9 +331,37 @@ public record CaravanTraveler(
         newMaxActiveRoleCount,
         roleData == null ? TravelerRoleData.empty() : roleData,
         wagonId,
+        drivingWagonId,
         contract,
         consumption,
         createdAt,
+        now);
+  }
+
+  public CaravanTraveler updateDetails(
+      String fullName,
+      String description,
+      List<String> availableRoleCodes,
+      List<String> activeRoleCodes,
+      String activeRoleCode,
+      int newMaxActiveRoleCount,
+      TravelerRoleData roleData,
+      UUID wagonId,
+      TravelerContract contract,
+      int consumption,
+      Instant now) {
+    return updateDetails(
+        fullName,
+        description,
+        availableRoleCodes,
+        activeRoleCodes,
+        activeRoleCode,
+        newMaxActiveRoleCount,
+        roleData,
+        wagonId,
+        drivingWagonId,
+        contract,
+        consumption,
         now);
   }
 

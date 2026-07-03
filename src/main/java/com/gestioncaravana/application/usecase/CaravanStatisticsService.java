@@ -80,7 +80,7 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
     var contributions = new ArrayList<CaravanStatContributionView>();
 
     var derivedStats = deriveStats(caravan, mainStats, wagons, travelers, beasts, cargo, feats, contributions);
-    var otherStats = deriveOtherStats(caravan, wagons, travelers, beasts, cargo, contributions);
+    var otherStats = deriveOtherStats(caravan, wagons, travelers, beasts, cargo, feats, contributions);
     var warnings = new ArrayList<String>();
     if (caravan.discontent() >= mainStats.morale()) {
       warnings.add("El descontento ha alcanzado o superado la moral de la caravana.");
@@ -216,6 +216,7 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
       List<CaravanTraveler> travelers,
       List<com.gestioncaravana.domain.CaravanBeast> beasts,
       List<CaravanCargo> cargo,
+      List<com.gestioncaravana.domain.CaravanFeat> feats,
       List<CaravanStatContributionView> contributions) {
     var travelerCapacity = 0;
     var cargoCapacity = 0;
@@ -240,18 +241,42 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
       contributions.add(contribution("cargoCapacity", "ROLE", "encargado-de-suministros", "Encargados de suministros", "+" + bonus, "ADD", "Cada encargado de suministros aporta +10% a la capacidad"));
     }
 
+    var impeccableOrganization = countActiveFeats(feats, "organizacion-impecable");
+    if (impeccableOrganization > 0 && cargoCapacity > 0) {
+      var bonus = Math.round(cargoCapacity * 0.1f * impeccableOrganization);
+      cargoCapacity += bonus;
+      contributions.add(contribution("cargoCapacity", "FEAT", "organizacion-impecable", "Organización Impecable", "+" + bonus, "ADD", "Cada selección activa aumenta la capacidad de cargamento en un 10%"));
+    }
+
+    var wagonConsumption = consumption;
+    var travelerConsumption = 0;
     for (var traveler : travelers) {
       if (traveler.hasActiveRole("batidor")) {
         contributions.add(contribution("consumption", "ROLE", traveler.id().toString(), traveler.fullName(), "-" + traveler.consumption(), "ADD", "Los batidores no cuentan para el consumo"));
       } else {
-        consumption += traveler.consumption();
+        travelerConsumption += traveler.consumption();
         contributions.add(contribution("consumption", "TRAVELER", traveler.id().toString(), traveler.fullName(), "+" + traveler.consumption(), "ADD", "Consumo del viajero"));
       }
     }
 
+    var totalConsumption = wagonConsumption + travelerConsumption;
+
+    var efficientConsumption = countActiveFeats(feats, "consumo-eficiente");
+    if (efficientConsumption > 0) {
+      var reducedConsumption = Math.max(0, totalConsumption - (2 * efficientConsumption));
+      var floor = Math.max(0, wagonConsumption);
+      var adjustedConsumption = Math.max(floor, reducedConsumption);
+      contributions.add(contribution("consumption", "FEAT", "consumo-eficiente", "Consumo Eficiente", String.valueOf(adjustedConsumption - totalConsumption), "ADD", "Reduce el consumo total en 2 por selección sin bajar del consumo de carros"));
+      totalConsumption = adjustedConsumption;
+    }
+
     var speed = deriveSpeed(wagons, beasts, contributions);
     var beastCount = beasts.size();
-    var maxWagons = 10 + caravan.level();
+    var additionalWagons = countActiveFeats(feats, "carros-adicionales");
+    var maxWagons = 10 + caravan.level() + (caravan.level() * additionalWagons);
+    if (additionalWagons > 0) {
+      contributions.add(contribution("wagonCapacity", "FEAT", "carros-adicionales", "Carros Adicionales", "+" + (caravan.level() * additionalWagons), "ADD", "Cada selección aumenta el límite de carros en el nivel de la caravana"));
+    }
 
     var cargoRemaining = cargoCapacity - cargoLoad;
     contributions.add(contribution("cargoLoad", "CARGO", caravan.id().toString(), "Carga transportada", "+" + cargoLoad, "BASE", "Carga total actual"));
@@ -265,7 +290,7 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
         cargoCapacity,
         cargoLoad,
         cargoRemaining,
-        consumption,
+        totalConsumption,
         travelers.size(),
         wagons.size(),
         beastCount,

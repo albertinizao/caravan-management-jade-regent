@@ -20,7 +20,8 @@ final class CaravanBeastResponseMapper {
         view.fourLegged(),
         view.specialNote(),
         view.description(),
-        view.notes());
+        view.notes(),
+        view.occupiedSpace());
   }
 
   static CaravanBeastResponse toResponse(CaravanBeastView view) {
@@ -44,6 +45,7 @@ final class CaravanBeastResponseMapper {
         view.assignedWagonId(),
         view.assignedWagonName(),
         view.createdAt(),
-        view.updatedAt());
+        view.updatedAt(),
+        view.occupiedSpace());
   }
 }

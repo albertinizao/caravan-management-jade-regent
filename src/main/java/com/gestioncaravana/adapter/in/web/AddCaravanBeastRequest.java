@@ -3,6 +3,7 @@ package com.gestioncaravana.adapter.in.web;
 import com.gestioncaravana.domain.CaravanBeastSourceType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import java.math.BigDecimal;
 
 public record AddCaravanBeastRequest(
     @NotNull CaravanBeastSourceType sourceType,
@@ -17,4 +18,5 @@ public record AddCaravanBeastRequest(
     Boolean fourLegged,
     @NotBlank String specialNote,
     @NotBlank String description,
-    String customNotes) {}
+    String customNotes,
+    BigDecimal occupiedSpace) {}

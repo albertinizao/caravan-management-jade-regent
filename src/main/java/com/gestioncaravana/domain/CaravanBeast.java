@@ -1,5 +1,6 @@
 package com.gestioncaravana.domain;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -22,7 +23,51 @@ public record CaravanBeast(
     CaravanBeastAssignmentType assignmentType,
     UUID assignedWagonId,
     Instant createdAt,
-    Instant updatedAt) {
+    Instant updatedAt,
+    BigDecimal occupiedSpace) {
+
+  public CaravanBeast(
+      UUID id,
+      UUID caravanId,
+      CaravanBeastSourceType sourceType,
+      String catalogBeastCode,
+      String name,
+      String size,
+      int strength,
+      int speed,
+      Integer thermalAdaptation,
+      Integer basePrice,
+      Integer trainedPrice,
+      boolean fourLegged,
+      String specialNote,
+      String description,
+      String customNotes,
+      CaravanBeastAssignmentType assignmentType,
+      UUID assignedWagonId,
+      Instant createdAt,
+      Instant updatedAt) {
+    this(
+        id,
+        caravanId,
+        sourceType,
+        catalogBeastCode,
+        name,
+        size,
+        strength,
+        speed,
+        thermalAdaptation,
+        basePrice,
+        trainedPrice,
+        fourLegged,
+        specialNote,
+        description,
+        customNotes,
+        assignmentType,
+        assignedWagonId,
+        createdAt,
+        updatedAt,
+        BigDecimal.ONE);
+  }
 
   public CaravanBeast {
     if (id == null) {
@@ -70,6 +115,7 @@ public record CaravanBeast(
     if (sourceType == CaravanBeastSourceType.CUSTOM && catalogBeastCode != null && !catalogBeastCode.isBlank()) {
       throw new IllegalArgumentException("catalogBeastCode must be empty for custom beasts");
     }
+    validateOccupiedSpace(occupiedSpace);
   }
 
   public static CaravanBeast createFromCatalog(
@@ -96,6 +142,40 @@ public record CaravanBeast(
         CaravanBeastAssignmentType.NONE,
         null,
         now,
+        now,
+        catalogItem.occupiedSpace() == null ? BigDecimal.ONE : catalogItem.occupiedSpace());
+  }
+
+  public static CaravanBeast createCustom(
+      UUID id,
+      UUID caravanId,
+      String name,
+      String size,
+      int strength,
+      int speed,
+      Integer thermalAdaptation,
+      Integer basePrice,
+      Integer trainedPrice,
+      boolean fourLegged,
+      String specialNote,
+      String description,
+      String customNotes,
+      Instant now) {
+    return createCustom(
+        id,
+        caravanId,
+        name,
+        size,
+        strength,
+        speed,
+        thermalAdaptation,
+        basePrice,
+        trainedPrice,
+        fourLegged,
+        specialNote,
+        description,
+        customNotes,
+        BigDecimal.ONE,
         now);
   }
 
@@ -113,6 +193,7 @@ public record CaravanBeast(
       String specialNote,
       String description,
       String customNotes,
+      BigDecimal occupiedSpace,
       Instant now) {
     return new CaravanBeast(
         id,
@@ -133,7 +214,8 @@ public record CaravanBeast(
         CaravanBeastAssignmentType.NONE,
         null,
         now,
-        now);
+        now,
+        occupiedSpace == null ? BigDecimal.ONE : occupiedSpace);
   }
 
   public CaravanBeast assignDraft(UUID wagonId, Instant now) {
@@ -156,7 +238,8 @@ public record CaravanBeast(
         CaravanBeastAssignmentType.DRAFT,
         wagonId,
         createdAt,
-        now);
+        now,
+        occupiedSpace);
   }
 
   public CaravanBeast assignTraveler(UUID wagonId, Instant now) {
@@ -179,7 +262,8 @@ public record CaravanBeast(
         CaravanBeastAssignmentType.TRAVELER,
         wagonId,
         createdAt,
-        now);
+        now,
+        occupiedSpace);
   }
 
   public CaravanBeast clearAssignment(Instant now) {
@@ -202,7 +286,8 @@ public record CaravanBeast(
         CaravanBeastAssignmentType.NONE,
         null,
         createdAt,
-        now);
+        now,
+        occupiedSpace);
   }
 
   private static String normalize(String value) {
@@ -210,5 +295,20 @@ public record CaravanBeast(
       return null;
     }
     return value.trim();
+  }
+
+  private static void validateOccupiedSpace(BigDecimal occupiedSpace) {
+    if (occupiedSpace == null) {
+      throw new IllegalArgumentException("occupiedSpace is required");
+    }
+    if (occupiedSpace.signum() < 0) {
+      throw new IllegalArgumentException("occupiedSpace must be greater than or equal to 0");
+    }
+    if (occupiedSpace.compareTo(BigDecimal.valueOf(4)) > 0) {
+      throw new IllegalArgumentException("occupiedSpace must be less than or equal to 4");
+    }
+    if (occupiedSpace.multiply(BigDecimal.valueOf(2)).stripTrailingZeros().scale() > 0) {
+      throw new IllegalArgumentException("occupiedSpace must use 0.5 increments");
+    }
   }
 }

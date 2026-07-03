@@ -76,8 +76,8 @@ public record CaravanTraveler(
     if (activeRoleCodes.size() > maxActiveRoleCount) {
       throw new IllegalArgumentException("activeRoleCodes cannot exceed maxActiveRoleCount");
     }
-    if (consumption < 1) {
-      throw new IllegalArgumentException("consumption must be greater than or equal to 1");
+    if (consumption < 0) {
+      throw new IllegalArgumentException("consumption must be greater than or equal to 0");
     }
     if (createdAt == null || updatedAt == null) {
       throw new IllegalArgumentException("timestamps are required");

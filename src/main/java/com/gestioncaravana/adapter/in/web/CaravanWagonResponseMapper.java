@@ -41,6 +41,7 @@ final class CaravanWagonResponseMapper {
         view.category(),
         view.cost(),
         view.hitPoints(),
+        view.currentHitPoints(),
         view.hardness(),
         view.propulsion(),
         view.travelerCapacity(),

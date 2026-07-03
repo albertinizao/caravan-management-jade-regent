@@ -2,6 +2,7 @@ package com.gestioncaravana.application.model;
 
 import com.gestioncaravana.domain.CaravanBeastAssignmentType;
 import com.gestioncaravana.domain.CaravanBeastSourceType;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -25,4 +26,5 @@ public record CaravanBeastView(
     UUID assignedWagonId,
     String assignedWagonName,
     Instant createdAt,
-    Instant updatedAt) {}
+    Instant updatedAt,
+    BigDecimal occupiedSpace) {}

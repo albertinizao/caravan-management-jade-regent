@@ -69,6 +69,7 @@ class WagonManagementServiceTest {
     assertThat(service.list(caravan.id())).hasSize(1);
     assertThat(service.getById(caravan.id(), created.id()).wagonTypeCode()).isEqualTo("carro-cubierto");
     assertThat(service.getById(caravan.id(), created.id()).improvements()).isEmpty();
+    assertThat(service.getById(caravan.id(), created.id()).currentHitPoints()).isEqualTo(service.getById(caravan.id(), created.id()).hitPoints());
   }
 
   @Test
@@ -213,6 +214,7 @@ class WagonManagementServiceTest {
         new com.gestioncaravana.application.port.in.AddCaravanWagonImprovementUseCase.AddCaravanWagonImprovementCommand("refuerzo-para-carros"));
 
     assertThat(withImprovement.hitPoints()).isEqualTo(40);
+    assertThat(withImprovement.currentHitPoints()).isEqualTo(30);
     assertThat(withImprovement.cargoCapacity()).isEqualTo(3);
     assertThat(withImprovement.improvements()).hasSize(1);
 
@@ -220,7 +222,52 @@ class WagonManagementServiceTest {
     var afterRemoval = service.execute(caravan.id(), wagon.id(), improvementId);
 
     assertThat(afterRemoval.hitPoints()).isEqualTo(30);
+    assertThat(afterRemoval.currentHitPoints()).isEqualTo(30);
     assertThat(afterRemoval.improvements()).isEmpty();
+  }
+
+  @Test
+  void damagesWagonAfterApplyingHardnessUnlessIgnored() {
+    var caravan = createCaravan();
+    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto", null));
+
+    var damaged = service.execute(
+        caravan.id(),
+        wagon.id(),
+        new com.gestioncaravana.application.port.in.DamageCaravanWagonUseCase.DamageCaravanWagonCommand(12, false));
+
+    assertThat(damaged.currentHitPoints()).isEqualTo(23);
+    assertThat(damaged.hitPoints()).isEqualTo(30);
+  }
+
+  @Test
+  void ignoresHardnessWhenRequestedWhileDamagingWagon() {
+    var caravan = createCaravan();
+    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto", null));
+
+    var damaged = service.execute(
+        caravan.id(),
+        wagon.id(),
+        new com.gestioncaravana.application.port.in.DamageCaravanWagonUseCase.DamageCaravanWagonCommand(12, true));
+
+    assertThat(damaged.currentHitPoints()).isEqualTo(18);
+  }
+
+  @Test
+  void repairsWagonWithoutExceedingMaximumHitPoints() {
+    var caravan = createCaravan();
+    var wagon = service.execute(caravan.id(), new com.gestioncaravana.application.port.in.AddCaravanWagonUseCase.AddCaravanWagonCommand("carro-cubierto", null));
+    var damaged = service.execute(
+        caravan.id(),
+        wagon.id(),
+        new com.gestioncaravana.application.port.in.DamageCaravanWagonUseCase.DamageCaravanWagonCommand(12, true));
+
+    var repaired = service.execute(
+        caravan.id(),
+        damaged.id(),
+        new com.gestioncaravana.application.port.in.RepairCaravanWagonUseCase.RepairCaravanWagonCommand(20));
+
+    assertThat(repaired.currentHitPoints()).isEqualTo(30);
   }
 
   @Test

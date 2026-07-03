@@ -64,6 +64,11 @@ const customFourLegged = ref(true);
 const customSpecialNote = ref("Ninguno");
 const customDescription = ref("");
 const customNotes = ref("");
+const customOccupiedSpace = ref("1");
+const spaceFormatter = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 1,
+});
 const { showToast } = useToast();
 
 function isPending(action: string) {
@@ -247,6 +252,7 @@ function resetCustomForm() {
   customSpecialNote.value = "Ninguno";
   customDescription.value = "";
   customNotes.value = "";
+  customOccupiedSpace.value = "1";
 }
 
 async function handleAddCatalogBeast(beastCode: string) {
@@ -298,6 +304,8 @@ async function handleCreateCustomBeast() {
   const parsedThermal = thermalInput === "" ? null : Number(thermalInput);
   const parsedBasePrice = basePriceInput === "" ? null : Number(basePriceInput);
   const parsedTrainedPrice = trainedPriceInput === "" ? null : Number(trainedPriceInput);
+  const occupiedSpaceText = normalizeInputValue(customOccupiedSpace.value).replace(",", ".");
+  const parsedOccupiedSpace = occupiedSpaceText === "" ? 1 : Number(occupiedSpaceText);
 
   if (Number.isNaN(parsedStrength) || parsedStrength < 0) {
     customModalError.value = "La fuerza debe ser un número válido";
@@ -319,6 +327,10 @@ async function handleCreateCustomBeast() {
     customModalError.value = "El precio adiestrado debe ser un número válido";
     return;
   }
+  if (Number.isNaN(parsedOccupiedSpace) || parsedOccupiedSpace < 0 || parsedOccupiedSpace > 4 || !Number.isInteger(parsedOccupiedSpace * 2)) {
+    customModalError.value = "El espacio ocupado debe ir de 0 a 4 en incrementos de 0.5";
+    return;
+  }
 
   submitting.value = true;
   pendingAction.value = "create-custom";
@@ -337,6 +349,7 @@ async function handleCreateCustomBeast() {
     specialNote: normalizeInputValue(customSpecialNote.value) || "Ninguno",
     description: normalizeInputValue(customDescription.value),
     customNotes: normalizeInputValue(customNotes.value) || null,
+    occupiedSpace: parsedOccupiedSpace,
   };
 
   try {
@@ -610,7 +623,7 @@ function isValidTravelerWagonForBeast(wagon: CaravanWagon, beast: CaravanBeast):
     return true;
   }
 
-  return travelerOccupancyForWagon(wagon.id) < wagon.travelerCapacity;
+  return travelerOccupancyForWagon(wagon.id) + beast.occupiedSpace <= wagon.travelerCapacity;
 }
 
 function draftOccupancyForWagon(wagonId: string) {
@@ -626,10 +639,10 @@ function draftOccupancyForWagon(wagonId: string) {
 
 function travelerOccupancyForWagon(wagonId: string) {
   const travelerCount = travelersByWagonId.value.get(wagonId) ?? 0;
-  const beastCount = beasts.value.filter(
+  const beastSpace = beasts.value.filter(
     (beast) => beast.assignmentType === "TRAVELER" && beast.assignedWagonId === wagonId,
-  ).length;
-  return travelerCount + beastCount;
+  ).reduce((total, beast) => total + beast.occupiedSpace, 0);
+  return travelerCount + beastSpace;
 }
 
 function parseDraftRequirement(propulsion: string): DraftRequirement | null {
@@ -671,6 +684,10 @@ function beastThermalLabel(value: number | null) {
 
 function beastSizeLabel(size: string) {
   return size === "G" ? "Grande" : size === "M" ? "Mediana" : size === "E" ? "Enorme" : size;
+}
+
+function formatSpace(value: number) {
+  return spaceFormatter.format(value);
 }
 
 function draftAssignmentHint(beast: CaravanBeast | null): string {
@@ -877,6 +894,7 @@ onMounted(refresh);
                 <div><dt>Precio</dt><dd>{{ beastPriceLabel(item.basePrice) }}</dd></div>
                 <div><dt>Adiestrado</dt><dd>{{ beastPriceLabel(item.trainedPrice) }}</dd></div>
                 <div><dt>Tamaño</dt><dd>{{ beastSizeLabel(item.size) }}</dd></div>
+                <div><dt>Espacio</dt><dd>{{ formatSpace(item.occupiedSpace) }}</dd></div>
                 <div><dt>Fuerza</dt><dd>{{ item.strength }}</dd></div>
                 <div><dt>Velocidad</dt><dd>{{ item.speed }}</dd></div>
                 <div><dt>Adaptación</dt><dd>{{ beastThermalLabel(item.thermalAdaptation) }}</dd></div>
@@ -962,10 +980,15 @@ onMounted(refresh);
               <textarea v-model="customDescription" rows="3"></textarea>
             </label>
 
-            <label>
-              <span>Notas personalizadas</span>
-              <textarea v-model="customNotes" rows="3" placeholder="Opcional"></textarea>
-            </label>
+              <label>
+                <span>Notas personalizadas</span>
+                <textarea v-model="customNotes" rows="3" placeholder="Opcional"></textarea>
+              </label>
+
+              <label>
+                <span>Espacio ocupado</span>
+                <input v-model="customOccupiedSpace" type="number" min="0" max="4" step="0.5" placeholder="1" />
+              </label>
 
             <div class="modal-actions">
               <button class="secondary-button" type="button" @click="closeCustomModal">Cancelar</button>
@@ -1003,6 +1026,7 @@ onMounted(refresh);
                 <div><dt>Origen</dt><dd>{{ beastTypeLabel(selectedBeast) }}</dd></div>
                 <div><dt>Código</dt><dd>{{ selectedBeast.catalogBeastCode ?? "—" }}</dd></div>
                 <div><dt>Tamaño</dt><dd>{{ beastSizeLabel(selectedBeast.size) }}</dd></div>
+                <div><dt>Espacio</dt><dd>{{ formatSpace(selectedBeast.occupiedSpace) }}</dd></div>
                 <div><dt>Fuerza</dt><dd>{{ selectedBeast.strength }}</dd></div>
                 <div><dt>Velocidad</dt><dd>{{ selectedBeast.speed }}</dd></div>
                 <div><dt>Adaptación</dt><dd>{{ beastThermalLabel(selectedBeast.thermalAdaptation) }}</dd></div>

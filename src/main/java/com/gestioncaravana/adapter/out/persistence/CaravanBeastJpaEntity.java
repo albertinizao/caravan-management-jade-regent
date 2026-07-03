@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.time.Instant;
 
 @Entity
@@ -61,6 +62,9 @@ public class CaravanBeastJpaEntity {
 
   @Column
   private String assignedWagonId;
+
+  @Column(precision = 4, scale = 1)
+  private BigDecimal occupiedSpace;
 
   @Column(nullable = false)
   private Instant createdAt;
@@ -204,6 +208,14 @@ public class CaravanBeastJpaEntity {
 
   public void setAssignedWagonId(String assignedWagonId) {
     this.assignedWagonId = assignedWagonId;
+  }
+
+  public BigDecimal getOccupiedSpace() {
+    return occupiedSpace;
+  }
+
+  public void setOccupiedSpace(BigDecimal occupiedSpace) {
+    this.occupiedSpace = occupiedSpace;
   }
 
   public Instant getCreatedAt() {

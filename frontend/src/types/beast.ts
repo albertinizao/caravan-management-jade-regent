@@ -14,6 +14,7 @@ export interface BeastCatalogItem {
   specialNote: string;
   description: string;
   notes: string | null;
+  occupiedSpace: number;
 }
 
 export interface CaravanBeast {
@@ -37,6 +38,7 @@ export interface CaravanBeast {
   assignedWagonName: string | null;
   createdAt: string;
   updatedAt: string;
+  occupiedSpace: number;
 }
 
 export interface AddCaravanBeastPayload {
@@ -53,6 +55,7 @@ export interface AddCaravanBeastPayload {
   specialNote: string;
   description: string;
   customNotes?: string | null;
+  occupiedSpace?: number | null;
 }
 
 export interface UpdateCaravanBeastAssignmentPayload {

@@ -12,4 +12,5 @@ public record CaravanBeastCatalogItemView(
     boolean fourLegged,
     String specialNote,
     String description,
-    String notes) {}
+    String notes,
+    java.math.BigDecimal occupiedSpace) {}

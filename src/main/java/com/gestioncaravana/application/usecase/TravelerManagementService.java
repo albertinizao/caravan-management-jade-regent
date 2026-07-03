@@ -209,11 +209,9 @@ public class TravelerManagementService
     if (wagonId != null) {
       var wagon = wagonRepository.findById(caravanId, wagonId)
           .orElseThrow(() -> new IllegalArgumentException("Wagon not found: " + wagonId));
-      var currentCount = travelerRepository.countByCaravanIdAndWagonId(caravanId, wagonId);
-      var beastCount = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
-          caravanId, wagonId, com.gestioncaravana.domain.CaravanBeastAssignmentType.TRAVELER).size();
+      var currentCount = travelerOccupancySpace(caravanId, wagonId);
       if (traveler.wagonId() == null || !traveler.wagonId().equals(wagonId)) {
-        if (currentCount + beastCount >= currentWagonCapacity(caravanId, wagon.id())) {
+        if (currentCount.add(BigDecimal.ONE).compareTo(BigDecimal.valueOf(currentWagonCapacity(caravanId, wagon.id()))) > 0) {
           throw new IllegalArgumentException("Wagon capacity reached");
         }
       }
@@ -251,11 +249,9 @@ public class TravelerManagementService
 
     var wagon = wagonRepository.findById(caravanId, command.wagonId())
         .orElseThrow(() -> new IllegalArgumentException("Wagon not found: " + command.wagonId()));
-    var currentCount = travelerRepository.countByCaravanIdAndWagonId(caravanId, command.wagonId());
-    var beastCount = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
-        caravanId, command.wagonId(), com.gestioncaravana.domain.CaravanBeastAssignmentType.TRAVELER).size();
+    var currentCount = travelerOccupancySpace(caravanId, command.wagonId());
       if (traveler.wagonId() == null || !traveler.wagonId().equals(command.wagonId())) {
-        if (currentCount + beastCount >= currentWagonCapacity(caravanId, wagon.id())) {
+        if (currentCount.add(BigDecimal.ONE).compareTo(BigDecimal.valueOf(currentWagonCapacity(caravanId, wagon.id()))) > 0) {
           throw new IllegalArgumentException("Wagon capacity reached");
         }
       }
@@ -355,15 +351,22 @@ public class TravelerManagementService
     wagonRepository.findById(caravanId, wagonId)
         .orElseThrow(() -> new IllegalArgumentException("Wagon not found: " + wagonId));
 
-    var currentCount = travelerRepository.countByCaravanIdAndWagonId(caravanId, wagonId);
-    var beastCount = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
-        caravanId, wagonId, com.gestioncaravana.domain.CaravanBeastAssignmentType.TRAVELER).size();
+    var currentCount = travelerOccupancySpace(caravanId, wagonId);
     var currentTraveler = travelerId == null ? null : travelerRepository.findById(caravanId, travelerId).orElse(null);
     if (currentTraveler == null || !wagonId.equals(currentTraveler.wagonId())) {
-      if (currentCount + beastCount >= currentWagonCapacity(caravanId, wagonId)) {
+      if (currentCount.add(BigDecimal.ONE).compareTo(BigDecimal.valueOf(currentWagonCapacity(caravanId, wagonId))) > 0) {
         throw new IllegalArgumentException("Wagon capacity reached");
       }
     }
+  }
+
+  private BigDecimal travelerOccupancySpace(UUID caravanId, UUID wagonId) {
+    var travelerCount = travelerRepository.countByCaravanIdAndWagonId(caravanId, wagonId);
+    var beastSpace = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
+        caravanId, wagonId, com.gestioncaravana.domain.CaravanBeastAssignmentType.TRAVELER).stream()
+        .map(com.gestioncaravana.domain.CaravanBeast::occupiedSpace)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
+    return BigDecimal.valueOf(travelerCount).add(beastSpace);
   }
 
   private void validateDrivingWagonAssignment(UUID caravanId, UUID travelerId, UUID drivingWagonId, List<String> activeRoleCodes) {

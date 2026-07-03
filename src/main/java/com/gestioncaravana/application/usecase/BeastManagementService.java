@@ -24,6 +24,7 @@ import com.gestioncaravana.domain.WagonImprovementCatalog;
 import com.gestioncaravana.domain.WagonCatalog;
 import com.gestioncaravana.domain.CaravanWagon;
 import java.time.Clock;
+import java.math.BigDecimal;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
@@ -121,6 +122,7 @@ public class BeastManagementService
         command.specialNote(),
         command.description(),
         command.customNotes(),
+        command.occupiedSpace(),
         now);
     return toView(beastRepository.save(beast));
   }
@@ -227,21 +229,23 @@ public class BeastManagementService
   }
 
   private void validateTravelerAssignment(UUID caravanId, CaravanBeast beast, CaravanWagon wagon, UUID currentWagonId) {
-    var currentCount = travelerOccupancyCount(caravanId, wagon.id());
+    var currentCount = travelerOccupancySpace(caravanId, wagon.id());
     var alreadyOccupiesTargetSlot = beast.assignmentType() == CaravanBeastAssignmentType.TRAVELER
         && wagon.id().equals(currentWagonId);
     if (!alreadyOccupiesTargetSlot) {
-      if (currentCount >= currentWagonCapacity(caravanId, wagon.id())) {
+      if (currentCount.add(beast.occupiedSpace()).compareTo(BigDecimal.valueOf(currentWagonCapacity(caravanId, wagon.id()))) > 0) {
         throw new IllegalArgumentException("Wagon capacity reached");
       }
     }
   }
 
-  private int travelerOccupancyCount(UUID caravanId, UUID wagonId) {
+  private BigDecimal travelerOccupancySpace(UUID caravanId, UUID wagonId) {
     var travelerCount = travelerRepository.countByCaravanIdAndWagonId(caravanId, wagonId);
-    var beastCount = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
-        caravanId, wagonId, CaravanBeastAssignmentType.TRAVELER).size();
-    return (int) travelerCount + beastCount;
+    var beastSpace = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
+        caravanId, wagonId, CaravanBeastAssignmentType.TRAVELER).stream()
+        .map(CaravanBeast::occupiedSpace)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
+    return BigDecimal.valueOf(travelerCount).add(beastSpace);
   }
 
   private int currentWagonCapacity(UUID caravanId, UUID wagonId) {
@@ -301,7 +305,8 @@ public class BeastManagementService
         item.fourLegged(),
         item.specialNote(),
         item.description(),
-        item.notes());
+        item.notes(),
+        item.occupiedSpace());
   }
 
   private CaravanBeastView toView(CaravanBeast beast) {
@@ -330,7 +335,8 @@ public class BeastManagementService
         beast.assignedWagonId(),
         assignedWagonName,
         beast.createdAt(),
-        beast.updatedAt());
+        beast.updatedAt(),
+        beast.occupiedSpace());
   }
 
   private boolean isDraftEligibleSize(String size) {

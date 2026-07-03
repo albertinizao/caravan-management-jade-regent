@@ -417,8 +417,8 @@ async function handleCreateTraveler() {
     if (parsedSalary !== null && !/^\d+(\.\d{1,2})?$/.test(salaryText)) {
       throw new Error("El sueldo debe tener como máximo 2 decimales");
     }
-    if (Number.isNaN(parsedConsumption) || parsedConsumption < 1) {
-      throw new Error("El consumo debe ser un número mayor o igual a 1");
+    if (Number.isNaN(parsedConsumption) || parsedConsumption < 0) {
+      throw new Error("El consumo debe ser un número mayor o igual a 0");
     }
 
     await addCaravanTraveler(activeCaravan.value.id, {
@@ -596,8 +596,8 @@ async function handleSaveTravelerChanges() {
     selectedModalError.value = "El sueldo debe tener como máximo 2 decimales";
     return;
   }
-  if (Number.isNaN(parsedConsumption) || parsedConsumption < 1) {
-    selectedModalError.value = "El consumo debe ser un número mayor o igual a 1";
+  if (Number.isNaN(parsedConsumption) || parsedConsumption < 0) {
+    selectedModalError.value = "El consumo debe ser un número mayor o igual a 0";
     return;
   }
 
@@ -1122,7 +1122,7 @@ onMounted(refresh);
               <div class="two-columns">
                 <label>
                   <span>Consumo</span>
-                  <input v-model="selectedConsumption" type="number" min="1" />
+                  <input v-model="selectedConsumption" type="number" min="0" />
                 </label>
 
                 <div class="role-limit-summary">
@@ -1289,7 +1289,7 @@ onMounted(refresh);
 
               <label>
                 <span>Consumo</span>
-                <input v-model="createConsumption" type="number" min="1" />
+                <input v-model="createConsumption" type="number" min="0" />
               </label>
             </div>
 

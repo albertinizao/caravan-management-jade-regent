@@ -15,12 +15,14 @@ import { listCaravanBeasts, updateCaravanBeastAssignment, clearCaravanBeastAssig
 import {
   addCaravanWagon,
   addCaravanWagonImprovement,
+  damageCaravanWagon,
   deleteCaravanWagon,
   deleteCaravanWagonImprovement,
   getCaravanWagon,
   listCaravanWagons,
   listWagonCatalog,
   listWagonImprovementCatalog,
+  repairCaravanWagon,
   updateCaravanWagon,
 } from "@/services/wagons";
 import { listCaravanTravelers, updateCaravanTravelerWagon } from "@/services/travelers";
@@ -91,6 +93,11 @@ const draftPanelExpanded = ref(true);
 const cargoModalOpen = ref(false);
 const cargoModalMode = ref<"catalog" | "custom">("catalog");
 const cargoModalError = ref<string | null>(null);
+const healthModalOpen = ref(false);
+const healthModalMode = ref<"damage" | "repair">("damage");
+const healthModalError = ref<string | null>(null);
+const healthModalAmount = ref("");
+const healthModalIgnoreHardness = ref(false);
 const cargoCatalogCode = ref("");
 const cargoQuantity = ref("1");
 const cargoUnits = ref("1");
@@ -108,6 +115,10 @@ const wagonsTypeFilter = ref<"all" | "viajeros" | "mercancias" | "especiales">("
 const wagonsSearch = ref("");
 const draftMediumSlotsPerLargeBeast = 4;
 const carreteroRoleCode = "carretero";
+const spaceFormatter = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 1,
+});
 const { showToast } = useToast();
 
 function isPending(action: string) {
@@ -146,10 +157,18 @@ interface WagonAlert {
   description: string;
 }
 
+interface WagonMeterSegment {
+  key: string;
+  label: string;
+  widthPercent: number;
+  color: string;
+}
+
 interface WagonRowSummary {
   wagon: CaravanWagon;
+  currentHitPoints: number;
   travelerCount: number;
-  travelerBeastCount: number;
+  travelerBeastSpace: number;
   travelerCapacity: number;
   cargoLoad: number;
   cargoCapacity: number;
@@ -269,6 +288,10 @@ function wagonTravelerBeastsFor(wagonId: string) {
   return beasts.value.filter((beast) => beast.assignmentType === "TRAVELER" && beast.assignedWagonId === wagonId);
 }
 
+function wagonTravelerBeastSpaceFor(wagonId: string) {
+  return wagonTravelerBeastsFor(wagonId).reduce((total, beast) => total + beast.occupiedSpace, 0);
+}
+
 function wagonDraftBeastsFor(wagonId: string) {
   return beasts.value.filter((beast) => beast.assignmentType === "DRAFT" && beast.assignedWagonId === wagonId);
 }
@@ -286,6 +309,100 @@ function wagonCargoLoadFor(wagonId: string) {
 
 function wagonCargoCapacityFor(wagonId: string) {
   return cargoSummaryByWagonId.value[wagonId]?.cargoCapacity ?? 0;
+}
+
+function percentageOf(value: number, max: number) {
+  if (max <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, (value / max) * 100));
+}
+
+function formatSpace(value: number) {
+  return spaceFormatter.format(value);
+}
+
+const meterPalette = [
+  "#3b82f6",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+  "#8b5cf6",
+  "#14b8a6",
+  "#f97316",
+  "#ec4899",
+  "#6366f1",
+  "#84cc16",
+];
+
+function hashText(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function colorForKey(key: string) {
+  return meterPalette[hashText(key) % meterPalette.length];
+}
+
+function buildSegments(
+  entries: Array<{ key: string; label: string; amount: number }>,
+  total: number,
+  remainderLabel: string,
+): WagonMeterSegment[] {
+  const used = entries.reduce((sum, entry) => sum + Math.max(0, entry.amount), 0);
+  const barTotal = total > 0 ? Math.max(total, used) : Math.max(used, 1);
+  const segments = entries
+    .filter((entry) => entry.amount > 0)
+    .map((entry) => ({
+      key: entry.key,
+      label: entry.label,
+      widthPercent: percentageOf(entry.amount, barTotal),
+      color: colorForKey(entry.key),
+    }));
+
+  const remainder = Math.max(0, barTotal - used);
+  if (barTotal > 0 && remainder > 0) {
+    segments.push({
+      key: `${remainderLabel}:remaining`,
+      label: `${remainder} libres`,
+      widthPercent: percentageOf(remainder, barTotal),
+      color: "#e5e7eb",
+    });
+  }
+
+  return segments;
+}
+
+function draftBandColor(className: string) {
+  if (className === "draft-band--danger") {
+    return "#fca5a5";
+  }
+  if (className === "draft-band--warning") {
+    return "#fdba74";
+  }
+  if (className === "draft-band--success") {
+    return "#86efac";
+  }
+  return "#93c5fd";
+}
+
+function wagonSpeedFor(wagon: CaravanWagon) {
+  const draftBeasts = wagonDraftBeastsFor(wagon.id);
+  const carretero = wagonCarreteroFor(wagon.id);
+  const requirement = wagonDraftRequirementFor(wagon);
+  const requiredStrength = requirement?.minimumStrength ?? 0;
+  const totalStrength = wagonDraftStrengthFor(wagon);
+
+  if (draftBeasts.length === 0 || !carretero || (requiredStrength > 0 && totalStrength < requiredStrength)) {
+    return 0;
+  }
+
+  const slowestBeastSpeed = Math.min(...draftBeasts.map((beast) => beast.speed));
+  return Number.isFinite(slowestBeastSpeed) ? Math.max(0, slowestBeastSpeed) : 0;
 }
 
 function wagonDraftRequirementFor(wagon: CaravanWagon): WagonDraftRequirement | null {
@@ -345,28 +462,13 @@ function wagonDraftStrengthFor(wagon: CaravanWagon) {
   return Math.max(0, wagon.draftStrength);
 }
 
-function wagonSpeedFor(wagon: CaravanWagon) {
-  const draftBeasts = wagonDraftBeastsFor(wagon.id);
-  const carretero = wagonCarreteroFor(wagon.id);
-  const requirement = wagonDraftRequirementFor(wagon);
-  const requiredStrength = requirement?.minimumStrength ?? 0;
-  const totalStrength = wagonDraftStrengthFor(wagon);
-
-  if (draftBeasts.length === 0 || !carretero || (requiredStrength > 0 && totalStrength < requiredStrength)) {
-    return 0;
-  }
-
-  const slowestBeastSpeed = Math.min(...draftBeasts.map((beast) => beast.speed));
-  return Number.isFinite(slowestBeastSpeed) ? Math.max(0, slowestBeastSpeed) : 0;
-}
-
 function wagonAlertsFor(wagon: CaravanWagon): WagonAlert[] {
   const alerts: WagonAlert[] = [];
   const requirement = wagonDraftRequirementFor(wagon);
   const draftBeasts = wagonDraftBeastsFor(wagon.id);
   const carretero = wagonCarreteroFor(wagon.id);
   const travelersCount = wagonTravelersFor(wagon.id).length;
-  const travelerBeastsCount = wagonTravelerBeastsFor(wagon.id).length;
+  const travelerBeastSpace = wagonTravelerBeastSpaceFor(wagon.id);
   const travelerCapacity = wagon.travelerCapacity;
   const cargoLoad = wagonCargoLoadFor(wagon.id);
   const cargoCapacity = wagonCargoCapacityFor(wagon.id);
@@ -395,11 +497,11 @@ function wagonAlertsFor(wagon: CaravanWagon): WagonAlert[] {
     });
   }
 
-  if (travelersCount + travelerBeastsCount > travelerCapacity) {
+  if (travelersCount + travelerBeastSpace > travelerCapacity) {
     alerts.push({
       kind: "danger",
       title: "Capacidad de viajeros superada",
-      description: `Transporta ${travelersCount + travelerBeastsCount} ocupantes para una capacidad máxima de ${travelerCapacity}.`,
+      description: `Transporta ${formatSpace(travelersCount + travelerBeastSpace)} plazas ocupadas para una capacidad máxima de ${travelerCapacity}.`,
     });
   }
 
@@ -418,7 +520,7 @@ function buildWagonRowSummary(wagon: CaravanWagon): WagonRowSummary {
   const draftRequirement = wagonDraftRequirementFor(wagon);
   const draftBeasts = wagonDraftBeastsFor(wagon.id);
   const travelerCount = wagonTravelersFor(wagon.id).length;
-  const travelerBeastCount = wagonTravelerBeastsFor(wagon.id).length;
+  const travelerBeastSpace = wagonTravelerBeastSpaceFor(wagon.id);
   const travelerCapacity = wagon.travelerCapacity;
   const cargoLoad = wagonCargoLoadFor(wagon.id);
   const cargoCapacity = wagonCargoCapacityFor(wagon.id);
@@ -427,15 +529,17 @@ function buildWagonRowSummary(wagon: CaravanWagon): WagonRowSummary {
   const draftLargeCapacity = draftRequirement?.maxLargeBeasts ?? 0;
   const draftMediumCapacity = draftRequirement?.maxMediumBeasts ?? 0;
   const draftStrength = wagonDraftStrengthFor(wagon);
-  const totalConsumption = wagon.consumption
-    + wagonTravelersFor(wagon.id).reduce((total, traveler) => total + traveler.consumption, 0);
+  const currentHitPoints = wagon.currentHitPoints ?? wagon.hitPoints;
   const hasCarretero = wagonCarreteroFor(wagon.id) !== null;
   const speed = wagonSpeedFor(wagon);
+  const totalConsumption = wagon.consumption
+    + wagonTravelersFor(wagon.id).reduce((total, traveler) => total + traveler.consumption, 0);
 
   return {
     wagon,
+    currentHitPoints,
     travelerCount,
-    travelerBeastCount,
+    travelerBeastSpace,
     travelerCapacity,
     cargoLoad,
     cargoCapacity,
@@ -454,6 +558,9 @@ function buildWagonRowSummary(wagon: CaravanWagon): WagonRowSummary {
 }
 
 const visibleWagonRows = computed(() => visibleWagons.value.map((wagon) => buildWagonRowSummary(wagon)));
+const visibleWagonTotalConsumption = computed(() =>
+  visibleWagonRows.value.reduce((total, row) => total + row.totalConsumption, 0),
+);
 const wagonAlertsSummary = computed<WagonRowSummary | null>(() =>
   wagonAlertsModalTarget.value ? buildWagonRowSummary(wagonAlertsModalTarget.value) : null,
 );
@@ -523,6 +630,23 @@ const selectedWagonTypeName = computed(() => {
   return catalog.value.find((item) => item.code === selectedWagon.value?.wagonTypeCode)?.name
     ?? selectedWagon.value.wagonTypeCode;
 });
+
+const selectedWagonCurrentHitPoints = computed(() =>
+  selectedWagon.value ? (selectedWagon.value.currentHitPoints ?? selectedWagon.value.hitPoints) : 0,
+);
+
+const selectedWagonHitPoints = computed(() => selectedWagon.value?.hitPoints ?? 0);
+
+const selectedWagonHitPointPercentage = computed(() =>
+  percentageOf(selectedWagonCurrentHitPoints.value, selectedWagonHitPoints.value),
+);
+
+const selectedWagonTotalConsumption = computed(() =>
+  selectedWagon.value
+    ? selectedWagon.value.consumption
+      + selectedWagonTravelers.value.reduce((total, traveler) => total + traveler.consumption, 0)
+    : 0,
+);
 
 const selectedWagonSpecificCommodityLabel = computed(() => {
   if (!selectedWagon.value || selectedWagon.value.wagonTypeCode !== "carro-de-mercancias-especificas") {
@@ -626,18 +750,70 @@ const unassignedTravelers = computed(() => travelers.value.filter((traveler) => 
 
 const unassignedBeasts = computed(() => beasts.value.filter((beast) => beast.assignmentType === "NONE"));
 
-const selectedWagonOccupancy = computed(() => selectedWagonTravelers.value.length + selectedWagonTravelerBeasts.value.length);
+const selectedWagonOccupancy = computed(() =>
+  selectedWagonTravelers.value.length
+  + selectedWagonTravelerBeasts.value.reduce((total, beast) => total + beast.occupiedSpace, 0),
+);
 const selectedWagonCapacityRemaining = computed(() =>
   selectedWagon.value ? Math.max(0, selectedWagon.value.travelerCapacity - selectedWagonOccupancy.value) : 0
+);
+const selectedWagonCrewSegments = computed<WagonMeterSegment[]>(() => {
+  const capacity = selectedWagon.value?.travelerCapacity ?? 0;
+  return buildSegments(
+    [
+      {
+        key: "crew-travelers",
+        label: `${selectedWagonTravelers.value.length} viajeros`,
+        amount: selectedWagonTravelers.value.length,
+      },
+      {
+        key: "crew-beasts",
+        label: `${formatSpace(selectedWagonTravelerBeasts.value.reduce((total, beast) => total + beast.occupiedSpace, 0))} espacio bestias`,
+        amount: selectedWagonTravelerBeasts.value.reduce((total, beast) => total + beast.occupiedSpace, 0),
+      },
+    ],
+    capacity,
+    "crew",
+  );
+});
+const selectedWagonCargoSegments = computed<WagonMeterSegment[]>(() =>
+  buildSegments(
+    groupedSelectedWagonCargo.value.map((entry) => ({
+      key: entry.key,
+      label: `${entry.representative.displayName} · ${entry.totalCargoLoad}`,
+      amount: entry.totalCargoLoad,
+    })),
+    selectedWagon.value?.cargoCapacity ?? 0,
+    "cargo",
+  ),
 );
 const selectedWagonDraftRequirement = computed(() =>
   selectedWagon.value ? parseDraftRequirement(selectedWagon.value.propulsion) : null,
 );
+const selectedWagonDraftGroups = computed(() => (selectedWagon.value ? groupedDraftBeasts(selectedWagon.value) : []));
+const selectedWagonDraftOccupancySegments = computed<WagonMeterSegment[]>(() => {
+  const requirement = selectedWagonDraftRequirement.value;
+  const totalSlots = requirement
+    ? requirement.maxLargeBeasts + requirement.maxMediumBeasts
+    : selectedWagonDraftGroups.value.reduce((sum, group) => sum + group.count, 0);
+
+  return buildSegments(
+    selectedWagonDraftGroups.value.map((group) => ({
+      key: group.key,
+      label: `${group.name} · ${group.count}`,
+      amount: group.count,
+    })),
+    Math.max(1, totalSlots),
+    "draft-occupancy",
+  );
+});
 const availableTravelersForSelectedWagon = computed(() =>
-  selectedWagonCapacityRemaining.value > 0 ? unassignedTravelers.value : []
+  selectedWagonCapacityRemaining.value >= 1 ? unassignedTravelers.value : []
 );
 const availableTravelerBeastsForSelectedWagon = computed(() =>
-  selectedWagonCapacityRemaining.value > 0 ? unassignedBeasts.value : []
+  selectedWagon.value
+    ? unassignedBeasts.value.filter((beast) => beast.occupiedSpace <= selectedWagonCapacityRemaining.value)
+    : []
 );
 const availableDraftBeastsForSelectedWagon = computed(() => {
   const wagon = selectedWagon.value;
@@ -664,15 +840,15 @@ const assignmentModalHint = computed(() => {
   }
 
   if (assignmentModalMode.value === "traveler") {
-    return selectedWagonCapacityRemaining.value === 0
+    return selectedWagonCapacityRemaining.value < 1
       ? "Este carro ya no tiene plazas libres para viajeros."
-      : `Se mostrarán solo viajeros sin asignar. Quedan ${selectedWagonCapacityRemaining.value} plazas libres en este carro.`;
+      : `Se mostrarán solo viajeros sin asignar. Quedan ${formatSpace(selectedWagonCapacityRemaining.value)} plazas libres en este carro.`;
   }
 
   if (assignmentModalMode.value === "beast-traveler") {
-    return selectedWagonCapacityRemaining.value === 0
+    return selectedWagonCapacityRemaining.value < 0.5
       ? "Este carro ya no tiene plazas libres para bestias viajeras."
-      : `Se mostrarán solo bestias sin asignar. Quedan ${selectedWagonCapacityRemaining.value} plazas libres en este carro.`;
+      : `Se mostrarán solo bestias sin asignar. Quedan ${formatSpace(selectedWagonCapacityRemaining.value)} plazas libres en este carro.`;
   }
 
   return availableDraftBeastsForSelectedWagon.value.length === 0
@@ -839,6 +1015,7 @@ async function openWagonDetails(wagon: CaravanWagon) {
     selectedWagon.value = await getCaravanWagon(activeCaravan.value.id, wagon.id);
     wagonNameDraft.value = selectedWagon.value.name;
     wagonNameEditorOpen.value = false;
+    closeHealthModal();
     await loadSelectedWagonCargo(activeCaravan.value.id, wagon.id);
     improvementModalOpen.value = false;
     selectedImprovementCode.value = null;
@@ -938,6 +1115,7 @@ function closeModal() {
   selectedWagonCargo.value = [];
   closeWagonAlertsModal();
   closeCargoModal();
+  closeHealthModal();
   closeAssignmentModal();
   improvementModalOpen.value = false;
   selectedImprovementCode.value = null;
@@ -975,6 +1153,70 @@ async function handleRenameSelectedWagon() {
     showToast(`Nombre actualizado: ${updatedWagon.name}.`);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to rename wagon";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+function openHealthModal(mode: "damage" | "repair") {
+  if (!selectedWagon.value) {
+    return;
+  }
+
+  healthModalMode.value = mode;
+  healthModalAmount.value = "";
+  healthModalIgnoreHardness.value = false;
+  healthModalError.value = null;
+  healthModalOpen.value = true;
+}
+
+function closeHealthModal() {
+  healthModalOpen.value = false;
+  healthModalError.value = null;
+  healthModalAmount.value = "";
+  healthModalIgnoreHardness.value = false;
+}
+
+async function handleApplyHealthChange() {
+  if (!activeCaravan.value || !selectedWagon.value) {
+    return;
+  }
+
+  const amount = Number(healthModalAmount.value);
+  if (!Number.isInteger(amount) || amount < 1) {
+    healthModalError.value = healthModalMode.value === "damage"
+      ? "Indica cuánto daño va a recibir el carro"
+      : "Indica cuánta vida vas a reparar";
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = `${healthModalMode.value}-wagon:${selectedWagon.value.id}`;
+  healthModalError.value = null;
+
+  try {
+    const updatedWagon = healthModalMode.value === "damage"
+      ? await damageCaravanWagon(activeCaravan.value.id, selectedWagon.value.id, {
+        damageAmount: amount,
+        ignoreHardness: healthModalIgnoreHardness.value,
+      })
+      : await repairCaravanWagon(activeCaravan.value.id, selectedWagon.value.id, {
+        repairAmount: amount,
+      });
+
+    selectedWagon.value = updatedWagon;
+    selectedWagonCargo.value = await listCaravanCargo(activeCaravan.value.id, { wagonId: updatedWagon.id });
+    wagonNameDraft.value = updatedWagon.name;
+    replaceWagonInList(updatedWagon);
+    closeHealthModal();
+    showToast(
+      healthModalMode.value === "damage"
+        ? `Carro dañado. Vida actual: ${updatedWagon.currentHitPoints ?? updatedWagon.hitPoints}/${updatedWagon.hitPoints}.`
+        : `Carro reparado. Vida actual: ${updatedWagon.currentHitPoints ?? updatedWagon.hitPoints}/${updatedWagon.hitPoints}.`,
+    );
+  } catch (cause) {
+    healthModalError.value = cause instanceof Error ? cause.message : "Failed to update wagon health";
   } finally {
     submitting.value = false;
     pendingAction.value = null;
@@ -1287,7 +1529,7 @@ async function assignTravelerToSelectedWagon(traveler: CaravanTraveler) {
     return;
   }
 
-  if (selectedWagonCapacityRemaining.value <= 0) {
+  if (selectedWagonCapacityRemaining.value < 1) {
     assignmentModalError.value = "Este carro ya no tiene plazas libres para viajeros.";
     return;
   }
@@ -1338,7 +1580,7 @@ async function assignBeastToSelectedWagon(beast: CaravanBeast, assignmentType: "
     return;
   }
 
-  if (assignmentType === "TRAVELER" && selectedWagonCapacityRemaining.value <= 0) {
+  if (assignmentType === "TRAVELER" && selectedWagonCapacityRemaining.value < beast.occupiedSpace) {
     assignmentModalError.value = "Este carro ya no tiene plazas libres para bestias viajeras.";
     return;
   }
@@ -1776,6 +2018,9 @@ onMounted(refresh);
               <h2>Carros de la caravana</h2>
               <p class="muted">Haz clic en un carro para ver todos sus detalles</p>
             </div>
+            <div class="section-header-summary">
+              <span class="pill">Consumo total visible: {{ visibleWagonTotalConsumption }}</span>
+            </div>
           </div>
 
           <div class="filters">
@@ -1801,17 +2046,24 @@ onMounted(refresh);
 
           <div v-else class="table-wrap">
             <table class="wagon-table">
+              <colgroup>
+                <col class="wagon-col-name" />
+                <col class="wagon-col-life" />
+                <col class="wagon-col-dr" />
+                <col class="wagon-col-travelers" />
+                <col class="wagon-col-cargo" />
+                <col class="wagon-col-draft" />
+                <col class="wagon-col-alerts" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>Carro</th>
-                  <th>PG</th>
-                  <th>Dureza</th>
+                  <th>Vida</th>
+                  <th>DR</th>
                   <th>Viajeros</th>
                   <th>Carga</th>
-                  <th>Consumo</th>
-                  <th>Velocidad</th>
                   <th>Tiro</th>
-                  <th>Alertas</th>
+                  <th aria-label="Alertas"></th>
                 </tr>
               </thead>
               <tbody>
@@ -1828,23 +2080,45 @@ onMounted(refresh);
                     <p v-if="row.wagon.specificCommodity" class="muted">Mercancía específica: {{ row.wagon.specificCommodity }}</p>
                     <p class="muted">{{ row.wagon.specialBenefit }}</p>
                   </td>
-                  <td>{{ row.wagon.hitPoints }}</td>
+                  <td>
+                    <p class="muted">{{ row.currentHitPoints }} / {{ row.wagon.hitPoints }}</p>
+                    <div
+                      class="health-meter"
+                      :aria-label="`Vida ${row.currentHitPoints} de ${row.wagon.hitPoints}`"
+                      :title="`Vida mínima: 0 · Vida máxima: ${row.wagon.hitPoints}`"
+                    >
+                      <span
+                        class="health-meter-fill"
+                        :style="{ width: `${percentageOf(row.currentHitPoints, row.wagon.hitPoints)}%` }"
+                      ></span>
+                    </div>
+                  </td>
                   <td>{{ row.wagon.hardness }}</td>
                   <td>
-                    <strong>{{ row.travelerCount + row.travelerBeastCount }} / {{ row.travelerCapacity }}</strong>
-                    <p class="muted">{{ row.travelerCount }} viajeros · {{ row.travelerBeastCount }} bestias viajeras</p>
+                    <strong>{{ formatSpace(row.travelerCount + row.travelerBeastSpace) }} / {{ row.travelerCapacity }}</strong>
+                    <div
+                      class="capacity-meter"
+                      :aria-label="`Viajeros ocupados ${formatSpace(row.travelerCount + row.travelerBeastSpace)} de ${row.travelerCapacity}`"
+                      :title="`Ocupación: ${formatSpace(row.travelerCount + row.travelerBeastSpace)} / ${row.travelerCapacity}`"
+                    >
+                      <span
+                        class="capacity-meter-fill capacity-meter-fill--travelers"
+                        :style="{ width: `${percentageOf(row.travelerCount + row.travelerBeastSpace, row.travelerCapacity)}%` }"
+                      ></span>
+                    </div>
                   </td>
                   <td>
                     <strong>{{ row.cargoLoad }} / {{ row.cargoCapacity }}</strong>
-                    <p class="muted">unidades</p>
-                  </td>
-                  <td>
-                    <strong>{{ row.totalConsumption }}</strong>
-                    <p class="muted">consumo total</p>
-                  </td>
-                  <td>
-                    <strong>{{ row.speed }} mi/día</strong>
-                    <p class="muted">{{ row.hasCarretero ? "Con carretero" : "Sin carretero" }}</p>
+                    <div
+                      class="capacity-meter"
+                      :aria-label="`Carga ocupada ${row.cargoLoad} de ${row.cargoCapacity}`"
+                      :title="`Carga: ${row.cargoLoad} / ${row.cargoCapacity}`"
+                    >
+                      <span
+                        class="capacity-meter-fill capacity-meter-fill--cargo"
+                        :style="{ width: `${percentageOf(row.cargoLoad, row.cargoCapacity)}%` }"
+                      ></span>
+                    </div>
                   </td>
                   <td>
                     <div class="draft-summary-cell">
@@ -1883,11 +2157,12 @@ onMounted(refresh);
                       class="alert-button"
                       type="button"
                       :class="{ danger: row.alerts.some((alert) => alert.kind === 'danger') }"
+                      aria-label="Ver alertas"
                       @click.stop="openWagonAlerts(row.wagon)"
                     >
-                      {{ row.alerts.length }} alerta{{ row.alerts.length > 1 ? "s" : "" }}
+                      ⚠
                     </button>
-                    <span v-else class="muted">Sin alertas</span>
+                    <span v-else class="muted">—</span>
                   </td>
                 </tr>
               </tbody>
@@ -2131,16 +2406,76 @@ onMounted(refresh);
             </label>
           </div>
 
+          <section v-if="wagonAlertsSummary" class="info-block">
+            <h3>Detalle de alertas</h3>
+            <div v-if="wagonAlertsSummary.alerts.length === 0" class="muted">
+              Este carro no tiene alertas activas.
+            </div>
+            <div v-else class="alerts-list">
+              <article
+                v-for="alert in wagonAlertsSummary.alerts"
+                :key="`${wagonAlertsSummary.wagon.id}-${alert.title}`"
+                class="alert-item"
+                :class="alert.kind"
+              >
+                <strong>{{ alert.title }}</strong>
+                <p>{{ alert.description }}</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="info-block wagon-health-card">
+            <div class="section-header">
+              <div>
+                <h3>Vida</h3>
+                <p class="muted">Gestiona el daño y la reparación del carro.</p>
+              </div>
+            </div>
+
+            <div class="wagon-health-controls" role="group" aria-label="Controles de vida del carro">
+              <button
+                class="life-mini-button"
+                type="button"
+                :disabled="loading || submitting"
+                aria-label="Abrir modal de daño"
+                title="Dañar carro"
+                @click="openHealthModal('damage')"
+              >
+                -
+              </button>
+
+              <div class="health-meter wagon-health-meter">
+                <span
+                  class="health-meter-fill"
+                  :style="{ width: `${selectedWagonHitPointPercentage}%` }"
+                ></span>
+              </div>
+
+              <button
+                class="life-mini-button"
+                type="button"
+                :disabled="loading || submitting"
+                aria-label="Abrir modal de reparación"
+                title="Reparar carro"
+                @click="openHealthModal('repair')"
+              >
+                +
+              </button>
+            </div>
+
+            <div class="wagon-health-values">
+              <span><strong>{{ selectedWagonCurrentHitPoints }}</strong> vida actual</span>
+              <span><strong>{{ selectedWagonHitPoints }}</strong> vida máxima</span>
+            </div>
+          </section>
+
           <dl class="stats modal-stats">
             <div><dt>Tipo</dt><dd>{{ selectedWagonTypeName }}</dd></div>
             <div><dt>Coste</dt><dd>{{ selectedWagon.cost }} po</dd></div>
-            <div><dt>PG</dt><dd>{{ selectedWagon.hitPoints }}</dd></div>
             <div><dt>Dureza</dt><dd>{{ selectedWagon.hardness }}</dd></div>
-            <div><dt>Propulsión</dt><dd>{{ selectedWagon.propulsion }}</dd></div>
-            <div><dt>Viajeros</dt><dd>{{ selectedWagon.travelerCapacity }}</dd></div>
-            <div><dt>Carga</dt><dd>{{ selectedWagon.cargoCapacity }}</dd></div>
             <div><dt>Límite</dt><dd>{{ selectedWagon.limit }}</dd></div>
             <div><dt>Consumo</dt><dd>{{ selectedWagon.consumption }}</dd></div>
+            <div><dt>Consumo total</dt><dd>{{ selectedWagonTotalConsumption }}</dd></div>
           </dl>
 
           <section class="info-block">
@@ -2168,7 +2503,7 @@ onMounted(refresh);
               <div>
                 <h3>Tripulación asignada</h3>
                 <p class="muted">
-                  {{ selectedWagonOccupancy }}/{{ selectedWagon.travelerCapacity }} plazas ocupadas entre viajeros y bestias viajeras.
+                  {{ formatSpace(selectedWagonOccupancy) }}/{{ selectedWagon.travelerCapacity }} plazas ocupadas entre viajeros y bestias viajeras.
                 </p>
               </div>
               <div class="accordion-actions">
@@ -2188,6 +2523,29 @@ onMounted(refresh);
                 >
                   Añadir bestias viajeras
                 </button>
+              </div>
+            </div>
+
+            <div class="summary-meter-block">
+              <div
+                class="meter-strip"
+                :aria-label="`Ocupación de tripulación ${formatSpace(selectedWagonOccupancy)} de ${selectedWagon.travelerCapacity}`"
+              >
+                <span
+                  v-for="segment in selectedWagonCrewSegments"
+                  :key="segment.key"
+                  class="meter-segment"
+                  :style="{ width: `${segment.widthPercent}%`, background: segment.color }"
+                  :title="segment.label"
+                ></span>
+              </div>
+              <div class="meter-legend">
+                <span>Viajeros</span>
+                <span>{{ selectedWagonTravelers.length }}</span>
+                <span>Bestias viajeras</span>
+                <span>{{ formatSpace(selectedWagonTravelerBeasts.reduce((total, beast) => total + beast.occupiedSpace, 0)) }}</span>
+                <span>Libre</span>
+                <span>{{ formatSpace(selectedWagonCapacityRemaining) }}</span>
               </div>
             </div>
 
@@ -2298,6 +2656,27 @@ onMounted(refresh);
               </div>
             </div>
 
+            <div class="summary-meter-block">
+              <div
+                class="meter-strip"
+                :aria-label="`Ocupación de carga ${selectedWagonCargoLoad} de ${selectedWagon.cargoCapacity}`"
+              >
+                <span
+                  v-for="segment in selectedWagonCargoSegments"
+                  :key="segment.key"
+                  class="meter-segment"
+                  :style="{ width: `${segment.widthPercent}%`, background: segment.color }"
+                  :title="segment.label"
+                ></span>
+              </div>
+              <div class="meter-legend">
+                <span>Carga usada</span>
+                <span>{{ selectedWagonCargoLoad }}</span>
+                <span>Espacio libre</span>
+                <span>{{ selectedWagonCargoRemaining }}</span>
+              </div>
+            </div>
+
             <div v-if="groupedSelectedWagonCargo.length === 0" class="muted">
               No hay mercancías asignadas a este carro.
             </div>
@@ -2392,6 +2771,48 @@ onMounted(refresh);
                 <p>{{ draftStrengthState(selectedWagon).description }}</p>
               </div>
               <template v-else>
+                <div class="summary-meter-block">
+                  <div
+                    class="meter-strip"
+                    :aria-label="`Tiro ocupado ${selectedWagonDraftBeasts.length} de ${(selectedWagonDraftRequirement?.maxLargeBeasts ?? 0) + (selectedWagonDraftRequirement?.maxMediumBeasts ?? 0)}`"
+                  >
+                    <span
+                      v-for="segment in selectedWagonDraftOccupancySegments"
+                      :key="segment.key"
+                      class="meter-segment"
+                      :style="{ width: `${segment.widthPercent}%`, background: segment.color }"
+                      :title="segment.label"
+                    ></span>
+                  </div>
+                  <div class="meter-legend">
+                    <span>Grandes</span>
+                    <span>{{ draftOccupancyForWagon(selectedWagon).largeCount }}/{{ selectedWagonDraftRequirement?.maxLargeBeasts ?? 0 }}</span>
+                    <span>Medianas</span>
+                    <span>{{ draftOccupancyForWagon(selectedWagon).mediumCount }}/{{ selectedWagonDraftRequirement?.maxMediumBeasts ?? 0 }}</span>
+                  </div>
+                </div>
+
+                <div class="summary-meter-block">
+                  <div
+                    class="meter-strip meter-strip--strength"
+                    :aria-label="`Fuerza requerida ${selectedWagon.draftStrength} de ${selectedWagon.draftRequiredStrength}`"
+                  >
+                    <span
+                      v-for="band in draftBandsForRequirement(selectedWagon.draftRequiredStrength, selectedWagon.draftStrength)"
+                      :key="`${selectedWagon.id}-${band.label}`"
+                      class="meter-segment"
+                      :style="{ width: `${band.widthPercent}%`, background: draftBandColor(band.className) }"
+                      :title="band.label"
+                    ></span>
+                  </div>
+                  <div class="meter-legend">
+                    <span>Requerida</span>
+                    <span>{{ selectedWagon.draftRequiredStrength }}</span>
+                    <span>Actual</span>
+                    <span>{{ selectedWagon.draftStrength }}</span>
+                  </div>
+                </div>
+
                 <dl class="stats draft-stats">
                   <div>
                     <dt>Máx. grandes</dt>
@@ -2539,29 +2960,12 @@ onMounted(refresh);
             <div class="alert-summary-grid">
               <div>
                 <span>Viajeros</span>
-                <strong>{{ wagonAlertsSummary.travelerCount + wagonAlertsSummary.travelerBeastCount }} / {{ wagonAlertsSummary.travelerCapacity }}</strong>
+                <strong>{{ formatSpace(wagonAlertsSummary.travelerCount + wagonAlertsSummary.travelerBeastSpace) }} / {{ wagonAlertsSummary.travelerCapacity }}</strong>
               </div>
               <div><span>Carga</span><strong>{{ wagonAlertsSummary.cargoLoad }} / {{ wagonAlertsSummary.cargoCapacity }}</strong></div>
+              <div><span>Carretero</span><strong>{{ wagonAlertsSummary.hasCarretero ? "Asignado" : "Pendiente" }}</strong></div>
               <div><span>Tiro</span><strong>{{ wagonAlertsSummary.draftStrength }} / {{ wagonAlertsSummary.draftRequirement?.minimumStrength ?? 0 }}</strong></div>
               <div><span>Velocidad</span><strong>{{ wagonAlertsSummary.speed }} mi/día</strong></div>
-            </div>
-          </section>
-
-          <section class="info-block">
-            <h3>Detalle de alertas</h3>
-            <div v-if="wagonAlertsSummary.alerts.length === 0" class="muted">
-              Este carro no tiene alertas activas.
-            </div>
-            <div v-else class="alerts-list">
-              <article
-                v-for="alert in wagonAlertsSummary.alerts"
-                :key="`${wagonAlertsSummary.wagon.id}-${alert.title}`"
-                class="alert-item"
-                :class="alert.kind"
-              >
-                <strong>{{ alert.title }}</strong>
-                <p>{{ alert.description }}</p>
-              </article>
             </div>
           </section>
 
@@ -2763,6 +3167,53 @@ onMounted(refresh);
         </div>
       </div>
 
+      <div v-if="healthModalOpen" class="modal-backdrop" @click.self="closeHealthModal">
+        <div class="modal modal-add">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">{{ healthModalMode === 'damage' ? 'Dañar carro' : 'Reparar carro' }}</p>
+              <h2>{{ healthModalMode === 'damage' ? 'Aplicar daño' : 'Reparar vida' }}</h2>
+              <p class="muted">
+                {{ healthModalMode === 'damage'
+                  ? 'La dureza se resta del daño salvo que marques la opción para ignorarla.'
+                  : 'La reparación no puede superar la vida máxima del carro.' }}
+              </p>
+            </div>
+            <button class="ghost-button" type="button" @click="closeHealthModal">Cerrar</button>
+          </div>
+
+          <p v-if="healthModalError" class="error">{{ healthModalError }}</p>
+
+          <div class="modal-form">
+            <label>
+              <span>{{ healthModalMode === 'damage' ? 'Daño a aplicar' : 'Vida a reparar' }}</span>
+              <input v-model="healthModalAmount" type="number" min="1" step="1" />
+            </label>
+
+            <label v-if="healthModalMode === 'damage'" class="checkbox-field">
+              <input v-model="healthModalIgnoreHardness" type="checkbox" />
+              <span>Ignorar dureza</span>
+            </label>
+          </div>
+
+          <div class="modal-actions">
+            <button
+              class="primary-button confirm-button"
+              type="button"
+              :disabled="loading || submitting || !selectedWagon"
+              :aria-busy="submitting"
+              @click="handleApplyHealthChange"
+            >
+              <span class="button-with-spinner">
+                <span v-if="isPending(`${healthModalMode}-wagon:${selectedWagon?.id}`)" class="button-spinner" aria-hidden="true"></span>
+                <span>{{ isPending(`${healthModalMode}-wagon:${selectedWagon?.id}`) ? 'Guardando…' : 'Guardar' }}</span>
+              </span>
+            </button>
+            <button class="ghost-button" type="button" @click="closeHealthModal">Cancelar</button>
+          </div>
+        </div>
+      </div>
+
       <div v-if="assignmentModalOpen" class="modal-backdrop" @click.self="closeAssignmentModal">
         <div class="modal modal-add">
           <div class="modal-header">
@@ -2811,7 +3262,7 @@ onMounted(refresh);
 
           <div v-else class="assignment-list">
             <div v-if="assignmentModalMode === 'beast-traveler' && availableTravelerBeastsForSelectedWagon.length === 0" class="muted">
-              No hay bestias sin asignar.
+              No hay bestias sin asignar que quepan en este carro.
             </div>
             <div v-if="assignmentModalMode === 'beast-draft' && availableDraftBeastsForSelectedWagon.length === 0" class="muted">
               No hay bestias válidas para el tiro de este carro.
@@ -3048,6 +3499,11 @@ p {
   gap: 1rem;
 }
 
+.section-header-summary {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .filters {
   display: grid;
   grid-template-columns: 220px 1fr;
@@ -3182,6 +3638,34 @@ p {
   min-width: 260px;
 }
 
+.capacity-meter,
+.health-meter {
+  position: relative;
+  overflow: hidden;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.capacity-meter-fill,
+.health-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.capacity-meter-fill--travelers {
+  background: linear-gradient(90deg, #bfdbfe, #3b82f6);
+}
+
+.capacity-meter-fill--cargo {
+  background: linear-gradient(90deg, #fde68a, #f59e0b);
+}
+
+.health-meter-fill {
+  background: linear-gradient(90deg, #86efac, #16a34a);
+}
+
 .draft-summary-line {
   margin: 0;
   font-size: 0.9rem;
@@ -3268,7 +3752,7 @@ p {
 
 .alert-summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
@@ -3617,7 +4101,16 @@ dd {
 .wagon-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
+
+.wagon-table colgroup col.wagon-col-name { width: 21%; }
+.wagon-table colgroup col.wagon-col-life { width: 13%; }
+.wagon-table colgroup col.wagon-col-dr { width: 8%; }
+.wagon-table colgroup col.wagon-col-travelers { width: 14%; }
+.wagon-table colgroup col.wagon-col-cargo { width: 14%; }
+.wagon-table colgroup col.wagon-col-draft { width: 24%; }
+.wagon-table colgroup col.wagon-col-alerts { width: 6%; }
 
 .wagon-table th,
 .wagon-table td {
@@ -3625,6 +4118,12 @@ dd {
   border-bottom: 1px solid #e5e7eb;
   text-align: left;
   vertical-align: top;
+}
+
+.wagon-table th:first-child,
+.wagon-table td:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wagon-table tbody tr {
@@ -3829,6 +4328,118 @@ dd {
   min-height: 3rem;
 }
 
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid #dbe3f0;
+  border-radius: 0.9rem;
+  background: #f8fafc;
+}
+
+.checkbox-field input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+}
+
+.health-summary {
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid #dbe3f0;
+  border-radius: 1rem;
+  background: #f8fafc;
+}
+
+.life-mini-button {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.75rem;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.life-mini-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.wagon-health-card {
+  gap: 0.85rem;
+}
+
+.wagon-health-controls {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.wagon-health-meter {
+  height: 2.5rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.85rem;
+  background: #fff;
+}
+
+.wagon-health-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.92rem;
+  color: #475569;
+}
+
+.wagon-health-values strong {
+  color: #111827;
+}
+
+.summary-meter-block {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.meter-strip {
+  display: flex;
+  overflow: hidden;
+  min-height: 0.9rem;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.meter-strip--strength {
+  min-height: 0.85rem;
+}
+
+.meter-segment {
+  display: block;
+  height: 100%;
+}
+
+.meter-legend {
+  display: grid;
+  grid-template-columns: auto auto auto auto auto auto;
+  gap: 0.45rem 0.75rem;
+  align-items: center;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.meter-legend span:nth-child(odd) {
+  color: #64748b;
+}
+
 .two-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4012,6 +4623,14 @@ dd {
 
   .filters {
     grid-template-columns: 1fr;
+  }
+
+  .wagon-health-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .wagon-health-values {
+    flex-direction: column;
   }
 
   .search-action-row {

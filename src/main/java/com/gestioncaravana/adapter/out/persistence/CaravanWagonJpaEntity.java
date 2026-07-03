@@ -26,6 +26,9 @@ public class CaravanWagonJpaEntity {
   @Column
   private String specificCommodity;
 
+  @Column
+  private Integer currentHitPoints;
+
   @Column(nullable = false)
   private Instant createdAt;
 
@@ -72,6 +75,14 @@ public class CaravanWagonJpaEntity {
 
   public void setSpecificCommodity(String specificCommodity) {
     this.specificCommodity = specificCommodity;
+  }
+
+  public Integer getCurrentHitPoints() {
+    return currentHitPoints;
+  }
+
+  public void setCurrentHitPoints(Integer currentHitPoints) {
+    this.currentHitPoints = currentHitPoints;
   }
 
   public Instant getCreatedAt() {

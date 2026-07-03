@@ -4,6 +4,7 @@ import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.domain.CaravanBeast;
 import com.gestioncaravana.domain.CaravanBeastAssignmentType;
 import com.gestioncaravana.domain.CaravanBeastSourceType;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -74,6 +75,7 @@ public class CaravanBeastRepositoryAdapter implements CaravanBeastRepositoryPort
     entity.setAssignedWagonId(beast.assignedWagonId() == null ? null : beast.assignedWagonId().toString());
     entity.setCreatedAt(beast.createdAt());
     entity.setUpdatedAt(beast.updatedAt());
+    entity.setOccupiedSpace(beast.occupiedSpace());
     return entity;
   }
 
@@ -97,6 +99,7 @@ public class CaravanBeastRepositoryAdapter implements CaravanBeastRepositoryPort
         CaravanBeastAssignmentType.valueOf(entity.getAssignmentType()),
         entity.getAssignedWagonId() == null ? null : UUID.fromString(entity.getAssignedWagonId()),
         entity.getCreatedAt(),
-        entity.getUpdatedAt());
+        entity.getUpdatedAt(),
+        entity.getOccupiedSpace() == null ? BigDecimal.ONE : entity.getOccupiedSpace());
   }
 }

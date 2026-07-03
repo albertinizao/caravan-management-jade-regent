@@ -6,6 +6,7 @@ export interface WagonCatalogItem {
   category: string;
   cost: number;
   hitPoints: number;
+  currentHitPoints: number | null;
   hardness: number;
   propulsion: string;
   travelerCapacity: number;
@@ -74,6 +75,7 @@ export interface CaravanWagon {
   category: string;
   cost: number;
   hitPoints: number;
+  currentHitPoints: number | null;
   hardness: number;
   propulsion: string;
   travelerCapacity: number;

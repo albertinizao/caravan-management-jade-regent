@@ -89,6 +89,29 @@ class TravelerManagementServiceTest {
   }
 
   @Test
+  void allowsZeroConsumptionForTravelers() {
+    var caravan = createCaravan();
+
+    var created = service.execute(
+        caravan.id(),
+        new AddCaravanTravelerCommand(
+            "Sin consumo",
+            null,
+            List.of("pasajero"),
+            List.of("pasajero"),
+            null,
+            1,
+            null,
+            null,
+            0,
+            null,
+            null,
+            null));
+
+    assertThat(created.consumption()).isZero();
+  }
+
+  @Test
   void createsCarreteroOnlyWhenItHasAValidWagon() {
     var caravan = createCaravan();
     var sleepingWagon = createWagon(caravan.id(), "carro-cubierto");

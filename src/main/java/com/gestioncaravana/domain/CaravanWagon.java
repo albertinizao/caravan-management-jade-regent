@@ -9,6 +9,7 @@ public record CaravanWagon(
     String wagonTypeCode,
     String displayName,
     String specificCommodity,
+    Integer currentHitPoints,
     Instant createdAt,
     Instant updatedAt) {
 
@@ -24,22 +25,40 @@ public record CaravanWagon(
     }
     displayName = normalize(displayName);
     specificCommodity = normalize(specificCommodity);
+    if (currentHitPoints != null && currentHitPoints < 0) {
+      throw new IllegalArgumentException("currentHitPoints must be greater than or equal to 0");
+    }
     if (createdAt == null || updatedAt == null) {
       throw new IllegalArgumentException("timestamps are required");
     }
   }
 
   public static CaravanWagon create(UUID id, UUID caravanId, String wagonTypeCode, String displayName, Instant now) {
-    return create(id, caravanId, wagonTypeCode, displayName, null, now);
+    return create(id, caravanId, wagonTypeCode, displayName, null, null, now);
   }
 
   public static CaravanWagon create(
       UUID id, UUID caravanId, String wagonTypeCode, String displayName, String specificCommodity, Instant now) {
-    return new CaravanWagon(id, caravanId, wagonTypeCode, displayName, specificCommodity, now, now);
+    return create(id, caravanId, wagonTypeCode, displayName, specificCommodity, null, now);
+  }
+
+  public static CaravanWagon create(
+      UUID id,
+      UUID caravanId,
+      String wagonTypeCode,
+      String displayName,
+      String specificCommodity,
+      Integer currentHitPoints,
+      Instant now) {
+    return new CaravanWagon(id, caravanId, wagonTypeCode, displayName, specificCommodity, currentHitPoints, now, now);
   }
 
   public CaravanWagon rename(String displayName, Instant now) {
-    return new CaravanWagon(id, caravanId, wagonTypeCode, displayName, specificCommodity, createdAt, now);
+    return new CaravanWagon(id, caravanId, wagonTypeCode, displayName, specificCommodity, currentHitPoints, createdAt, now);
+  }
+
+  public CaravanWagon withCurrentHitPoints(Integer currentHitPoints, Instant now) {
+    return new CaravanWagon(id, caravanId, wagonTypeCode, displayName, specificCommodity, currentHitPoints, createdAt, now);
   }
 
   public String displayNameOr(String fallback) {

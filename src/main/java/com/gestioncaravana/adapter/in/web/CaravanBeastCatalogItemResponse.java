@@ -1,5 +1,7 @@
 package com.gestioncaravana.adapter.in.web;
 
+import java.math.BigDecimal;
+
 public record CaravanBeastCatalogItemResponse(
     String code,
     String name,
@@ -12,4 +14,5 @@ public record CaravanBeastCatalogItemResponse(
     boolean fourLegged,
     String specialNote,
     String description,
-    String notes) {}
+    String notes,
+    BigDecimal occupiedSpace) {}

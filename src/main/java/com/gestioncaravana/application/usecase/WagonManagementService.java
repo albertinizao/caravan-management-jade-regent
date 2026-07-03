@@ -7,6 +7,7 @@ import com.gestioncaravana.application.model.WagonImprovementCatalogItemView;
 import com.gestioncaravana.application.model.WagonCatalogItemView;
 import com.gestioncaravana.application.port.in.AddCaravanWagonUseCase;
 import com.gestioncaravana.application.port.in.AddCaravanWagonImprovementUseCase;
+import com.gestioncaravana.application.port.in.DamageCaravanWagonUseCase;
 import com.gestioncaravana.application.port.in.DeleteCaravanWagonUseCase;
 import com.gestioncaravana.application.port.in.DeleteCaravanWagonImprovementUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanWagonUseCase;
@@ -15,6 +16,7 @@ import com.gestioncaravana.application.port.in.ListCaravanWagonsUseCase;
 import com.gestioncaravana.application.port.in.ListWagonImprovementCatalogUseCase;
 import com.gestioncaravana.application.port.in.ListWagonCatalogUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanWagonUseCase;
+import com.gestioncaravana.application.port.in.RepairCaravanWagonUseCase;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
@@ -51,8 +53,10 @@ public class WagonManagementService
         AddCaravanWagonUseCase,
         UpdateCaravanWagonUseCase,
         AddCaravanWagonImprovementUseCase,
+        DamageCaravanWagonUseCase,
         DeleteCaravanWagonImprovementUseCase,
-        DeleteCaravanWagonUseCase {
+        DeleteCaravanWagonUseCase,
+        RepairCaravanWagonUseCase {
 
   private final CaravanCampaignRepositoryPort caravanRepository;
   private final CaravanWagonRepositoryPort wagonRepository;
@@ -158,7 +162,14 @@ public class WagonManagementService
     }
 
     var now = clock.instant();
-    var wagon = CaravanWagon.create(UUID.randomUUID(), caravanId, wagonType.code(), command.displayName(), specificCommodity, now);
+    var wagon = CaravanWagon.create(
+        UUID.randomUUID(),
+        caravanId,
+        wagonType.code(),
+        command.displayName(),
+        specificCommodity,
+        wagonType.hitPoints(),
+        now);
     return toView(wagonRepository.save(wagon), List.of());
   }
 
@@ -182,13 +193,15 @@ public class WagonManagementService
     validateImprovementAddition(wagonType, improvementType, existing);
     var now = clock.instant();
     improvementRepository.save(CaravanWagonImprovement.create(UUID.randomUUID(), caravanId, wagonId, improvementType.code(), now));
-    return toView(wagon, improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagonId));
+    return toView(clampWagonHealthToDerivedMax(wagon, wagonType, wagonId, caravanId), improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagonId));
   }
 
   @Override
   public CaravanWagonView execute(UUID caravanId, UUID wagonId, UUID improvementId) {
     requireCaravan(caravanId);
     var wagon = requireWagon(caravanId, wagonId);
+    var wagonType = WagonCatalog.findByCode(wagon.wagonTypeCode())
+        .orElseThrow(() -> new IllegalStateException("Unknown wagon catalog entry: " + wagon.wagonTypeCode()));
     var improvements = improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagonId);
     var target = improvements.stream()
         .filter(improvement -> improvement.id().equals(improvementId))
@@ -196,7 +209,36 @@ public class WagonManagementService
         .orElseThrow(() -> new IllegalArgumentException("Improvement not found: " + improvementId));
     validateImprovementRemoval(target, improvements);
     improvementRepository.deleteById(caravanId, wagonId, improvementId);
-    return toView(wagon, improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagonId));
+    return toView(clampWagonHealthToDerivedMax(wagon, wagonType, wagonId, caravanId), improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagonId));
+  }
+
+  @Override
+  public CaravanWagonView execute(UUID caravanId, UUID wagonId, DamageCaravanWagonCommand command) {
+    requireCaravan(caravanId);
+    var wagon = requireWagon(caravanId, wagonId);
+    var wagonType = WagonCatalog.findByCode(wagon.wagonTypeCode())
+        .orElseThrow(() -> new IllegalStateException("Unknown wagon catalog entry: " + wagon.wagonTypeCode()));
+    var improvements = improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagonId);
+    var derived = deriveWagonStats(wagonType, improvements);
+    var currentHitPoints = resolveCurrentHitPoints(wagon, derived.hitPoints());
+    var effectiveDamage = Math.max(0, command.damageAmount() - (command.ignoreHardness() ? 0 : derived.hardness()));
+    var updatedHitPoints = Math.max(0, currentHitPoints - effectiveDamage);
+    var updated = wagon.withCurrentHitPoints(updatedHitPoints, clock.instant());
+    return toView(wagonRepository.save(updated), improvements);
+  }
+
+  @Override
+  public CaravanWagonView execute(UUID caravanId, UUID wagonId, RepairCaravanWagonCommand command) {
+    requireCaravan(caravanId);
+    var wagon = requireWagon(caravanId, wagonId);
+    var wagonType = WagonCatalog.findByCode(wagon.wagonTypeCode())
+        .orElseThrow(() -> new IllegalStateException("Unknown wagon catalog entry: " + wagon.wagonTypeCode()));
+    var improvements = improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagonId);
+    var derived = deriveWagonStats(wagonType, improvements);
+    var currentHitPoints = resolveCurrentHitPoints(wagon, derived.hitPoints());
+    var updatedHitPoints = Math.min(derived.hitPoints(), currentHitPoints + Math.max(0, command.repairAmount()));
+    var updated = wagon.withCurrentHitPoints(updatedHitPoints, clock.instant());
+    return toView(wagonRepository.save(updated), improvements);
   }
 
   @Override
@@ -317,6 +359,7 @@ public class WagonManagementService
     var wagonType = WagonCatalog.findByCode(wagon.wagonTypeCode())
         .orElseThrow(() -> new IllegalStateException("Unknown wagon catalog entry: " + wagon.wagonTypeCode()));
     var derived = deriveWagonStats(wagonType, improvements);
+    var currentHitPoints = resolveCurrentHitPoints(wagon, derived.hitPoints());
     var draftBeasts = draftBeasts(wagon.caravanId(), wagon.id());
     var draftStrength = draftBeasts.stream().mapToInt(this::effectiveDraftStrength).sum();
     var carretero = travelerRepository.findAllByCaravanId(wagon.caravanId()).stream()
@@ -333,6 +376,7 @@ public class WagonManagementService
         wagonType.category(),
         derived.cost(),
         derived.hitPoints(),
+        currentHitPoints,
         derived.hardness(),
         derived.propulsion(),
         derived.travelerCapacity(),
@@ -490,6 +534,25 @@ public class WagonManagementService
 
   private int roundStat(double value) {
     return (int) Math.round(value);
+  }
+
+  private int resolveCurrentHitPoints(CaravanWagon wagon, int maxHitPoints) {
+    if (wagon.currentHitPoints() == null) {
+      return maxHitPoints;
+    }
+
+    return Math.min(maxHitPoints, Math.max(0, wagon.currentHitPoints()));
+  }
+
+  private CaravanWagon clampWagonHealthToDerivedMax(CaravanWagon wagon, WagonType wagonType, UUID wagonId, UUID caravanId) {
+    var improvements = improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagonId);
+    var derived = deriveWagonStats(wagonType, improvements);
+    var currentHitPoints = wagon.currentHitPoints();
+    if (currentHitPoints == null || currentHitPoints <= derived.hitPoints()) {
+      return wagon;
+    }
+
+    return wagon.withCurrentHitPoints(derived.hitPoints(), clock.instant());
   }
 
   private String calculateImprovementBlockedReason(

@@ -19,6 +19,7 @@ import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
 import com.gestioncaravana.domain.CaravanWagonImprovement;
 import com.gestioncaravana.domain.TravelerRoleData;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -117,6 +118,55 @@ class BeastManagementServiceTest {
     assertThat(service.list(caravan.id(), null, "catalog", "draft", draftWagon.id())).hasSize(1);
     assertThat(service.list(caravan.id(), "mula", "custom", "traveler", travelerWagon.id())).hasSize(1);
     assertThat(service.getById(caravan.id(), catalogBeast.id()).assignedWagonName()).isEqualTo("Carro Escuela");
+  }
+
+  @Test
+  void rejectsTravelerAssignmentsWhenOccupiedSpaceWouldExceedCapacity() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id(), "carro-cubierto");
+    for (var index = 0; index < 7; index++) {
+      travelerRepository.save(CaravanTraveler.create(
+          UUID.randomUUID(),
+          caravan.id(),
+          "Traveler " + index,
+          null,
+          List.of("pasajero"),
+          List.of("pasajero"),
+          null,
+          1,
+          TravelerRoleData.empty(),
+          wagon.id(),
+          null,
+          1,
+          NOW));
+    }
+
+    var heavyBeast = service.execute(
+        caravan.id(),
+        new AddCaravanBeastCommand(
+            CaravanBeastSourceType.CUSTOM,
+            null,
+            "Bestia pesada",
+            "G",
+            2,
+            30,
+            null,
+            null,
+            null,
+            true,
+            "Ninguno",
+            "Bestia personalizada",
+            null,
+            BigDecimal.valueOf(2)));
+
+    assertThat(heavyBeast.occupiedSpace()).isEqualByComparingTo("2");
+
+    assertThatThrownBy(() -> service.execute(
+        caravan.id(),
+        heavyBeast.id(),
+        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.TRAVELER, wagon.id())))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Wagon capacity reached");
   }
 
   @Test

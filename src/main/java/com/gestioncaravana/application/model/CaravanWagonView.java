@@ -13,6 +13,7 @@ public record CaravanWagonView(
     String category,
     int cost,
     int hitPoints,
+    Integer currentHitPoints,
     int hardness,
     String propulsion,
     int travelerCapacity,

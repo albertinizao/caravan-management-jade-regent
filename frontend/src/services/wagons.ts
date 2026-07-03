@@ -16,6 +16,15 @@ export interface UpdateCaravanWagonPayload {
   displayName?: string | null;
 }
 
+export interface DamageCaravanWagonPayload {
+  damageAmount: number;
+  ignoreHardness: boolean;
+}
+
+export interface RepairCaravanWagonPayload {
+  repairAmount: number;
+}
+
 export interface AddCaravanWagonImprovementPayload {
   improvementTypeCode: string;
 }
@@ -58,6 +67,28 @@ export function updateCaravanWagon(
 ) {
   return fetchJson<CaravanWagon>(`/caravans/${caravanId}/wagons/${wagonId}`, {
     method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function damageCaravanWagon(
+  caravanId: string,
+  wagonId: string,
+  payload: DamageCaravanWagonPayload,
+) {
+  return fetchJson<CaravanWagon>(`/caravans/${caravanId}/wagons/${wagonId}/damage`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function repairCaravanWagon(
+  caravanId: string,
+  wagonId: string,
+  payload: RepairCaravanWagonPayload,
+) {
+  return fetchJson<CaravanWagon>(`/caravans/${caravanId}/wagons/${wagonId}/repair`, {
+    method: "POST",
     body: JSON.stringify(payload),
   });
 }

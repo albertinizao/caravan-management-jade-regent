@@ -20,6 +20,7 @@ public interface UpdateCaravanTravelerUseCase {
       BigDecimal salary,
       String contractConditions,
       Integer consumption,
+      BigDecimal occupiedSpace,
       UUID servedTravelerId) {
     public UpdateCaravanTravelerCommand(
         String fullName,
@@ -32,6 +33,7 @@ public interface UpdateCaravanTravelerUseCase {
         BigDecimal salary,
         String contractConditions,
         Integer consumption,
+        BigDecimal occupiedSpace,
         UUID servedTravelerId) {
       this(
           fullName,
@@ -45,6 +47,7 @@ public interface UpdateCaravanTravelerUseCase {
           salary,
           contractConditions,
           consumption,
+          occupiedSpace,
           servedTravelerId);
     }
   }

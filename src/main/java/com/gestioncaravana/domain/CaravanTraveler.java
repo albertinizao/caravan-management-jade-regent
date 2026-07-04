@@ -1,5 +1,6 @@
 package com.gestioncaravana.domain;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -18,8 +19,44 @@ public record CaravanTraveler(
     UUID drivingWagonId,
     TravelerContract contract,
     int consumption,
+    BigDecimal occupiedSpace,
     Instant createdAt,
     Instant updatedAt) {
+
+  public CaravanTraveler(
+      UUID id,
+      UUID caravanId,
+      String fullName,
+      String description,
+      List<String> availableRoleCodes,
+      List<String> activeRoleCodes,
+      String activeRoleCode,
+      int maxActiveRoleCount,
+      TravelerRoleData roleSpecificData,
+      UUID wagonId,
+      TravelerContract contract,
+      int consumption,
+      BigDecimal occupiedSpace,
+      Instant createdAt,
+      Instant updatedAt) {
+    this(
+        id,
+        caravanId,
+        fullName,
+        description,
+        availableRoleCodes,
+        activeRoleCodes,
+        activeRoleCode,
+        maxActiveRoleCount,
+        roleSpecificData,
+        wagonId,
+        null,
+        contract,
+        consumption,
+        occupiedSpace,
+        createdAt,
+        updatedAt);
+  }
 
   public CaravanTraveler(
       UUID id,
@@ -50,6 +87,42 @@ public record CaravanTraveler(
         null,
         contract,
         consumption,
+        BigDecimal.ONE,
+        createdAt,
+        updatedAt);
+  }
+
+  public CaravanTraveler(
+      UUID id,
+      UUID caravanId,
+      String fullName,
+      String description,
+      List<String> availableRoleCodes,
+      List<String> activeRoleCodes,
+      String activeRoleCode,
+      int maxActiveRoleCount,
+      TravelerRoleData roleSpecificData,
+      UUID wagonId,
+      UUID drivingWagonId,
+      TravelerContract contract,
+      int consumption,
+      Instant createdAt,
+      Instant updatedAt) {
+    this(
+        id,
+        caravanId,
+        fullName,
+        description,
+        availableRoleCodes,
+        activeRoleCodes,
+        activeRoleCode,
+        maxActiveRoleCount,
+        roleSpecificData,
+        wagonId,
+        drivingWagonId,
+        contract,
+        consumption,
+        BigDecimal.ONE,
         createdAt,
         updatedAt);
   }
@@ -78,6 +151,18 @@ public record CaravanTraveler(
     }
     if (consumption < 0) {
       throw new IllegalArgumentException("consumption must be greater than or equal to 0");
+    }
+    if (occupiedSpace == null) {
+      throw new IllegalArgumentException("occupiedSpace is required");
+    }
+    if (occupiedSpace.compareTo(BigDecimal.ZERO) < 0) {
+      throw new IllegalArgumentException("occupiedSpace must be greater than or equal to 0");
+    }
+    if (occupiedSpace.compareTo(BigDecimal.valueOf(4)) > 0) {
+      throw new IllegalArgumentException("occupiedSpace must be less than or equal to 4");
+    }
+    if (occupiedSpace.multiply(BigDecimal.valueOf(2)).stripTrailingZeros().scale() > 0) {
+      throw new IllegalArgumentException("occupiedSpace must use 0.5 increments");
     }
     if (createdAt == null || updatedAt == null) {
       throw new IllegalArgumentException("timestamps are required");
@@ -130,6 +215,7 @@ public record CaravanTraveler(
       UUID drivingWagonId,
       TravelerContract contract,
       int consumption,
+      BigDecimal occupiedSpace,
       Instant now) {
     var normalizedRoles = availableRoleCodes.stream().map(String::trim).filter(code -> !code.isBlank()).distinct().toList();
     if (normalizedRoles.isEmpty()) {
@@ -160,7 +246,41 @@ public record CaravanTraveler(
         drivingWagonId,
         contract,
         consumption,
+        occupiedSpace == null ? BigDecimal.ONE : occupiedSpace,
         now,
+        now);
+  }
+
+  public static CaravanTraveler create(
+      UUID id,
+      UUID caravanId,
+      String fullName,
+      String description,
+      List<String> availableRoleCodes,
+      List<String> activeRoleCodes,
+      String activeRoleCode,
+      int maxActiveRoleCount,
+      TravelerRoleData roleSpecificData,
+      UUID wagonId,
+      UUID drivingWagonId,
+      TravelerContract contract,
+      int consumption,
+      Instant now) {
+    return create(
+        id,
+        caravanId,
+        fullName,
+        description,
+        availableRoleCodes,
+        activeRoleCodes,
+        activeRoleCode,
+        maxActiveRoleCount,
+        roleSpecificData,
+        wagonId,
+        drivingWagonId,
+        contract,
+        consumption,
+        BigDecimal.ONE,
         now);
   }
 
@@ -192,6 +312,7 @@ public record CaravanTraveler(
         null,
         contract,
         consumption,
+        BigDecimal.ONE,
         now);
   }
 
@@ -210,6 +331,7 @@ public record CaravanTraveler(
         drivingWagonId,
         contract,
         consumption,
+        occupiedSpace,
         createdAt,
         now);
   }
@@ -229,6 +351,7 @@ public record CaravanTraveler(
         drivingWagonId,
         contract,
         consumption,
+        occupiedSpace,
         createdAt,
         now);
   }
@@ -248,6 +371,7 @@ public record CaravanTraveler(
         drivingWagonId,
         contract,
         consumption,
+        occupiedSpace,
         createdAt,
         now);
   }
@@ -275,6 +399,7 @@ public record CaravanTraveler(
         drivingWagonId,
         contract,
         consumption,
+        occupiedSpace,
         createdAt,
         now);
   }
@@ -300,6 +425,7 @@ public record CaravanTraveler(
       UUID drivingWagonId,
       TravelerContract contract,
       int consumption,
+      BigDecimal occupiedSpace,
       Instant now) {
     var normalizedAvailableRoles = availableRoleCodes == null
         ? this.availableRoleCodes
@@ -334,6 +460,7 @@ public record CaravanTraveler(
         drivingWagonId,
         contract,
         consumption,
+        occupiedSpace,
         createdAt,
         now);
   }
@@ -362,6 +489,7 @@ public record CaravanTraveler(
         drivingWagonId,
         contract,
         consumption,
+        this.occupiedSpace,
         now);
   }
 

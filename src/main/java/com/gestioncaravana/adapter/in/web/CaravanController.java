@@ -442,6 +442,7 @@ public class CaravanController {
             request.salary(),
             request.contractConditions(),
             request.consumption(),
+            request.occupiedSpace(),
             request.wagonId(),
             request.drivingWagonId(),
             request.servedTravelerId()));
@@ -475,6 +476,7 @@ public class CaravanController {
                 request.salary(),
                 request.contractConditions(),
                 request.consumption(),
+                request.occupiedSpace(),
                 request.servedTravelerId())));
   }
 

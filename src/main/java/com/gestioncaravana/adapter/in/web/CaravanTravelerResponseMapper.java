@@ -25,6 +25,7 @@ final class CaravanTravelerResponseMapper {
         view.salary(),
         view.contractConditions(),
         view.consumption(),
+        view.occupiedSpace(),
         view.servedTravelerId(),
         view.servedTravelerName(),
         view.createdAt(),

@@ -65,6 +65,7 @@ public class CaravanTravelerRepositoryAdapter implements CaravanTravelerReposito
     entity.setSalary(traveler.contract() == null ? null : traveler.contract().salary());
     entity.setContractConditions(traveler.contract() == null ? null : traveler.contract().conditions());
     entity.setConsumption(traveler.consumption());
+    entity.setOccupiedSpace(traveler.occupiedSpace());
     entity.setGeneratingFood(traveler.roleSpecificData() != null && traveler.roleSpecificData().generatingFood());
     entity.setDaysServing(traveler.roleSpecificData() == null ? 0 : traveler.roleSpecificData().daysServing());
     entity.setCreatedAt(traveler.createdAt());
@@ -109,6 +110,7 @@ public class CaravanTravelerRepositoryAdapter implements CaravanTravelerReposito
             ? null
             : new TravelerContract(entity.getSalary(), normalize(entity.getContractConditions()), entity.getCreatedAt(), null),
         entity.getConsumption(),
+        entity.getOccupiedSpace() == null ? java.math.BigDecimal.ONE : entity.getOccupiedSpace(),
         entity.getCreatedAt(),
         entity.getUpdatedAt());
   }

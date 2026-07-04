@@ -75,6 +75,14 @@ const visibleContributions = computed(() =>
   caravanStatistics.value?.contributions.filter((item) => !hiddenContributionStats.has(item.statCode)) ?? [],
 );
 
+function percentageOf(value: number, max: number) {
+  if (max <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, (value / max) * 100));
+}
+
 function isPending(action: string) {
   return pendingAction.value === action;
 }
@@ -354,9 +362,25 @@ onMounted(refresh);
                 <dt>Nivel</dt>
                 <dd>{{ selectedCaravan.level }}</dd>
               </div>
-              <div>
+              <div class="stat-with-meter">
                 <dt>Descontento</dt>
                 <dd>{{ selectedCaravan.discontent }}</dd>
+                <div class="summary-meter-block">
+                  <div
+                    class="meter-strip"
+                    :aria-label="`Descontento ${selectedCaravan.discontent} de ${caravanStatistics?.moraleThreshold ?? 0}`"
+                    :title="`Descontento ${selectedCaravan.discontent} de ${caravanStatistics?.moraleThreshold ?? 0}`"
+                  >
+                    <span
+                      class="meter-segment meter-segment--discontent"
+                      :style="{ width: `${percentageOf(selectedCaravan.discontent, caravanStatistics?.moraleThreshold ?? 0)}%` }"
+                    ></span>
+                  </div>
+                  <div class="meter-values">
+                    <span><strong>{{ selectedCaravan.discontent }}</strong> descontento actual</span>
+                    <span><strong>{{ caravanStatistics?.moraleThreshold ?? 0 }}</strong> umbral de motín</span>
+                  </div>
+                </div>
               </div>
               <div>
                 <dt>Ofensiva</dt>
@@ -404,31 +428,19 @@ onMounted(refresh);
               </section>
 
               <section>
-                <h3>Otros atributos</h3>
+                <h3>Estadísticas de la caravana</h3>
                 <dl class="stats stats-3">
                   <div>
                     <dt>Velocidad</dt>
                     <dd>{{ caravanStatistics.otherStats.speed }} mi/día</dd>
                   </div>
                   <div>
-                    <dt>Viajeros</dt>
-                    <dd>{{ caravanStatistics.otherStats.travelerCount }} / {{ caravanStatistics.otherStats.travelerCapacity }}</dd>
-                  </div>
-                  <div>
-                    <dt>Carros</dt>
-                    <dd>{{ caravanStatistics.otherStats.wagonCount }} / {{ caravanStatistics.otherStats.maxWagons }}</dd>
-                  </div>
-                  <div>
-                    <dt>Cargamento</dt>
-                    <dd>{{ caravanStatistics.otherStats.cargoLoad }} / {{ caravanStatistics.otherStats.cargoCapacity }}</dd>
-                  </div>
-                  <div>
-                    <dt>Consumo</dt>
+                    <dt>Consumo total</dt>
                     <dd>{{ caravanStatistics.otherStats.consumption }}</dd>
                   </div>
                   <div>
-                    <dt>Bestias</dt>
-                    <dd>{{ caravanStatistics.otherStats.beastCount }}</dd>
+                    <dt>Dotes</dt>
+                    <dd>{{ selectedCaravan.feats.length }}</dd>
                   </div>
                 </dl>
               </section>
@@ -438,6 +450,22 @@ onMounted(refresh);
                 <p :class="['warning-banner', { danger: caravanStatistics.discontent >= caravanStatistics.moraleThreshold }]">
                   Descontento: {{ caravanStatistics.discontent }} · Umbral de motín: {{ caravanStatistics.moraleThreshold }}
                 </p>
+                <div class="summary-meter-block">
+                  <div
+                    class="meter-strip"
+                    :aria-label="`Descontento ${caravanStatistics.discontent} de ${caravanStatistics.moraleThreshold}`"
+                    :title="`Descontento ${caravanStatistics.discontent} de ${caravanStatistics.moraleThreshold}`"
+                  >
+                    <span
+                      class="meter-segment meter-segment--discontent"
+                      :style="{ width: `${percentageOf(caravanStatistics.discontent, caravanStatistics.moraleThreshold)}%` }"
+                    ></span>
+                  </div>
+                  <div class="meter-values">
+                    <span><strong>{{ caravanStatistics.discontent }}</strong> descontento actual</span>
+                    <span><strong>{{ caravanStatistics.moraleThreshold }}</strong> umbral de motín</span>
+                  </div>
+                </div>
                 <p v-if="caravanStatistics.warnings.length > 0" class="muted">
                   {{ caravanStatistics.warnings.join(" ") }}
                 </p>
@@ -890,6 +918,11 @@ textarea {
   background: #f9fafb;
 }
 
+.stat-with-meter {
+  display: grid;
+  gap: 0.45rem;
+}
+
 dt {
   font-size: 0.8rem;
   color: #6b7280;
@@ -919,6 +952,41 @@ dd {
   color: #1d4ed8;
   text-decoration: none;
   font-weight: 600;
+}
+
+.summary-meter-block {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.meter-strip {
+  display: flex;
+  overflow: hidden;
+  min-height: 0.9rem;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.meter-segment {
+  display: block;
+  height: 100%;
+}
+
+.meter-segment--discontent {
+  background: linear-gradient(90deg, #fca5a5, #ef4444);
+}
+
+.meter-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: #475569;
+}
+
+.meter-values strong {
+  color: #111827;
 }
 
 .list {

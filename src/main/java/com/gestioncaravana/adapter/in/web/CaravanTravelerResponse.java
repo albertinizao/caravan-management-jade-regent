@@ -22,6 +22,7 @@ public record CaravanTravelerResponse(
     BigDecimal salary,
     String contractConditions,
     int consumption,
+    BigDecimal occupiedSpace,
     UUID servedTravelerId,
     String servedTravelerName,
     Instant createdAt,

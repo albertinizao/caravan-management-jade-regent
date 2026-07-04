@@ -47,6 +47,7 @@ const selectedRoleTargetTravelerId = ref("");
 const selectedSalary = ref("");
 const selectedContractConditions = ref("");
 const selectedConsumption = ref("1");
+const selectedOccupiedSpace = ref("1");
 const createModalOpen = ref(false);
 const createModalError = ref<string | null>(null);
 const createFullName = ref("");
@@ -57,6 +58,7 @@ const createMaxActiveRoleCount = ref(1);
 const createSalary = ref("");
 const createContractConditions = ref("");
 const createConsumption = ref("1");
+const createOccupiedSpace = ref("1");
 const createWagonId = ref("");
 const createDrivingWagonId = ref("");
 const createServedTravelerId = ref("");
@@ -98,6 +100,7 @@ function syncSelectedTravelerDraft(traveler: CaravanTraveler) {
   selectedSalary.value = traveler.salary === null ? "" : String(traveler.salary);
   selectedContractConditions.value = traveler.contractConditions ?? "";
   selectedConsumption.value = String(traveler.consumption);
+  selectedOccupiedSpace.value = String(traveler.occupiedSpace);
 }
 
 const visibleTravelers = computed(() => {
@@ -143,9 +146,11 @@ function selectedTravelerWagonCapacity(wagonId: string, excludedTravelerId?: str
     return 0;
   }
 
-  const travelerCount = travelers.value.filter((traveler) => traveler.wagonId === wagonId && traveler.id !== excludedTravelerId).length;
+  const travelerSpace = travelers.value
+    .filter((traveler) => traveler.wagonId === wagonId && traveler.id !== excludedTravelerId)
+    .reduce((total, traveler) => total + traveler.occupiedSpace, 0);
   const beastCount = beasts.value.filter((beast) => beast.assignmentType === "TRAVELER" && beast.assignedWagonId === wagonId).length;
-  return Math.max(0, wagon.travelerCapacity - travelerCount - beastCount);
+  return Math.max(0, wagon.travelerCapacity - travelerSpace - beastCount);
 }
 
 function wagonHasAnotherCarretero(wagonId: string, excludedTravelerId?: string | null) {
@@ -324,6 +329,7 @@ async function refresh() {
       selectedSalary.value = "";
       selectedContractConditions.value = "";
       selectedConsumption.value = "1";
+      selectedOccupiedSpace.value = "1";
     }
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to load travelers";
@@ -344,6 +350,7 @@ function openCreateModal() {
   createSalary.value = "";
   createContractConditions.value = "";
   createConsumption.value = "1";
+  createOccupiedSpace.value = "1";
   createWagonId.value = "";
   createDrivingWagonId.value = "";
   createServedTravelerId.value = "";
@@ -408,8 +415,10 @@ async function handleCreateTraveler() {
   try {
     const salaryText = String(createSalary.value).trim().replace(",", ".");
     const consumptionText = String(createConsumption.value).trim();
+    const occupiedSpaceText = String(createOccupiedSpace.value).trim().replace(",", ".");
     const parsedSalary = salaryText ? Number(salaryText) : null;
     const parsedConsumption = consumptionText ? Number(consumptionText) : 1;
+    const parsedOccupiedSpace = occupiedSpaceText ? Number(occupiedSpaceText) : 1;
 
     if (parsedSalary !== null && Number.isNaN(parsedSalary)) {
       throw new Error("El sueldo debe ser un número válido");
@@ -419,6 +428,9 @@ async function handleCreateTraveler() {
     }
     if (Number.isNaN(parsedConsumption) || parsedConsumption < 0) {
       throw new Error("El consumo debe ser un número mayor o igual a 0");
+    }
+    if (Number.isNaN(parsedOccupiedSpace) || parsedOccupiedSpace < 0 || parsedOccupiedSpace > 4 || !Number.isInteger(parsedOccupiedSpace * 2)) {
+      throw new Error("El espacio ocupado debe ir de 0 a 4 en incrementos de 0.5");
     }
 
     await addCaravanTraveler(activeCaravan.value.id, {
@@ -433,6 +445,7 @@ async function handleCreateTraveler() {
       salary: parsedSalary,
       contractConditions: createContractConditions.value.trim() || null,
       consumption: parsedConsumption,
+      occupiedSpace: parsedOccupiedSpace,
       wagonId: createWagonId.value || null,
       drivingWagonId: createDrivingWagonId.value || null,
       servedTravelerId: createServedTravelerId.value || null,
@@ -479,6 +492,7 @@ function closeTraveler() {
   selectedSalary.value = "";
   selectedContractConditions.value = "";
   selectedConsumption.value = "1";
+  selectedOccupiedSpace.value = "1";
 }
 
 function enterEditMode() {
@@ -585,8 +599,10 @@ async function handleSaveTravelerChanges() {
 
   const salaryText = String(selectedSalary.value).trim().replace(",", ".");
   const consumptionText = String(selectedConsumption.value).trim();
+  const occupiedSpaceText = String(selectedOccupiedSpace.value).trim().replace(",", ".");
   const parsedSalary = salaryText ? Number(salaryText) : null;
   const parsedConsumption = consumptionText ? Number(consumptionText) : selectedTraveler.value.consumption;
+  const parsedOccupiedSpace = occupiedSpaceText ? Number(occupiedSpaceText) : selectedTraveler.value.occupiedSpace;
 
   if (parsedSalary !== null && Number.isNaN(parsedSalary)) {
     selectedModalError.value = "El sueldo debe ser un número válido";
@@ -598,6 +614,10 @@ async function handleSaveTravelerChanges() {
   }
   if (Number.isNaN(parsedConsumption) || parsedConsumption < 0) {
     selectedModalError.value = "El consumo debe ser un número mayor o igual a 0";
+    return;
+  }
+  if (Number.isNaN(parsedOccupiedSpace) || parsedOccupiedSpace < 0 || parsedOccupiedSpace > 4 || !Number.isInteger(parsedOccupiedSpace * 2)) {
+    selectedModalError.value = "El espacio ocupado debe ir de 0 a 4 en incrementos de 0.5";
     return;
   }
 
@@ -620,6 +640,7 @@ async function handleSaveTravelerChanges() {
       salary: parsedSalary,
       contractConditions: selectedContractConditions.value.trim() || null,
       consumption: parsedConsumption,
+      occupiedSpace: parsedOccupiedSpace,
       servedTravelerId: targetRole?.requiresTargetTraveler ? selectedRoleTargetTravelerId.value : null,
     });
     selectedTraveler.value = updated;
@@ -975,10 +996,11 @@ onMounted(refresh);
                   <dt>Roles posibles</dt>
                   <dd>{{ roleSummary(selectedTraveler.availableRoleCodes) }}</dd>
                 </div>
-                <div><dt>Carro de viaje</dt><dd>{{ selectedTraveler.wagonName ?? "Sin carro" }}</dd></div>
-                <div><dt>Carro que conduce</dt><dd>{{ selectedTraveler.drivingWagonName ?? "Sin carro de conducción" }}</dd></div>
-                <div><dt>Consumo</dt><dd>{{ selectedTraveler.consumption }}</dd></div>
-              </dl>
+                  <div><dt>Carro de viaje</dt><dd>{{ selectedTraveler.wagonName ?? "Sin carro" }}</dd></div>
+                  <div><dt>Carro que conduce</dt><dd>{{ selectedTraveler.drivingWagonName ?? "Sin carro de conducción" }}</dd></div>
+                  <div><dt>Consumo</dt><dd>{{ selectedTraveler.consumption }}</dd></div>
+                  <div><dt>Espacio ocupado</dt><dd>{{ selectedTraveler.occupiedSpace }}</dd></div>
+                </dl>
               <p v-if="selectedTraveler.servedTravelerName" class="muted">
                 Sirve a <strong>{{ selectedTraveler.servedTravelerName }}</strong>
               </p>
@@ -1125,10 +1147,10 @@ onMounted(refresh);
                   <input v-model="selectedConsumption" type="number" min="0" />
                 </label>
 
-                <div class="role-limit-summary">
-                  <span>Roles simultáneos máximos</span>
-                  <strong>{{ selectedMaxActiveRoleCount }}</strong>
-                </div>
+                <label>
+                  <span>Espacio ocupado</span>
+                  <input v-model="selectedOccupiedSpace" type="number" min="0" max="4" step="0.5" />
+                </label>
               </div>
 
               <label>
@@ -1245,11 +1267,6 @@ onMounted(refresh);
                   </option>
                 </select>
                 </label>
-
-                <div class="role-limit-summary">
-                  <span>Roles simultáneos máximos</span>
-                  <strong>{{ createMaxActiveRoleCount }}</strong>
-                </div>
               </div>
 
               <label>
@@ -1274,7 +1291,7 @@ onMounted(refresh);
                 <small class="muted">{{ createDrivingWagonHelperText }}</small>
               </label>
 
-              <div class="two-columns">
+              <div class="three-columns">
                 <label>
                   <span>Sueldo</span>
                 <input
@@ -1290,6 +1307,11 @@ onMounted(refresh);
               <label>
                 <span>Consumo</span>
                 <input v-model="createConsumption" type="number" min="0" />
+              </label>
+
+              <label>
+                <span>Espacio ocupado</span>
+                <input v-model="createOccupiedSpace" type="number" min="0" max="4" step="0.5" placeholder="1" />
               </label>
             </div>
 
@@ -1665,13 +1687,6 @@ dd {
   gap: 0.6rem;
 }
 
-.role-limit-summary {
-  display: grid;
-  gap: 0.35rem;
-  align-content: start;
-}
-
-.role-limit-summary strong,
 .role-limit-controls strong {
   font-size: 1.05rem;
 }
@@ -1772,6 +1787,12 @@ dd {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.three-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -1782,7 +1803,8 @@ dd {
   .filters,
   .detail-grid,
   .editor-grid,
-  .two-columns {
+  .two-columns,
+  .three-columns {
     grid-template-columns: 1fr;
   }
 
@@ -1808,6 +1830,7 @@ dd {
   .detail-grid,
   .editor-grid,
   .two-columns,
+  .three-columns,
   .role-checkbox-grid,
   .role-toggle-grid {
     grid-template-columns: 1fr;

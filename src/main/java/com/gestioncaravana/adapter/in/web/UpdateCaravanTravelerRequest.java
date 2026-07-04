@@ -17,4 +17,5 @@ public record UpdateCaravanTravelerRequest(
     BigDecimal salary,
     String contractConditions,
     Integer consumption,
+    BigDecimal occupiedSpace,
     UUID servedTravelerId) {}

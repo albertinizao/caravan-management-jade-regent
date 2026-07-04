@@ -57,6 +57,9 @@ public class CaravanTravelerJpaEntity {
   @Column(nullable = false)
   private int consumption;
 
+  @Column(precision = 4, scale = 1)
+  private BigDecimal occupiedSpace = BigDecimal.ONE;
+
   @Column(nullable = false)
   private Boolean generatingFood = Boolean.FALSE;
 
@@ -186,6 +189,14 @@ public class CaravanTravelerJpaEntity {
 
   public void setConsumption(int consumption) {
     this.consumption = consumption;
+  }
+
+  public BigDecimal getOccupiedSpace() {
+    return occupiedSpace;
+  }
+
+  public void setOccupiedSpace(BigDecimal occupiedSpace) {
+    this.occupiedSpace = occupiedSpace;
   }
 
   public Boolean getGeneratingFood() {

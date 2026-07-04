@@ -25,6 +25,7 @@ export interface CaravanTraveler {
   salary: number | null;
   contractConditions: string | null;
   consumption: number;
+  occupiedSpace: number;
   servedTravelerId: string | null;
   servedTravelerName: string | null;
   createdAt: string;
@@ -41,6 +42,7 @@ export interface AddCaravanTravelerPayload {
   salary?: number | null;
   contractConditions?: string | null;
   consumption?: number | null;
+  occupiedSpace?: number | null;
   wagonId?: string | null;
   drivingWagonId?: string | null;
   servedTravelerId?: string | null;
@@ -69,5 +71,6 @@ export interface UpdateCaravanTravelerPayload {
   salary?: number | null;
   contractConditions?: string | null;
   consumption?: number | null;
+  occupiedSpace?: number | null;
   servedTravelerId?: string | null;
 }

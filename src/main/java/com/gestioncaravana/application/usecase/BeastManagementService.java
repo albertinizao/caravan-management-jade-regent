@@ -233,7 +233,7 @@ public class BeastManagementService
     var alreadyOccupiesTargetSlot = beast.assignmentType() == CaravanBeastAssignmentType.TRAVELER
         && wagon.id().equals(currentWagonId);
     if (!alreadyOccupiesTargetSlot) {
-      if (currentCount.add(beast.occupiedSpace()).compareTo(BigDecimal.valueOf(currentWagonCapacity(caravanId, wagon.id()))) > 0) {
+      if (currentCount.add(BigDecimal.ONE).compareTo(BigDecimal.valueOf(currentWagonCapacity(caravanId, wagon.id()))) > 0) {
         throw new IllegalArgumentException("Wagon capacity reached");
       }
     }
@@ -241,11 +241,9 @@ public class BeastManagementService
 
   private BigDecimal travelerOccupancySpace(UUID caravanId, UUID wagonId) {
     var travelerCount = travelerRepository.countByCaravanIdAndWagonId(caravanId, wagonId);
-    var beastSpace = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
-        caravanId, wagonId, CaravanBeastAssignmentType.TRAVELER).stream()
-        .map(CaravanBeast::occupiedSpace)
-        .reduce(BigDecimal.ZERO, BigDecimal::add);
-    return BigDecimal.valueOf(travelerCount).add(beastSpace);
+    var beastCount = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
+        caravanId, wagonId, CaravanBeastAssignmentType.TRAVELER).size();
+    return BigDecimal.valueOf(travelerCount + beastCount);
   }
 
   private int currentWagonCapacity(UUID caravanId, UUID wagonId) {

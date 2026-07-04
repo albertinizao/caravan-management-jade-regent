@@ -289,7 +289,7 @@ function wagonTravelerBeastsFor(wagonId: string) {
 }
 
 function wagonTravelerBeastSpaceFor(wagonId: string) {
-  return wagonTravelerBeastsFor(wagonId).reduce((total, beast) => total + beast.occupiedSpace, 0);
+  return wagonTravelerBeastsFor(wagonId).length;
 }
 
 function wagonDraftBeastsFor(wagonId: string) {
@@ -752,7 +752,7 @@ const unassignedBeasts = computed(() => beasts.value.filter((beast) => beast.ass
 
 const selectedWagonOccupancy = computed(() =>
   selectedWagonTravelers.value.length
-  + selectedWagonTravelerBeasts.value.reduce((total, beast) => total + beast.occupiedSpace, 0),
+  + selectedWagonTravelerBeasts.value.length,
 );
 const selectedWagonCapacityRemaining = computed(() =>
   selectedWagon.value ? Math.max(0, selectedWagon.value.travelerCapacity - selectedWagonOccupancy.value) : 0
@@ -768,8 +768,8 @@ const selectedWagonCrewSegments = computed<WagonMeterSegment[]>(() => {
       },
       {
         key: "crew-beasts",
-        label: `${formatSpace(selectedWagonTravelerBeasts.value.reduce((total, beast) => total + beast.occupiedSpace, 0))} espacio bestias`,
-        amount: selectedWagonTravelerBeasts.value.reduce((total, beast) => total + beast.occupiedSpace, 0),
+        label: `${selectedWagonTravelerBeasts.value.length} bestias viajeras`,
+        amount: selectedWagonTravelerBeasts.value.length,
       },
     ],
     capacity,
@@ -811,8 +811,8 @@ const availableTravelersForSelectedWagon = computed(() =>
   selectedWagonCapacityRemaining.value >= 1 ? unassignedTravelers.value : []
 );
 const availableTravelerBeastsForSelectedWagon = computed(() =>
-  selectedWagon.value
-    ? unassignedBeasts.value.filter((beast) => beast.occupiedSpace <= selectedWagonCapacityRemaining.value)
+  selectedWagon.value && selectedWagonCapacityRemaining.value >= 1
+    ? unassignedBeasts.value
     : []
 );
 const availableDraftBeastsForSelectedWagon = computed(() => {
@@ -1580,7 +1580,7 @@ async function assignBeastToSelectedWagon(beast: CaravanBeast, assignmentType: "
     return;
   }
 
-  if (assignmentType === "TRAVELER" && selectedWagonCapacityRemaining.value < beast.occupiedSpace) {
+  if (assignmentType === "TRAVELER" && selectedWagonCapacityRemaining.value < 1) {
     assignmentModalError.value = "Este carro ya no tiene plazas libres para bestias viajeras.";
     return;
   }
@@ -2543,7 +2543,7 @@ onMounted(refresh);
                 <span>Viajeros</span>
                 <span>{{ selectedWagonTravelers.length }}</span>
                 <span>Bestias viajeras</span>
-                <span>{{ formatSpace(selectedWagonTravelerBeasts.reduce((total, beast) => total + beast.occupiedSpace, 0)) }}</span>
+                <span>{{ selectedWagonTravelerBeasts.length }}</span>
                 <span>Libre</span>
                 <span>{{ formatSpace(selectedWagonCapacityRemaining) }}</span>
               </div>

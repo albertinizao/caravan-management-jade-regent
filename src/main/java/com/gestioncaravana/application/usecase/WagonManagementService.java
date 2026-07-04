@@ -443,7 +443,8 @@ public class WagonManagementService
         beast.assignedWagonId(),
         assignedWagonName,
         beast.createdAt(),
-        beast.updatedAt());
+        beast.updatedAt(),
+        beast.occupiedSpace());
   }
 
   private DerivedWagonStats deriveWagonStats(WagonType wagonType, List<CaravanWagonImprovement> improvements) {

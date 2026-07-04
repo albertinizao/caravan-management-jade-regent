@@ -31,6 +31,8 @@ import org.junit.jupiter.api.Test;
 
 class TravelerManagementServiceTest {
 
+  private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
+
   private InMemoryCaravanRepository caravanRepository;
   private InMemoryTravelerRepository travelerRepository;
   private InMemoryWagonRepository wagonRepository;
@@ -104,11 +106,57 @@ class TravelerManagementServiceTest {
             null,
             null,
             0,
+            BigDecimal.ZERO,
             null,
             null,
             null));
 
     assertThat(created.consumption()).isZero();
+    assertThat(created.occupiedSpace()).isZero();
+  }
+
+  @Test
+  void allowsZeroOccupiedSpaceEvenWhenTheWagonIsFull() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id(), "carro-cubierto");
+    for (var index = 0; index < 8; index++) {
+      travelerRepository.save(CaravanTraveler.create(
+          UUID.randomUUID(),
+          caravan.id(),
+          "Traveler " + index,
+          null,
+          List.of("pasajero"),
+          List.of("pasajero"),
+          null,
+          1,
+          TravelerRoleData.empty(),
+          wagon.id(),
+          null,
+          null,
+          1,
+          BigDecimal.ONE,
+          NOW));
+    }
+
+    var created = service.execute(
+        caravan.id(),
+        new AddCaravanTravelerCommand(
+            "Sin espacio",
+            null,
+            List.of("pasajero"),
+            List.of("pasajero"),
+            null,
+            1,
+            null,
+            null,
+            1,
+            BigDecimal.ZERO,
+            wagon.id(),
+            null,
+            null));
+
+    assertThat(created.occupiedSpace()).isZero();
+    assertThat(created.wagonId()).isEqualTo(wagon.id());
   }
 
   @Test

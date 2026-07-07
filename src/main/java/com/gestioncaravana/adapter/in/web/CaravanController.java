@@ -38,6 +38,9 @@ import com.gestioncaravana.application.port.in.UpdateCaravanTravelerRoleUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanTravelerWagonUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanBeastAssignmentUseCase;
+import com.gestioncaravana.application.port.in.UpdateCaravanDiscontentUseCase;
+import com.gestioncaravana.application.port.in.UpdateCaravanLevelUseCase;
+import com.gestioncaravana.application.port.in.UpdateCaravanMainStatsUseCase;
 import com.gestioncaravana.application.port.in.RepairCaravanWagonUseCase;
 import com.gestioncaravana.application.port.in.PreviewCaravanDayCycleUseCase;
 import jakarta.validation.Valid;
@@ -48,6 +51,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -97,6 +101,9 @@ public class CaravanController {
   private final AddCaravanWagonImprovementUseCase addCaravanWagonImprovementUseCase;
   private final DeleteCaravanWagonImprovementUseCase deleteCaravanWagonImprovementUseCase;
   private final DeleteCaravanWagonUseCase deleteCaravanWagonUseCase;
+  private final UpdateCaravanLevelUseCase updateCaravanLevelUseCase;
+  private final UpdateCaravanDiscontentUseCase updateCaravanDiscontentUseCase;
+  private final UpdateCaravanMainStatsUseCase updateCaravanMainStatsUseCase;
 
   public CaravanController(
       CreateCaravanUseCase createCaravanUseCase,
@@ -138,7 +145,10 @@ public class CaravanController {
       RepairCaravanWagonUseCase repairCaravanWagonUseCase,
       AddCaravanWagonImprovementUseCase addCaravanWagonImprovementUseCase,
       DeleteCaravanWagonImprovementUseCase deleteCaravanWagonImprovementUseCase,
-      DeleteCaravanWagonUseCase deleteCaravanWagonUseCase) {
+      DeleteCaravanWagonUseCase deleteCaravanWagonUseCase,
+      UpdateCaravanLevelUseCase updateCaravanLevelUseCase,
+      UpdateCaravanDiscontentUseCase updateCaravanDiscontentUseCase,
+      UpdateCaravanMainStatsUseCase updateCaravanMainStatsUseCase) {
     this.createCaravanUseCase = createCaravanUseCase;
     this.deleteCaravanUseCase = deleteCaravanUseCase;
     this.listCaravansUseCase = listCaravansUseCase;
@@ -179,6 +189,9 @@ public class CaravanController {
     this.addCaravanWagonImprovementUseCase = addCaravanWagonImprovementUseCase;
     this.deleteCaravanWagonImprovementUseCase = deleteCaravanWagonImprovementUseCase;
     this.deleteCaravanWagonUseCase = deleteCaravanWagonUseCase;
+    this.updateCaravanLevelUseCase = updateCaravanLevelUseCase;
+    this.updateCaravanDiscontentUseCase = updateCaravanDiscontentUseCase;
+    this.updateCaravanMainStatsUseCase = updateCaravanMainStatsUseCase;
   }
 
   @PostMapping("/caravans")
@@ -257,6 +270,40 @@ public class CaravanController {
   @GetMapping("/caravans/{id}")
   CaravanResponse getById(@PathVariable UUID id) {
     return CaravanResponseMapper.toResponse(getCaravanUseCase.getById(id));
+  }
+
+  @PatchMapping("/caravans/{caravanId}/main-stats")
+  CaravanResponse updateCaravanMainStats(
+      @PathVariable UUID caravanId,
+      @Valid @RequestBody UpdateCaravanMainStatsRequest request) {
+    return CaravanResponseMapper.toResponse(
+        updateCaravanMainStatsUseCase.execute(
+            caravanId,
+            new UpdateCaravanMainStatsUseCase.UpdateCaravanMainStatsCommand(
+                request.offense(),
+                request.defense(),
+                request.mobility(),
+                request.morale())));
+  }
+
+  @PatchMapping("/caravans/{caravanId}/level")
+  CaravanResponse updateCaravanLevel(
+      @PathVariable UUID caravanId,
+      @Valid @RequestBody UpdateCaravanDeltaRequest request) {
+    return CaravanResponseMapper.toResponse(
+        updateCaravanLevelUseCase.execute(
+            caravanId,
+            new UpdateCaravanLevelUseCase.UpdateCaravanLevelCommand(requireDelta(request.delta()))));
+  }
+
+  @PatchMapping("/caravans/{caravanId}/discontent")
+  CaravanResponse updateCaravanDiscontent(
+      @PathVariable UUID caravanId,
+      @Valid @RequestBody UpdateCaravanDeltaRequest request) {
+    return CaravanResponseMapper.toResponse(
+        updateCaravanDiscontentUseCase.execute(
+            caravanId,
+            new UpdateCaravanDiscontentUseCase.UpdateCaravanDiscontentCommand(requireDelta(request.delta()))));
   }
 
   @GetMapping("/caravans/{id}/statistics")
@@ -338,6 +385,16 @@ public class CaravanController {
   @GetMapping("/caravans/{caravanId}/beasts/{beastId}")
   CaravanBeastResponse getCaravanBeast(@PathVariable UUID caravanId, @PathVariable UUID beastId) {
     return CaravanBeastResponseMapper.toResponse(getCaravanBeastUseCase.getById(caravanId, beastId));
+  }
+
+  private static int requireDelta(Integer delta) {
+    if (delta == null) {
+      throw new IllegalArgumentException("delta is required");
+    }
+    if (delta == 0) {
+      throw new IllegalArgumentException("delta must not be 0");
+    }
+    return delta;
   }
 
   @PostMapping("/caravans/{caravanId}/beasts/catalog/{beastCode}")

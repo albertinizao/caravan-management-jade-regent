@@ -130,6 +130,66 @@ class CaravanManagementServiceTest {
     assertThat(caravan.feats()).containsExactly("Caravana Mejorada");
   }
 
+  @Test
+  void adjustsLevelAndDiscontentForTheSelectedCaravan() {
+    var created = service.execute(new CreateCaravanCommand("Campaign", null, null, null, null, null));
+    service.select(created.id());
+
+    var leveledUp = service.execute(created.id(), new com.gestioncaravana.application.port.in.UpdateCaravanLevelUseCase.UpdateCaravanLevelCommand(1));
+    var moreDiscontent = service.execute(created.id(), new com.gestioncaravana.application.port.in.UpdateCaravanDiscontentUseCase.UpdateCaravanDiscontentCommand(2));
+    var leveledDown = service.execute(created.id(), new com.gestioncaravana.application.port.in.UpdateCaravanLevelUseCase.UpdateCaravanLevelCommand(-1));
+    var lessDiscontent = service.execute(created.id(), new com.gestioncaravana.application.port.in.UpdateCaravanDiscontentUseCase.UpdateCaravanDiscontentCommand(-1));
+
+    assertThat(leveledUp.level()).isEqualTo(2);
+    assertThat(moreDiscontent.discontent()).isEqualTo(2);
+    assertThat(leveledDown.level()).isEqualTo(1);
+    assertThat(lessDiscontent.discontent()).isEqualTo(1);
+    assertThat(lessDiscontent.active()).isTrue();
+    assertThat(service.getActive()).map(caravan -> caravan.level()).hasValue(1);
+  }
+
+  @Test
+  void rejectsUpdatesThatWouldBreakTheMinimumBounds() {
+    var created = service.execute(new CreateCaravanCommand("Campaign", null, null, null, null, null));
+
+    assertThatThrownBy(() -> service.execute(
+        created.id(),
+        new com.gestioncaravana.application.port.in.UpdateCaravanLevelUseCase.UpdateCaravanLevelCommand(-1)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("level must be greater than or equal to 1");
+    assertThatThrownBy(() -> service.execute(
+        created.id(),
+        new com.gestioncaravana.application.port.in.UpdateCaravanDiscontentUseCase.UpdateCaravanDiscontentCommand(-1)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("discontent must be greater than or equal to 0");
+  }
+
+  @Test
+  void updatesMainStatsOnlyWhenUnassignedPointsAreAvailable() {
+    var created = service.execute(new CreateCaravanCommand("Campaign", null, 2, 2, 1, 1));
+
+    var updated = service.execute(
+        created.id(),
+        new com.gestioncaravana.application.port.in.UpdateCaravanMainStatsUseCase.UpdateCaravanMainStatsCommand(3, 2, 1, 1));
+
+    assertThat(updated.mainStats().offense()).isEqualTo(3);
+    assertThat(updated.mainStats().defense()).isEqualTo(2);
+    assertThat(updated.mainStats().mobility()).isEqualTo(1);
+    assertThat(updated.mainStats().morale()).isEqualTo(1);
+    assertThat(updated.mainStats().unassignedPoints()).isZero();
+  }
+
+  @Test
+  void rejectsMainStatsUpdatesWhenThereAreNoFreePoints() {
+    var created = service.execute(new CreateCaravanCommand("Campaign", null, 2, 2, 2, 1));
+
+    assertThatThrownBy(() -> service.execute(
+        created.id(),
+        new com.gestioncaravana.application.port.in.UpdateCaravanMainStatsUseCase.UpdateCaravanMainStatsCommand(4, 2, 1, 1)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("No unassigned points available");
+  }
+
   private static final class InMemoryCaravanRepository implements CaravanCampaignRepositoryPort {
     private final List<CaravanCampaign> caravans = new ArrayList<>();
 

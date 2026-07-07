@@ -30,6 +30,10 @@ export interface CaravanDayCyclePayload {
   choices: CaravanDayCycleChoicePayload[];
 }
 
+export interface UpdateCaravanDeltaPayload {
+  delta: number;
+}
+
 export interface ActiveCaravanResponse {
   caravan: Caravan | null;
 }
@@ -62,6 +66,34 @@ export function getCaravan(id: string) {
 
 export function getCaravanStatistics(id: string) {
   return fetchJson<CaravanStatistics>(`/caravans/${id}/statistics`);
+}
+
+export interface UpdateCaravanMainStatsPayload {
+  offense: number;
+  defense: number;
+  mobility: number;
+  morale: number;
+}
+
+export function updateCaravanMainStats(id: string, payload: UpdateCaravanMainStatsPayload) {
+  return fetchJson<Caravan>(`/caravans/${id}/main-stats`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateCaravanLevel(id: string, payload: UpdateCaravanDeltaPayload) {
+  return fetchJson<Caravan>(`/caravans/${id}/level`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateCaravanDiscontent(id: string, payload: UpdateCaravanDeltaPayload) {
+  return fetchJson<Caravan>(`/caravans/${id}/discontent`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function previewCaravanDayCycle(id: string, payload: Omit<CaravanDayCyclePayload, "idempotencyKey">) {

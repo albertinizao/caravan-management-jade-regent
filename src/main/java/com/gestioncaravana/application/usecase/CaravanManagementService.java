@@ -8,6 +8,9 @@ import com.gestioncaravana.application.port.in.GetCaravanUseCase;
 import com.gestioncaravana.application.port.in.ListCaravansUseCase;
 import com.gestioncaravana.application.port.in.DeleteCaravanUseCase;
 import com.gestioncaravana.application.port.in.SelectActiveCaravanUseCase;
+import com.gestioncaravana.application.port.in.UpdateCaravanDiscontentUseCase;
+import com.gestioncaravana.application.port.in.UpdateCaravanLevelUseCase;
+import com.gestioncaravana.application.port.in.UpdateCaravanMainStatsUseCase;
 import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
@@ -38,7 +41,10 @@ public class CaravanManagementService
         GetCaravanUseCase,
         DeleteCaravanUseCase,
         SelectActiveCaravanUseCase,
-        GetActiveCaravanUseCase {
+        GetActiveCaravanUseCase,
+        UpdateCaravanLevelUseCase,
+        UpdateCaravanDiscontentUseCase,
+        UpdateCaravanMainStatsUseCase {
 
   private final CaravanCampaignRepositoryPort campaignRepository;
   private final CaravanWagonRepositoryPort wagonRepository;
@@ -165,6 +171,30 @@ public class CaravanManagementService
   }
 
   @Override
+  public CaravanCampaignView execute(UUID caravanId, UpdateCaravanLevelCommand command) {
+    var campaign = requireCaravan(caravanId);
+    var updated = campaign.adjustLevel(requireDelta(command.delta()), clock.instant());
+    return toView(campaignRepository.save(updated), isActiveCaravan(caravanId));
+  }
+
+  @Override
+  public CaravanCampaignView execute(UUID caravanId, UpdateCaravanDiscontentCommand command) {
+    var campaign = requireCaravan(caravanId);
+    var updated = campaign.adjustDiscontent(requireDelta(command.delta()), clock.instant());
+    return toView(campaignRepository.save(updated), isActiveCaravan(caravanId));
+  }
+
+  @Override
+  public CaravanCampaignView execute(UUID caravanId, UpdateCaravanMainStatsCommand command) {
+    var campaign = requireCaravan(caravanId);
+    if (campaign.mainStats().unassignedPoints() <= 0) {
+      throw new IllegalArgumentException("No unassigned points available");
+    }
+    var updated = campaign.updateMainStats(command.offense(), command.defense(), command.mobility(), command.morale(), clock.instant());
+    return toView(campaignRepository.save(updated), isActiveCaravan(caravanId));
+  }
+
+  @Override
   public void delete(UUID id) {
     var exists = campaignRepository.findById(id)
         .orElseThrow(() -> new IllegalArgumentException("Caravan not found: " + id));
@@ -228,6 +258,22 @@ public class CaravanManagementService
         travelers,
         beasts,
         feats);
+  }
+
+  private CaravanCampaign requireCaravan(UUID caravanId) {
+    return campaignRepository.findById(caravanId)
+        .orElseThrow(() -> new IllegalArgumentException("Caravan not found: " + caravanId));
+  }
+
+  private boolean isActiveCaravan(UUID caravanId) {
+    return activeSelectionPort.getActiveCaravanId().filter(caravanId::equals).isPresent();
+  }
+
+  private static int requireDelta(int delta) {
+    if (delta == 0) {
+      throw new IllegalArgumentException("delta must not be 0");
+    }
+    return delta;
   }
 
   private static final class NoopCaravanFeatRepositoryPort implements CaravanFeatRepositoryPort {

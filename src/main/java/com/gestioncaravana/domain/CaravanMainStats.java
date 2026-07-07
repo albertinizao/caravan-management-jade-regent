@@ -49,6 +49,28 @@ public record CaravanMainStats(
     return new CaravanMainStats(resolvedOffense, resolvedDefense, resolvedMobility, resolvedMorale, unassignedPoints);
   }
 
+  public static CaravanMainStats withUpdatedAllocation(
+      int offense,
+      int defense,
+      int mobility,
+      int morale,
+      int totalPoints) {
+    if (totalPoints < 4) {
+      throw new IllegalArgumentException("totalPoints must be greater than or equal to 4");
+    }
+    validateBoundedStat("offense", offense);
+    validateBoundedStat("defense", defense);
+    validateBoundedStat("mobility", mobility);
+    validateBoundedStat("morale", morale);
+
+    var unassignedPoints = totalPoints - (offense + defense + mobility + morale);
+    if (unassignedPoints < 0) {
+      throw new IllegalArgumentException("updated allocation must not spend more points than available");
+    }
+
+    return new CaravanMainStats(offense, defense, mobility, morale, unassignedPoints);
+  }
+
   private static void validateBoundedStat(String name, int value) {
     if (value < 0 || value > MAX_STAT_VALUE) {
       throw new IllegalArgumentException(name + " must be between 0 and 10");

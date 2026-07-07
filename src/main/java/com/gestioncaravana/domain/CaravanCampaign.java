@@ -64,6 +64,47 @@ public record CaravanCampaign(
     return new CaravanCampaign(id, name, description, level, mainStats, discontent, status, createdAt, now);
   }
 
+  public CaravanCampaign adjustLevel(int delta, Instant now) {
+    if (delta == 0) {
+      throw new IllegalArgumentException("delta must not be 0");
+    }
+
+    var updatedLevel = level + delta;
+    if (updatedLevel < 1) {
+      throw new IllegalArgumentException("level must be greater than or equal to 1");
+    }
+
+    return new CaravanCampaign(id, name, description, updatedLevel, mainStats, discontent, status, createdAt, now);
+  }
+
+  public CaravanCampaign adjustDiscontent(int delta, Instant now) {
+    if (delta == 0) {
+      throw new IllegalArgumentException("delta must not be 0");
+    }
+
+    var updatedDiscontent = discontent + delta;
+    if (updatedDiscontent < 0) {
+      throw new IllegalArgumentException("discontent must be greater than or equal to 0");
+    }
+
+    return new CaravanCampaign(id, name, description, level, mainStats, updatedDiscontent, status, createdAt, now);
+  }
+
+  public CaravanCampaign updateMainStats(
+      int offense,
+      int defense,
+      int mobility,
+      int morale,
+      Instant now) {
+    var totalPoints = mainStats.offense()
+        + mainStats.defense()
+        + mainStats.mobility()
+        + mainStats.morale()
+        + mainStats.unassignedPoints();
+    var updatedMainStats = CaravanMainStats.withUpdatedAllocation(offense, defense, mobility, morale, totalPoints);
+    return new CaravanCampaign(id, name, description, level, updatedMainStats, discontent, status, createdAt, now);
+  }
+
   private static String normalizeDescription(String description) {
     if (description == null || description.isBlank()) {
       return null;

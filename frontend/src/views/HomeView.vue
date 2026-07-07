@@ -10,6 +10,9 @@ import {
   listCaravans,
   previewCaravanDayCycle,
   selectActiveCaravan,
+  updateCaravanDiscontent,
+  updateCaravanLevel,
+  updateCaravanMainStats,
 } from "@/services/caravans";
 import { useToast } from "@/composables/useToast";
 import { listCaravanTravelers } from "@/services/travelers";
@@ -17,6 +20,7 @@ import type {
   Caravan,
   CaravanDayCyclePreview,
   CaravanDayCycleResult,
+  CaravanMainStats,
   CaravanStatistics,
 } from "@/types/caravan";
 import type { CaravanTraveler } from "@/types/traveler";
@@ -43,6 +47,8 @@ const dayCycleTravelers = ref<CaravanTraveler[]>([]);
 const dayCyclePreview = ref<CaravanDayCyclePreview | null>(null);
 const dayCycleError = ref<string | null>(null);
 const dayCycleChoices = ref<Record<string, "HUNT" | "EXPLORE">>({});
+const editableMainStats = ref<CaravanMainStats | null>(null);
+const mainStatsSubmitting = ref(false);
 const { showToast } = useToast();
 
 const hiddenContributionStats = new Set([
@@ -60,6 +66,41 @@ const hiddenContributionStats = new Set([
 ]);
 
 const selectedCaravan = computed(() => activeCaravan.value ?? caravans.value.find((caravan) => caravan.active) ?? null);
+const canEditMainStats = computed(() => (selectedCaravan.value?.mainStats.unassignedPoints ?? 0) > 0);
+const displayedMainStats = computed(() => editableMainStats.value ?? selectedCaravan.value?.mainStats ?? null);
+const mainStatsRemainingPoints = computed(() => {
+  if (!selectedCaravan.value || !editableMainStats.value || !canEditMainStats.value) {
+    return 0;
+  }
+
+  const initialBudget =
+    selectedCaravan.value.mainStats.offense +
+    selectedCaravan.value.mainStats.defense +
+    selectedCaravan.value.mainStats.mobility +
+    selectedCaravan.value.mainStats.morale +
+    selectedCaravan.value.mainStats.unassignedPoints;
+  const currentAllocation =
+    editableMainStats.value.offense +
+    editableMainStats.value.defense +
+    editableMainStats.value.mobility +
+    editableMainStats.value.morale;
+
+  return Math.max(0, initialBudget - currentAllocation);
+});
+const hasMainStatsChanges = computed(() => {
+  if (!selectedCaravan.value || !editableMainStats.value || !canEditMainStats.value) {
+    return false;
+  }
+
+  const saved = selectedCaravan.value.mainStats;
+  const draft = editableMainStats.value;
+  return (
+    saved.offense !== draft.offense ||
+    saved.defense !== draft.defense ||
+    saved.mobility !== draft.mobility ||
+    saved.morale !== draft.morale
+  );
+});
 const canUseIntermittentFasting = computed(
   () => selectedCaravan.value?.feats.some((feat) => feat === "Ayuno Intermitente") ?? false,
 );
@@ -83,6 +124,22 @@ function percentageOf(value: number, max: number) {
   return Math.max(0, Math.min(100, (value / max) * 100));
 }
 
+function progressBackground(value: number, max: number, fillColor: string, emptyColor = "#e5e7eb") {
+  const percentage = percentageOf(value, max);
+
+  return {
+    background: `linear-gradient(90deg, ${fillColor} 0%, ${fillColor} ${percentage}%, ${emptyColor} ${percentage}%, ${emptyColor} 100%)`,
+  };
+}
+
+function progressMarkerStyle(value: number, max: number) {
+  const percentage = percentageOf(value, max);
+
+  return {
+    left: `calc(${percentage}% - 0.125rem)`,
+  };
+}
+
 function isPending(action: string) {
   return pendingAction.value === action;
 }
@@ -99,6 +156,10 @@ function openCreateModal() {
 
 function closeCreateModal() {
   createModalOpen.value = false;
+}
+
+function syncEditableMainStats(caravan: Caravan | null) {
+  editableMainStats.value = caravan && caravan.mainStats.unassignedPoints > 0 ? { ...caravan.mainStats } : null;
 }
 
 function openDayCycleModal() {
@@ -202,6 +263,54 @@ async function handleAdvanceDayCycle() {
   }
 }
 
+function adjustEditableMainStat(
+  stat: keyof Pick<CaravanMainStats, "offense" | "defense" | "mobility" | "morale">,
+  delta: number,
+) {
+  if (!editableMainStats.value || !canEditMainStats.value) {
+    return;
+  }
+
+  if (delta > 0 && mainStatsRemainingPoints.value <= 0) {
+    return;
+  }
+
+  const nextValue = editableMainStats.value[stat] + delta;
+  if (nextValue < 1 || nextValue > 10) {
+    return;
+  }
+
+  editableMainStats.value = {
+    ...editableMainStats.value,
+    [stat]: nextValue,
+  };
+}
+
+async function saveMainStats() {
+  if (!selectedCaravan.value || !editableMainStats.value || !canEditMainStats.value) {
+    return;
+  }
+
+  mainStatsSubmitting.value = true;
+  pendingAction.value = "save-main-stats";
+  error.value = null;
+
+  try {
+    await updateCaravanMainStats(selectedCaravan.value.id, {
+      offense: editableMainStats.value.offense,
+      defense: editableMainStats.value.defense,
+      mobility: editableMainStats.value.mobility,
+      morale: editableMainStats.value.morale,
+    });
+    window.location.reload();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "No se pudieron guardar los atributos principales";
+  } finally {
+    mainStatsSubmitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
 async function refresh() {
   const previousAction = pendingAction.value;
   const trackRefresh = previousAction === null;
@@ -219,6 +328,7 @@ async function refresh() {
     activeCaravan.value = activeResponse.caravan;
     const selectedId = activeResponse.caravan?.id ?? caravanList.find((caravan) => caravan.active)?.id ?? null;
     caravanStatistics.value = selectedId ? await getCaravanStatistics(selectedId) : null;
+    syncEditableMainStats(activeResponse.caravan ?? caravanList.find((caravan) => caravan.active) ?? null);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to load caravans";
   } finally {
@@ -309,6 +419,62 @@ async function handleDelete(caravan: Caravan) {
   }
 }
 
+async function adjustCaravanLevel(delta: number) {
+  if (!selectedCaravan.value) {
+    return;
+  }
+
+  const caravanId = selectedCaravan.value.id;
+  const confirmed = window.confirm(
+    delta > 0
+      ? `¿Seguro que quieres subir de nivel la caravana "${selectedCaravan.value.name}"?`
+      : `¿Seguro que quieres bajar de nivel la caravana "${selectedCaravan.value.name}"?`,
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  const action = `level:${delta > 0 ? "up" : "down"}`;
+  submitting.value = true;
+  pendingAction.value = action;
+  error.value = null;
+
+  try {
+    await updateCaravanLevel(caravanId, { delta });
+    await refresh();
+    showToast(delta > 0 ? "Nivel de la caravana aumentado." : "Nivel de la caravana reducido.");
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "No se pudo ajustar el nivel";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+async function adjustCaravanDiscontent(delta: number) {
+  if (!selectedCaravan.value) {
+    return;
+  }
+
+  const caravanId = selectedCaravan.value.id;
+  const action = `discontent:${delta > 0 ? "up" : "down"}`;
+  submitting.value = true;
+  pendingAction.value = action;
+  error.value = null;
+
+  try {
+    await updateCaravanDiscontent(caravanId, { delta });
+    await refresh();
+    showToast(delta > 0 ? "Descontento aumentado." : "Descontento reducido.");
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "No se pudo ajustar el descontento";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
 onMounted(refresh);
 </script>
 
@@ -358,56 +524,148 @@ onMounted(refresh);
             </p>
 
             <dl class="stats">
-              <div>
+              <div class="stat-control-card">
                 <dt>Nivel</dt>
                 <dd>{{ selectedCaravan.level }}</dd>
-              </div>
-              <div class="stat-with-meter">
-                <dt>Descontento</dt>
-                <dd>{{ selectedCaravan.discontent }}</dd>
-                <div class="summary-meter-block">
-                  <div
-                    class="meter-strip"
-                    :aria-label="`Descontento ${selectedCaravan.discontent} de ${caravanStatistics?.moraleThreshold ?? 0}`"
-                    :title="`Descontento ${selectedCaravan.discontent} de ${caravanStatistics?.moraleThreshold ?? 0}`"
+                <div class="stat-control-actions" aria-label="Controles de nivel">
+                  <button
+                    class="stat-control-button"
+                    type="button"
+                    :disabled="loading || submitting || selectedCaravan.level <= 1"
+                    :aria-busy="isPending('level:down')"
+                    @click="adjustCaravanLevel(-1)"
                   >
-                    <span
-                      class="meter-segment meter-segment--discontent"
-                      :style="{ width: `${percentageOf(selectedCaravan.discontent, caravanStatistics?.moraleThreshold ?? 0)}%` }"
-                    ></span>
-                  </div>
-                  <div class="meter-values">
-                    <span><strong>{{ selectedCaravan.discontent }}</strong> descontento actual</span>
-                    <span><strong>{{ caravanStatistics?.moraleThreshold ?? 0 }}</strong> umbral de motín</span>
-                  </div>
+                    <span class="button-with-spinner">
+                      <span v-if="isPending('level:down')" class="button-spinner" aria-hidden="true"></span>
+                      <span>-</span>
+                    </span>
+                  </button>
+                  <button
+                    class="stat-control-button"
+                    type="button"
+                    :disabled="loading || submitting"
+                    :aria-busy="isPending('level:up')"
+                    @click="adjustCaravanLevel(1)"
+                  >
+                    <span class="button-with-spinner">
+                      <span v-if="isPending('level:up')" class="button-spinner" aria-hidden="true"></span>
+                      <span>+</span>
+                    </span>
+                  </button>
                 </div>
               </div>
               <div>
                 <dt>Ofensiva</dt>
-                <dd>{{ selectedCaravan.mainStats.offense }}</dd>
+                <dd>{{ displayedMainStats?.offense ?? selectedCaravan.mainStats.offense }}</dd>
+                <div v-if="canEditMainStats" class="stat-control-actions">
+                  <button
+                    class="stat-control-button"
+                    type="button"
+                    :disabled="loading || submitting || mainStatsRemainingPoints <= 0 || (displayedMainStats?.offense ?? 0) >= 10"
+                    @click="adjustEditableMainStat('offense', 1)"
+                  >
+                    +
+                  </button>
+                  <button
+                    class="stat-control-button"
+                    type="button"
+                    :disabled="loading || submitting || (displayedMainStats?.offense ?? 0) <= 1"
+                    @click="adjustEditableMainStat('offense', -1)"
+                  >
+                    -
+                  </button>
+                </div>
               </div>
               <div>
                 <dt>Defensa</dt>
-                <dd>{{ selectedCaravan.mainStats.defense }}</dd>
+                <dd>{{ displayedMainStats?.defense ?? selectedCaravan.mainStats.defense }}</dd>
+                <div v-if="canEditMainStats" class="stat-control-actions">
+                  <button
+                    class="stat-control-button"
+                    type="button"
+                    :disabled="loading || submitting || mainStatsRemainingPoints <= 0 || (displayedMainStats?.defense ?? 0) >= 10"
+                    @click="adjustEditableMainStat('defense', 1)"
+                  >
+                    +
+                  </button>
+                  <button
+                    class="stat-control-button"
+                    type="button"
+                    :disabled="loading || submitting || (displayedMainStats?.defense ?? 0) <= 1"
+                    @click="adjustEditableMainStat('defense', -1)"
+                  >
+                    -
+                  </button>
+                </div>
               </div>
               <div>
                 <dt>Movilidad</dt>
-                <dd>{{ selectedCaravan.mainStats.mobility }}</dd>
+                <dd>{{ displayedMainStats?.mobility ?? selectedCaravan.mainStats.mobility }}</dd>
+                <div v-if="canEditMainStats" class="stat-control-actions">
+                  <button
+                    class="stat-control-button"
+                    type="button"
+                    :disabled="loading || submitting || mainStatsRemainingPoints <= 0 || (displayedMainStats?.mobility ?? 0) >= 10"
+                    @click="adjustEditableMainStat('mobility', 1)"
+                  >
+                    +
+                  </button>
+                  <button
+                    class="stat-control-button"
+                    type="button"
+                    :disabled="loading || submitting || (displayedMainStats?.mobility ?? 0) <= 1"
+                    @click="adjustEditableMainStat('mobility', -1)"
+                  >
+                    -
+                  </button>
+                </div>
               </div>
               <div>
                 <dt>Moral</dt>
-                <dd>{{ selectedCaravan.mainStats.morale }}</dd>
+                <dd>{{ displayedMainStats?.morale ?? selectedCaravan.mainStats.morale }}</dd>
+                <div v-if="canEditMainStats" class="stat-control-actions">
+                  <button
+                    class="stat-control-button"
+                    type="button"
+                    :disabled="loading || submitting || mainStatsRemainingPoints <= 0 || (displayedMainStats?.morale ?? 0) >= 10"
+                    @click="adjustEditableMainStat('morale', 1)"
+                  >
+                    +
+                  </button>
+                  <button
+                    class="stat-control-button"
+                    type="button"
+                    :disabled="loading || submitting || (displayedMainStats?.morale ?? 0) <= 1"
+                    @click="adjustEditableMainStat('morale', -1)"
+                  >
+                    -
+                  </button>
+                </div>
               </div>
-              <div>
+              <div v-if="canEditMainStats">
                 <dt>Puntos libres</dt>
-                <dd>{{ selectedCaravan.mainStats.unassignedPoints }}</dd>
+                <dd>{{ mainStatsRemainingPoints }}</dd>
               </div>
             </dl>
+            <div v-if="canEditMainStats" class="main-stats-actions">
+              <button
+                class="primary-button"
+                type="button"
+                :disabled="loading || submitting || mainStatsSubmitting || !hasMainStatsChanges"
+                :aria-busy="isPending('save-main-stats')"
+                @click="saveMainStats"
+              >
+                <span class="button-with-spinner">
+                  <span v-if="isPending('save-main-stats')" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ isPending('save-main-stats') ? "Guardando…" : "Guardar" }}</span>
+                </span>
+              </button>
+            </div>
 
             <div v-if="caravanStatistics" class="stats-panel">
               <section>
                 <h3>Estadísticas derivadas automáticas</h3>
-                <dl class="stats stats-2">
+                <dl class="stats stats-4">
                   <div>
                     <dt>Ataque</dt>
                     <dd>{{ caravanStatistics.derivedStats.attack }}</dd>
@@ -443,6 +701,61 @@ onMounted(refresh);
                     <dd>{{ selectedCaravan.feats.length }}</dd>
                   </div>
                 </dl>
+
+                <div class="sections sections-3 sections-navigation">
+                  <RouterLink class="nav-card" to="/wagons">
+                    <h3>Carros</h3>
+                    <p class="muted">{{ caravanStatistics.otherStats.wagonCount }} / {{ caravanStatistics.otherStats.maxWagons }}</p>
+                    <div
+                      class="nav-meter nav-meter--wagons"
+                      :aria-label="`Carros ocupados ${caravanStatistics.otherStats.wagonCount} de ${caravanStatistics.otherStats.maxWagons}`"
+                      :title="`Carros ocupados ${caravanStatistics.otherStats.wagonCount} de ${caravanStatistics.otherStats.maxWagons}`"
+                    >
+                      <span
+                        class="nav-meter-segment nav-meter-segment--wagons"
+                        :style="{ width: `${percentageOf(caravanStatistics.otherStats.wagonCount, caravanStatistics.otherStats.maxWagons)}%` }"
+                      ></span>
+                    </div>
+                    <span class="nav-card-link">Abrir vista de carros</span>
+                  </RouterLink>
+                  <RouterLink class="nav-card" to="/travelers">
+                    <h3>Viajeros</h3>
+                    <p class="muted">
+                      {{ caravanStatistics.otherStats.travelerCount }} + {{ caravanStatistics.otherStats.beastCount }} /
+                      {{ caravanStatistics.otherStats.travelerCapacity }}
+                    </p>
+                    <div
+                      class="nav-meter nav-meter--travelers"
+                      :aria-label="`Viajeros ${caravanStatistics.otherStats.travelerCount} y bestias ${caravanStatistics.otherStats.beastCount} de ${caravanStatistics.otherStats.travelerCapacity}`"
+                      :title="`Viajeros ${caravanStatistics.otherStats.travelerCount} · Bestias ${caravanStatistics.otherStats.beastCount} de ${caravanStatistics.otherStats.travelerCapacity}`"
+                    >
+                      <span
+                        class="nav-meter-segment nav-meter-segment--travelers"
+                        :style="{ width: `${percentageOf(caravanStatistics.otherStats.travelerCount, caravanStatistics.otherStats.travelerCapacity)}%` }"
+                      ></span>
+                      <span
+                        class="nav-meter-segment nav-meter-segment--beasts"
+                        :style="{ width: `${percentageOf(caravanStatistics.otherStats.beastCount, caravanStatistics.otherStats.travelerCapacity)}%` }"
+                      ></span>
+                    </div>
+                    <span class="nav-card-link">Abrir vista de viajeros</span>
+                  </RouterLink>
+                  <RouterLink class="nav-card" to="/cargo">
+                    <h3>Cargamento</h3>
+                    <p class="muted">{{ caravanStatistics.otherStats.cargoLoad }} / {{ caravanStatistics.otherStats.cargoCapacity }}</p>
+                    <div
+                      class="nav-meter nav-meter--cargo"
+                      :aria-label="`Carga ocupada ${caravanStatistics.otherStats.cargoLoad} de ${caravanStatistics.otherStats.cargoCapacity}`"
+                      :title="`Carga ocupada ${caravanStatistics.otherStats.cargoLoad} de ${caravanStatistics.otherStats.cargoCapacity}`"
+                    >
+                      <span
+                        class="nav-meter-segment nav-meter-segment--cargo"
+                        :style="{ width: `${percentageOf(caravanStatistics.otherStats.cargoLoad, caravanStatistics.otherStats.cargoCapacity)}%` }"
+                      ></span>
+                    </div>
+                    <span class="nav-card-link">Abrir vista de carga</span>
+                  </RouterLink>
+                </div>
               </section>
 
               <section>
@@ -450,6 +763,32 @@ onMounted(refresh);
                 <p :class="['warning-banner', { danger: caravanStatistics.discontent >= caravanStatistics.moraleThreshold }]">
                   Descontento: {{ caravanStatistics.discontent }} · Umbral de motín: {{ caravanStatistics.moraleThreshold }}
                 </p>
+                <div class="stat-control-actions stat-control-actions--spaced" aria-label="Controles de descontento">
+                  <button
+                    class="stat-control-button"
+                    type="button"
+                    :disabled="loading || submitting || caravanStatistics.discontent <= 0"
+                    :aria-busy="isPending('discontent:down')"
+                    @click="adjustCaravanDiscontent(-1)"
+                  >
+                    <span class="button-with-spinner">
+                      <span v-if="isPending('discontent:down')" class="button-spinner" aria-hidden="true"></span>
+                      <span>-</span>
+                    </span>
+                  </button>
+                  <button
+                    class="stat-control-button"
+                    type="button"
+                    :disabled="loading || submitting"
+                    :aria-busy="isPending('discontent:up')"
+                    @click="adjustCaravanDiscontent(1)"
+                  >
+                    <span class="button-with-spinner">
+                      <span v-if="isPending('discontent:up')" class="button-spinner" aria-hidden="true"></span>
+                      <span>+</span>
+                    </span>
+                  </button>
+                </div>
                 <div class="summary-meter-block">
                   <div
                     class="meter-strip"
@@ -485,27 +824,6 @@ onMounted(refresh);
               </section>
             </div>
 
-            <div class="sections">
-              <section>
-                <h3>Carros</h3>
-                <p class="muted">{{ selectedCaravan.wagons.length }} elementos</p>
-                <RouterLink class="section-link" to="/wagons">Abrir vista de carros</RouterLink>
-              </section>
-              <section>
-                <h3>Viajeros</h3>
-                <p class="muted">{{ selectedCaravan.travelers.length }} elementos</p>
-                <RouterLink class="section-link" to="/travelers">Abrir vista de viajeros</RouterLink>
-              </section>
-              <section>
-                <h3>Bestias</h3>
-                <p class="muted">{{ selectedCaravan.beasts.length }} elementos</p>
-                <RouterLink class="section-link" to="/beasts">Abrir vista de bestias</RouterLink>
-              </section>
-              <section>
-                <h3>Dotes</h3>
-                <p class="muted">{{ selectedCaravan.feats.length }} elementos</p>
-              </section>
-            </div>
           </div>
 
           <div v-else class="muted">
@@ -900,12 +1218,16 @@ textarea {
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
 .stats.stats-2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stats.stats-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .stats.stats-3 {
@@ -916,11 +1238,61 @@ textarea {
   padding: 0.85rem;
   border-radius: 0.85rem;
   background: #f9fafb;
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.stat-control-card {
+  display: grid;
+  gap: 0.5rem;
 }
 
 .stat-with-meter {
   display: grid;
   gap: 0.45rem;
+}
+
+.stat-control-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.stat-control-actions--spaced {
+  margin: 0.5rem 0 0.25rem;
+}
+
+.main-stats-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+.stat-control-button {
+  min-width: 2.25rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 0.7rem;
+  border: 1px solid #cbd5e1;
+  background: white;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.stat-control-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 dt {
@@ -940,6 +1312,10 @@ dd {
   gap: 0.75rem;
 }
 
+.sections.sections-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .sections section {
   padding: 0.85rem;
   border: 1px solid #e5e7eb;
@@ -948,36 +1324,112 @@ dd {
   gap: 0.35rem;
 }
 
-.section-link {
+.nav-card {
+  padding: 0.85rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.85rem;
+  display: grid;
+  gap: 0.35rem;
+  text-decoration: none;
+  color: inherit;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.nav-card:hover,
+.nav-card:focus-visible {
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.nav-meter {
+  display: flex;
+  overflow: hidden;
+  min-height: 0.6rem;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.nav-meter-segment {
+  display: block;
+  height: 100%;
+}
+
+.nav-meter--wagons .nav-meter-segment--wagons {
+  background: #7c3aed;
+}
+
+.nav-meter--travelers .nav-meter-segment--travelers {
+  background: #2563eb;
+}
+
+.nav-meter--travelers .nav-meter-segment--beasts {
+  background: #f97316;
+}
+
+.nav-meter--cargo .nav-meter-segment--cargo {
+  background: #f59e0b;
+}
+
+.nav-card-link {
   color: #1d4ed8;
   text-decoration: none;
   font-weight: 600;
 }
 
-.summary-meter-block {
+.sections-navigation {
+  margin-top: 0.75rem;
+}
+
+.stat-progress-card {
   display: grid;
-  gap: 0.5rem;
-  margin-top: 0.35rem;
+  gap: 0.6rem;
+  min-width: 0;
 }
 
-.meter-strip {
-  display: flex;
+.stat-progress-card dd {
+  margin-bottom: 0.1rem;
+}
+
+.progress-meter {
+  position: relative;
   overflow: hidden;
-  min-height: 0.9rem;
+  height: 1.15rem;
+  min-height: 1.15rem;
   border-radius: 999px;
-  background: #e5e7eb;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  box-shadow:
+    inset 0 1px 2px rgba(15, 23, 42, 0.12),
+    0 1px 0 rgba(255, 255, 255, 0.95);
 }
 
-.meter-segment {
-  display: block;
-  height: 100%;
+.progress-meter--travelers {
+  background-color: #2563eb;
 }
 
-.meter-segment--discontent {
-  background: linear-gradient(90deg, #fca5a5, #ef4444);
+.progress-meter--wagons {
+  background-color: #7c3aed;
 }
 
-.meter-values {
+.progress-meter--cargo {
+  background-color: #f59e0b;
+}
+
+.progress-meter-mark {
+  position: absolute;
+  top: 0.1rem;
+  bottom: 0.1rem;
+  width: 0.25rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.12);
+  pointer-events: none;
+}
+
+.progress-meta {
   display: flex;
   justify-content: space-between;
   gap: 0.75rem;
@@ -985,7 +1437,7 @@ dd {
   color: #475569;
 }
 
-.meter-values strong {
+.progress-meta strong {
   color: #111827;
 }
 

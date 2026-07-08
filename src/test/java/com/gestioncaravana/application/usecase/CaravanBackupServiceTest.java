@@ -1,8 +1,8 @@
 package com.gestioncaravana.application.usecase;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.gestioncaravana.application.model.CaravanBackupView;
 import com.gestioncaravana.application.port.in.CreateCaravanUseCase.CreateCaravanCommand;
 import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
@@ -13,20 +13,26 @@ import com.gestioncaravana.application.port.out.CaravanFeatCatalogPort;
 import com.gestioncaravana.application.port.out.CaravanFeatRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
-import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort;
-import com.gestioncaravana.domain.CaravanCampaign;
+import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
 import com.gestioncaravana.domain.CaravanBeast;
 import com.gestioncaravana.domain.CaravanBeastAssignmentType;
+import com.gestioncaravana.domain.CaravanBeastSourceType;
+import com.gestioncaravana.domain.CaravanCampaign;
 import com.gestioncaravana.domain.CaravanCargo;
 import com.gestioncaravana.domain.CaravanCargoSourceType;
+import com.gestioncaravana.domain.CaravanDayResolution;
 import com.gestioncaravana.domain.CaravanFeat;
 import com.gestioncaravana.domain.CaravanFeatAcquisitionSourceType;
-import com.gestioncaravana.domain.CaravanDayResolution;
+import com.gestioncaravana.domain.CaravanMainStats;
 import com.gestioncaravana.domain.CaravanSupplyState;
 import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
 import com.gestioncaravana.domain.CaravanWagonImprovement;
+import com.gestioncaravana.domain.TravelerContract;
+import com.gestioncaravana.domain.TravelerRoleCatalog;
+import com.gestioncaravana.domain.TravelerRoleData;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -37,78 +43,104 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-class CaravanManagementServiceTest {
+class CaravanBackupServiceTest {
 
-  private InMemoryCaravanRepository repository;
-  private InMemoryActiveSelection activeSelection;
+  private InMemoryCaravanRepository campaignRepository;
   private InMemoryCaravanWagonRepository wagonRepository;
   private InMemoryWagonImprovementRepository wagonImprovementRepository;
+  private InMemoryTravelerRepository travelerRepository;
   private InMemoryCargoRepository cargoRepository;
+  private InMemoryBeastRepository beastRepository;
   private InMemoryFeatRepository featRepository;
-  private CaravanManagementService service;
+  private InMemorySupplyStateRepository supplyStateRepository;
+  private InMemoryDayResolutionRepository dayResolutionRepository;
+  private InMemoryActiveSelection activeSelection;
+  private CaravanManagementService managementService;
+  private CaravanBackupService backupService;
 
   @BeforeEach
   void setUp() {
-    repository = new InMemoryCaravanRepository();
-    activeSelection = new InMemoryActiveSelection();
+    campaignRepository = new InMemoryCaravanRepository();
     wagonRepository = new InMemoryCaravanWagonRepository();
     wagonImprovementRepository = new InMemoryWagonImprovementRepository();
+    travelerRepository = new InMemoryTravelerRepository();
     cargoRepository = new InMemoryCargoRepository();
+    beastRepository = new InMemoryBeastRepository();
     featRepository = new InMemoryFeatRepository();
-    service = new CaravanManagementService(
-        repository,
+    supplyStateRepository = new InMemorySupplyStateRepository();
+    dayResolutionRepository = new InMemoryDayResolutionRepository();
+    activeSelection = new InMemoryActiveSelection();
+
+    var clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
+    managementService = new CaravanManagementService(
+        campaignRepository,
         wagonRepository,
         wagonImprovementRepository,
-        new InMemoryTravelerRepository(),
+        travelerRepository,
         cargoRepository,
-        new InMemoryBeastRepository(),
+        beastRepository,
         featRepository,
-        new InMemorySupplyStateRepository(),
-        new InMemoryDayResolutionRepository(),
-        new InMemoryFeatCatalogPort(),
+        supplyStateRepository,
+        dayResolutionRepository,
+        new NoopCaravanFeatCatalogPort(),
         activeSelection,
-        Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
+        clock);
+    backupService = new CaravanBackupService(
+        campaignRepository,
+        wagonRepository,
+        wagonImprovementRepository,
+        travelerRepository,
+        cargoRepository,
+        beastRepository,
+        featRepository,
+        supplyStateRepository,
+        dayResolutionRepository,
+        activeSelection,
+        managementService);
   }
 
   @Test
-  void createsAndListsCaravans() {
-    var created = service.execute(new CreateCaravanCommand("Campaign", null, null, null, null, null));
+  void exportsAndRestoresACompleteBackup() {
+    var created = managementService.execute(new CreateCaravanCommand("North Caravan", "Primary route", 2, 1, 1, 1));
+    managementService.select(created.id());
 
-    assertThat(created.name()).isEqualTo("Campaign");
-    assertThat(created.level()).isEqualTo(1);
-    assertThat(created.active()).isFalse();
-    assertThat(service.list()).hasSize(1);
-  }
-
-  @Test
-  void selectsAndReturnsTheActiveCaravan() {
-    var created = service.execute(new CreateCaravanCommand("Campaign", null, null, null, null, null));
-
-    var selected = service.select(created.id());
-
-    assertThat(selected.active()).isTrue();
-    assertThat(service.getActive()).isPresent();
-    assertThat(service.getActive()).map(caravan -> caravan.id()).hasValue(created.id());
-  }
-
-  @Test
-  void deletesCaravansAndClearsTheActiveSelectionWhenNeeded() {
-    var created = service.execute(new CreateCaravanCommand("Campaign", null, null, null, null, null));
     var wagonId = UUID.randomUUID();
-    wagonRepository.save(CaravanWagon.create(wagonId, created.id(), "wagon", "Load Bearer", Instant.parse("2026-01-01T00:00:00Z")));
+    wagonRepository.save(CaravanWagon.create(
+        wagonId,
+        created.id(),
+        "wagon",
+        "Lead Wagon",
+        "Spices",
+        Instant.parse("2026-01-01T00:00:00Z")));
     wagonImprovementRepository.save(CaravanWagonImprovement.create(
         UUID.randomUUID(),
         created.id(),
         wagonId,
         "reinforced-axle",
         Instant.parse("2026-01-01T00:00:00Z")));
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        created.id(),
+        "Mara",
+        "Scout",
+        List.of(TravelerRoleCatalog.PASSENGER_CODE),
+        List.of(TravelerRoleCatalog.PASSENGER_CODE),
+        TravelerRoleCatalog.PASSENGER_CODE,
+        1,
+        TravelerRoleData.empty(),
+        wagonId,
+        null,
+        TravelerContract.create(BigDecimal.valueOf(12.5), "Quarterly", Instant.parse("2026-01-01T00:00:00Z")),
+        1,
+        BigDecimal.ONE,
+        Instant.parse("2026-01-01T00:00:00Z")));
     cargoRepository.save(CaravanCargo.create(
         UUID.randomUUID(),
         created.id(),
         CaravanCargoSourceType.CUSTOM,
         null,
+        "Medical supplies",
         "Supplies",
-        "Food",
         1,
         1,
         wagonId,
@@ -117,6 +149,27 @@ class CaravanManagementServiceTest {
         null,
         null,
         Instant.parse("2026-01-01T00:00:00Z")));
+    beastRepository.save(new CaravanBeast(
+        UUID.randomUUID(),
+        created.id(),
+        CaravanBeastSourceType.CUSTOM,
+        null,
+        "Mule",
+        "M",
+        1,
+        2,
+        null,
+        null,
+        null,
+        false,
+        "Reliable",
+        "Strong enough for the route",
+        null,
+        1,
+        CaravanBeastAssignmentType.NONE,
+        null,
+        Instant.parse("2026-01-01T00:00:00Z"),
+        Instant.parse("2026-01-01T00:00:00Z")));
     featRepository.save(CaravanFeat.create(
         UUID.randomUUID(),
         created.id(),
@@ -129,104 +182,62 @@ class CaravanManagementServiceTest {
         null,
         null,
         Instant.parse("2026-01-01T00:00:00Z")));
-    service.select(created.id());
-
-    service.delete(created.id());
-
-    assertThat(service.list()).isEmpty();
-    assertThat(service.getActive()).isEmpty();
-    assertThat(wagonRepository.findAllByCaravanId(created.id())).isEmpty();
-    assertThat(wagonImprovementRepository.findAllByCaravanIdAndWagonId(created.id(), wagonId)).isEmpty();
-    assertThat(cargoRepository.findAllByCaravanId(created.id())).isEmpty();
-    assertThat(featRepository.findAllByCaravanId(created.id())).isEmpty();
-  }
-
-  @Test
-  void throwsWhenSelectingUnknownCaravan() {
-    assertThatThrownBy(() -> service.select(UUID.randomUUID()))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Caravan not found");
-  }
-
-  @Test
-  void showsFeatNamesInTheCaravanSummary() {
-    var created = service.execute(new CreateCaravanCommand("Campaign", null, null, null, null, null));
-    featRepository.save(CaravanFeat.create(
+    dayResolutionRepository.save(new CaravanDayResolution(
         UUID.randomUUID(),
         created.id(),
-        "caravana-mejorada",
-        CaravanFeatAcquisitionSourceType.LEVEL_UP,
-        2,
-        null,
+        "backup-day-1",
         1,
-        true,
+        Instant.parse("2026-01-01T00:00:00Z"),
+        10,
+        8,
+        4,
+        2,
+        -2,
+        0,
+        "choices",
+        "contributions",
+        "warnings"));
+
+    var backup = backupService.export(created.id());
+
+    campaignRepository.save(new CaravanCampaign(
+        created.id(),
+        "Mutated Caravan",
+        "Mutated",
+        created.level(),
+        CaravanMainStats.withUpdatedAllocation(3, 1, 1, 1, 6),
+        created.discontent(),
+        created.status(),
+        created.createdAt(),
+        Instant.parse("2026-01-02T00:00:00Z")));
+    cargoRepository.save(CaravanCargo.create(
+        UUID.randomUUID(),
+        created.id(),
+        CaravanCargoSourceType.CUSTOM,
+        null,
+        "Temporary cargo",
+        "Supplies",
+        1,
+        1,
+        wagonId,
         null,
         null,
-        Instant.parse("2026-01-01T00:00:00Z")));
+        null,
+        null,
+        Instant.parse("2026-01-02T00:00:00Z")));
 
-    var caravan = service.getById(created.id());
+    var restored = backupService.execute(backup);
 
-    assertThat(caravan.feats()).containsExactly("Caravana Mejorada");
-  }
-
-  @Test
-  void adjustsLevelAndDiscontentForTheSelectedCaravan() {
-    var created = service.execute(new CreateCaravanCommand("Campaign", null, null, null, null, null));
-    service.select(created.id());
-
-    var leveledUp = service.execute(created.id(), new com.gestioncaravana.application.port.in.UpdateCaravanLevelUseCase.UpdateCaravanLevelCommand(1));
-    var moreDiscontent = service.execute(created.id(), new com.gestioncaravana.application.port.in.UpdateCaravanDiscontentUseCase.UpdateCaravanDiscontentCommand(2));
-    var leveledDown = service.execute(created.id(), new com.gestioncaravana.application.port.in.UpdateCaravanLevelUseCase.UpdateCaravanLevelCommand(-1));
-    var lessDiscontent = service.execute(created.id(), new com.gestioncaravana.application.port.in.UpdateCaravanDiscontentUseCase.UpdateCaravanDiscontentCommand(-1));
-
-    assertThat(leveledUp.level()).isEqualTo(2);
-    assertThat(moreDiscontent.discontent()).isEqualTo(2);
-    assertThat(leveledDown.level()).isEqualTo(1);
-    assertThat(lessDiscontent.discontent()).isEqualTo(1);
-    assertThat(lessDiscontent.active()).isTrue();
-    assertThat(service.getActive()).map(caravan -> caravan.level()).hasValue(1);
-  }
-
-  @Test
-  void rejectsUpdatesThatWouldBreakTheMinimumBounds() {
-    var created = service.execute(new CreateCaravanCommand("Campaign", null, null, null, null, null));
-
-    assertThatThrownBy(() -> service.execute(
-        created.id(),
-        new com.gestioncaravana.application.port.in.UpdateCaravanLevelUseCase.UpdateCaravanLevelCommand(-1)))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("level must be greater than or equal to 1");
-    assertThatThrownBy(() -> service.execute(
-        created.id(),
-        new com.gestioncaravana.application.port.in.UpdateCaravanDiscontentUseCase.UpdateCaravanDiscontentCommand(-1)))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("discontent must be greater than or equal to 0");
-  }
-
-  @Test
-  void updatesMainStatsOnlyWhenUnassignedPointsAreAvailable() {
-    var created = service.execute(new CreateCaravanCommand("Campaign", null, 2, 2, 1, 1));
-
-    var updated = service.execute(
-        created.id(),
-        new com.gestioncaravana.application.port.in.UpdateCaravanMainStatsUseCase.UpdateCaravanMainStatsCommand(3, 2, 1, 1));
-
-    assertThat(updated.mainStats().offense()).isEqualTo(3);
-    assertThat(updated.mainStats().defense()).isEqualTo(2);
-    assertThat(updated.mainStats().mobility()).isEqualTo(1);
-    assertThat(updated.mainStats().morale()).isEqualTo(1);
-    assertThat(updated.mainStats().unassignedPoints()).isZero();
-  }
-
-  @Test
-  void rejectsMainStatsUpdatesWhenThereAreNoFreePoints() {
-    var created = service.execute(new CreateCaravanCommand("Campaign", null, 2, 2, 2, 1));
-
-    assertThatThrownBy(() -> service.execute(
-        created.id(),
-        new com.gestioncaravana.application.port.in.UpdateCaravanMainStatsUseCase.UpdateCaravanMainStatsCommand(4, 2, 1, 1)))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("No unassigned points available");
+    assertThat(backup.schemaVersion()).isEqualTo(CaravanBackupView.CURRENT_SCHEMA_VERSION);
+    assertThat(backup.active()).isTrue();
+    assertThat(backup.wagons()).hasSize(1);
+    assertThat(restored.name()).isEqualTo("North Caravan");
+    assertThat(campaignRepository.findById(created.id())).map(CaravanCampaign::name).hasValue("North Caravan");
+    assertThat(cargoRepository.findAllByCaravanId(created.id())).hasSize(1);
+    assertThat(travelerRepository.findAllByCaravanId(created.id())).hasSize(1);
+    assertThat(wagonImprovementRepository.findAllByCaravanIdAndWagonId(created.id(), wagonId)).hasSize(1);
+    assertThat(dayResolutionRepository.findAllByCaravanId(created.id())).hasSize(1);
+    assertThat(activeSelection.getActiveCaravanId()).contains(created.id());
   }
 
   private static final class InMemoryCaravanRepository implements CaravanCampaignRepositoryPort {
@@ -292,6 +303,42 @@ class CaravanManagementServiceTest {
       return wagons.stream()
           .filter(wagon -> wagon.caravanId().equals(caravanId) && wagon.wagonTypeCode().equals(wagonTypeCode))
           .count();
+    }
+  }
+
+  private static final class InMemoryWagonImprovementRepository implements CaravanWagonImprovementRepositoryPort {
+    private final List<CaravanWagonImprovement> improvements = new ArrayList<>();
+
+    @Override
+    public CaravanWagonImprovement save(CaravanWagonImprovement improvement) {
+      improvements.removeIf(existing -> existing.id().equals(improvement.id()));
+      improvements.add(improvement);
+      return improvement;
+    }
+
+    @Override
+    public List<CaravanWagonImprovement> findAllByCaravanIdAndWagonId(UUID caravanId, UUID wagonId) {
+      return improvements.stream()
+          .filter(improvement -> improvement.caravanId().equals(caravanId) && improvement.wagonId().equals(wagonId))
+          .toList();
+    }
+
+    @Override
+    public Optional<CaravanWagonImprovement> findById(UUID caravanId, UUID wagonId, UUID improvementId) {
+      return improvements.stream()
+          .filter(improvement ->
+              improvement.caravanId().equals(caravanId)
+                  && improvement.wagonId().equals(wagonId)
+                  && improvement.id().equals(improvementId))
+          .findFirst();
+    }
+
+    @Override
+    public void deleteById(UUID caravanId, UUID wagonId, UUID improvementId) {
+      improvements.removeIf(improvement ->
+          improvement.caravanId().equals(caravanId)
+              && improvement.wagonId().equals(wagonId)
+              && improvement.id().equals(improvementId));
     }
   }
 
@@ -425,42 +472,6 @@ class CaravanManagementServiceTest {
     }
   }
 
-  private static final class InMemoryWagonImprovementRepository implements CaravanWagonImprovementRepositoryPort {
-    private final List<CaravanWagonImprovement> improvements = new ArrayList<>();
-
-    @Override
-    public CaravanWagonImprovement save(CaravanWagonImprovement improvement) {
-      improvements.removeIf(existing -> existing.id().equals(improvement.id()));
-      improvements.add(improvement);
-      return improvement;
-    }
-
-    @Override
-    public List<CaravanWagonImprovement> findAllByCaravanIdAndWagonId(UUID caravanId, UUID wagonId) {
-      return improvements.stream()
-          .filter(improvement -> improvement.caravanId().equals(caravanId) && improvement.wagonId().equals(wagonId))
-          .toList();
-    }
-
-    @Override
-    public Optional<CaravanWagonImprovement> findById(UUID caravanId, UUID wagonId, UUID improvementId) {
-      return improvements.stream()
-          .filter(improvement ->
-              improvement.caravanId().equals(caravanId)
-                  && improvement.wagonId().equals(wagonId)
-                  && improvement.id().equals(improvementId))
-          .findFirst();
-    }
-
-    @Override
-    public void deleteById(UUID caravanId, UUID wagonId, UUID improvementId) {
-      improvements.removeIf(improvement ->
-          improvement.caravanId().equals(caravanId)
-              && improvement.wagonId().equals(wagonId)
-              && improvement.id().equals(improvementId));
-    }
-  }
-
   private static final class InMemoryFeatRepository implements CaravanFeatRepositoryPort {
     private final List<CaravanFeat> feats = new ArrayList<>();
 
@@ -498,32 +509,6 @@ class CaravanManagementServiceTest {
     @Override
     public void deleteByCaravanId(UUID caravanId) {
       feats.removeIf(feat -> feat.caravanId().equals(caravanId));
-    }
-  }
-
-  private static final class InMemoryFeatCatalogPort implements CaravanFeatCatalogPort {
-    @Override
-    public List<com.gestioncaravana.domain.CaravanFeatType> all() {
-      return List.of(
-          new com.gestioncaravana.domain.CaravanFeatType(
-              "caravana-mejorada",
-              "Caravana Mejorada",
-              "La caravana mejora su rendimiento general.",
-              List.of("Nivel 2"),
-              "Aumenta en 1 dos de las estadísticas principales hasta una puntuación máxima de +10.",
-              "Esta dote puede seleccionarse varias veces.",
-              null,
-              true,
-              999,
-              2,
-              null,
-              null,
-              null));
-    }
-
-    @Override
-    public Optional<com.gestioncaravana.domain.CaravanFeatType> findByCode(String code) {
-      return all().stream().filter(feat -> feat.code().equals(code)).findFirst();
     }
   }
 
@@ -592,6 +577,18 @@ class CaravanManagementServiceTest {
     @Override
     public void clear() {
       this.activeId = null;
+    }
+  }
+
+  private static final class NoopCaravanFeatCatalogPort implements CaravanFeatCatalogPort {
+    @Override
+    public List<com.gestioncaravana.domain.CaravanFeatType> all() {
+      return List.of();
+    }
+
+    @Override
+    public Optional<com.gestioncaravana.domain.CaravanFeatType> findByCode(String code) {
+      return Optional.empty();
     }
   }
 }

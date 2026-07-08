@@ -23,7 +23,9 @@ public interface AddCaravanBeastUseCase {
       String specialNote,
       String description,
       String customNotes,
-      BigDecimal occupiedSpace) {
+      Integer consumption,
+      BigDecimal occupiedSpace,
+      Integer quantity) {
     public AddCaravanBeastCommand(
         CaravanBeastSourceType sourceType,
         String catalogBeastCode,
@@ -52,7 +54,79 @@ public interface AddCaravanBeastUseCase {
           specialNote,
           description,
           customNotes,
-          null);
+          null,
+          null,
+          1);
+    }
+
+    public AddCaravanBeastCommand(
+        CaravanBeastSourceType sourceType,
+        String catalogBeastCode,
+        String name,
+        String size,
+        Integer strength,
+        Integer speed,
+        Integer thermalAdaptation,
+        Integer basePrice,
+        Integer trainedPrice,
+        Boolean fourLegged,
+        String specialNote,
+        String description,
+        String customNotes,
+        Integer consumption,
+        Integer quantity) {
+      this(
+          sourceType,
+          catalogBeastCode,
+          name,
+          size,
+          strength,
+          speed,
+          thermalAdaptation,
+          basePrice,
+          trainedPrice,
+          fourLegged,
+          specialNote,
+          description,
+          customNotes,
+          consumption,
+          null,
+          quantity);
+    }
+
+    public AddCaravanBeastCommand(
+        CaravanBeastSourceType sourceType,
+        String catalogBeastCode,
+        String name,
+        String size,
+        Integer strength,
+        Integer speed,
+        Integer thermalAdaptation,
+      Integer basePrice,
+      Integer trainedPrice,
+      Boolean fourLegged,
+      String specialNote,
+      String description,
+      String customNotes,
+      Integer consumption,
+      BigDecimal occupiedSpace) {
+      this(
+          sourceType,
+          catalogBeastCode,
+          name,
+          size,
+          strength,
+          speed,
+          thermalAdaptation,
+          basePrice,
+          trainedPrice,
+          fourLegged,
+          specialNote,
+          description,
+          customNotes,
+          consumption,
+          occupiedSpace,
+          1);
     }
   }
 }

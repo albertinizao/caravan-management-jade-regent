@@ -41,8 +41,8 @@ public record CaravanCargo(
     if (quantity < 1) {
       throw new IllegalArgumentException("quantity must be greater than or equal to 1");
     }
-    if (cargoUnits < 1) {
-      throw new IllegalArgumentException("cargoUnits must be greater than or equal to 1");
+    if (cargoUnits < 0) {
+      throw new IllegalArgumentException("cargoUnits must be greater than or equal to 0");
     }
     if (currentProvisions != null && currentProvisions < 0) {
       throw new IllegalArgumentException("currentProvisions must be greater than or equal to 0");

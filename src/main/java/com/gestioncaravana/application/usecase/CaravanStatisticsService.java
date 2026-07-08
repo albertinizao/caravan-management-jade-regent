@@ -224,7 +224,13 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
 
     for (var wagon : wagons) {
       var wagonType = requireWagonType(wagon.wagonTypeCode());
-      var derived = deriveWagonStats(wagon.displayNameOr(wagonType.name()), wagonType, improvementRepository.findAllByCaravanIdAndWagonId(caravan.id(), wagon.id()));
+      var derived = deriveWagonStats(
+          wagon.displayNameOr(wagonType.name()),
+          wagonType,
+          improvementRepository.findAllByCaravanIdAndWagonId(caravan.id(), wagon.id()),
+          beasts,
+          wagon.id(),
+          contributions);
       travelerCapacity += derived.travelerCapacity();
       cargoCapacity += derived.cargoCapacity();
       consumption += derived.consumption();
@@ -235,17 +241,12 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
 
     var cargoLoad = cargo.stream().mapToInt(CaravanCargo::cargoUnits).sum();
     var cargoManagers = countTravelersWithRole(travelers, "encargado-de-suministros");
-    if (cargoManagers > 0) {
-      var bonus = cargoCapacity == 0 ? 0 : Math.max(1, Math.round(cargoCapacity * 0.1f)) * cargoManagers;
-      cargoCapacity += bonus;
-      contributions.add(contribution("cargoCapacity", "ROLE", "encargado-de-suministros", "Encargados de suministros", "+" + bonus, "ADD", "Cada encargado de suministros aporta +10% a la capacidad"));
-    }
-
     var impeccableOrganization = countActiveFeats(feats, "organizacion-impecable");
-    if (impeccableOrganization > 0 && cargoCapacity > 0) {
-      var bonus = Math.round(cargoCapacity * 0.1f * impeccableOrganization);
-      cargoCapacity += bonus;
-      contributions.add(contribution("cargoCapacity", "FEAT", "organizacion-impecable", "Organización Impecable", "+" + bonus, "ADD", "Cada selección activa aumenta la capacidad de cargamento en un 10%"));
+    var cargoCapacityBeforeBonuses = cargoCapacity;
+    cargoCapacity = CaravanCargoCapacityCalculator.calculate(cargoCapacity, cargoManagers, impeccableOrganization);
+    var cargoCapacityBonus = cargoCapacity - cargoCapacityBeforeBonuses;
+    if (cargoCapacityBonus > 0) {
+      contributions.add(contribution("cargoCapacity", "BONUS", "cargo-capacity-bonuses", "Bonos de cargamento", "+" + cargoCapacityBonus, "ADD", "Organización Impecable y Encargados de suministros aumentan la capacidad de cargamento en un 10% por selección activa"));
     }
 
     var wagonConsumption = consumption;
@@ -332,7 +333,13 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
     return Math.max(0, speed);
   }
 
-  private WagonStats deriveWagonStats(String wagonName, WagonType wagonType, List<CaravanWagonImprovement> improvements) {
+  private WagonStats deriveWagonStats(
+      String wagonName,
+      WagonType wagonType,
+      List<CaravanWagonImprovement> improvements,
+      List<CaravanBeast> beasts,
+      UUID wagonId,
+      List<CaravanStatContributionView> contributions) {
     var currentTravelerCapacity = wagonType.travelerCapacity();
     var currentCargoCapacity = wagonType.cargoCapacity();
     var currentConsumption = wagonType.consumption();
@@ -363,6 +370,16 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
         currentConsumption += type.consumptionBonus();
       }
     }
+
+    var beastConsumption = beasts.stream()
+        .filter(beast -> beast.assignmentType() == CaravanBeastAssignmentType.TRAVELER)
+        .filter(beast -> beast.assignedWagonId() != null && beast.assignedWagonId().equals(wagonId))
+        .mapToInt(CaravanBeast::consumption)
+        .sum();
+    if (beastConsumption > 0) {
+      contributions.add(contribution("consumption", "BEAST", wagonId.toString(), wagonName, "+" + beastConsumption, "ADD", "Consumo de bestias viajeras"));
+    }
+    currentConsumption += beastConsumption;
 
     return new WagonStats(wagonName, Math.max(0, currentTravelerCapacity), Math.max(0, currentCargoCapacity), Math.max(0, currentConsumption));
   }

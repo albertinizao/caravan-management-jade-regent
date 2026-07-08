@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 
 import { useToast } from "@/composables/useToast";
 import { getActiveCaravan, listCaravans } from "@/services/caravans";
-import { addCaravanFeat, listCaravanFeatCatalog, listCaravanFeats, updateCaravanFeat } from "@/services/feats";
+import { addCaravanFeat, deleteCaravanFeat, listCaravanFeatCatalog, listCaravanFeats, updateCaravanFeat } from "@/services/feats";
 import type { Caravan } from "@/types/caravan";
 import type { CaravanFeat, CaravanFeatAcquisitionSourceType, CaravanFeatCatalogItem } from "@/types/feat";
 
@@ -285,6 +285,32 @@ async function submitFeat() {
   }
 }
 
+async function deleteFeat(feat: CaravanFeat) {
+  if (!activeCaravan.value) {
+    return;
+  }
+
+  const confirmed = window.confirm(`¿Seguro que quieres eliminar la dote ${feat.name}? Esta acción no se puede deshacer.`);
+  if (!confirmed) {
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = `delete:${feat.id}`;
+  error.value = null;
+
+  try {
+    await deleteCaravanFeat(activeCaravan.value.id, feat.id);
+    showToast(`Dote eliminada: ${feat.name}.`, "success");
+    await refresh();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Failed to delete feat";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
 onMounted(refresh);
 </script>
 
@@ -356,6 +382,16 @@ onMounted(refresh);
                 </td>
                 <td class="actions">
                   <button class="ghost-button" type="button" @click="openEditModal(feat)">Editar</button>
+                  <button
+                    class="danger-button"
+                    type="button"
+                    :disabled="submitting"
+                    :aria-busy="isPending(`delete:${feat.id}`)"
+                    @click="deleteFeat(feat)"
+                  >
+                    <span v-if="isPending(`delete:${feat.id}`)" class="button-spinner" aria-hidden="true"></span>
+                    <span>{{ isPending(`delete:${feat.id}`) ? "Eliminando…" : "Borrar" }}</span>
+                  </button>
                 </td>
               </tr>
             </tbody>
@@ -701,7 +737,9 @@ onMounted(refresh);
 }
 
 .actions {
-  text-align: right;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .actions button,
@@ -727,9 +765,16 @@ onMounted(refresh);
 }
 
 .primary-button:disabled,
-.ghost-button:disabled {
+.ghost-button:disabled,
+.danger-button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
+}
+
+.danger-button {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fecaca;
 }
 
 .badge {

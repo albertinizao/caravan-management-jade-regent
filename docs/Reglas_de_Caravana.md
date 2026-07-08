@@ -154,7 +154,7 @@ Los viajeros de vuestra caravana están acostumbrados a defenderse de posibles a
 Vuestra caravana es objetivamente mejor que otras.
 
 - **Requisito:** Nivel 2
-- **Beneficio:** Aumenta en 1 dos de las estadísticas principales hasta una puntuación máxima de +10.
+- **Beneficio:** Cada instancia añade 2 puntos libres a las estadísticas principales de la caravana.
 - **Especial:** Esta dote puede seleccionarse varias veces.
 
 #### Caravana Bendecida

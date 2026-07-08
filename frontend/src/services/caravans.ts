@@ -1,5 +1,6 @@
 import { fetchJson } from "@/services/http";
 import type {
+  CaravanBackup,
   Caravan,
   CaravanDayCyclePreview,
   CaravanDayCycleResult,
@@ -66,6 +67,17 @@ export function getCaravan(id: string) {
 
 export function getCaravanStatistics(id: string) {
   return fetchJson<CaravanStatistics>(`/caravans/${id}/statistics`);
+}
+
+export function exportCaravanBackup(id: string) {
+  return fetchJson<CaravanBackup>(`/caravans/${id}/backup`);
+}
+
+export function importCaravanBackup(payload: CaravanBackup) {
+  return fetchJson<Caravan>("/caravans/backup", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export interface UpdateCaravanMainStatsPayload {

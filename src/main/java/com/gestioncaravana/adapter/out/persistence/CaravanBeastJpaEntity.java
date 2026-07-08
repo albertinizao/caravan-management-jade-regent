@@ -57,13 +57,22 @@ public class CaravanBeastJpaEntity {
   @Column(length = 4000)
   private String customNotes;
 
+  @Column(nullable = true)
+  private Integer consumption;
+
+  @Column(length = 2000)
+  private String availableRoleCodesCsv;
+
+  @Column
+  private String activeRoleCode;
+
   @Column(nullable = false)
   private String assignmentType;
 
   @Column
   private String assignedWagonId;
 
-  @Column(precision = 4, scale = 1)
+  @Column(precision = 4, scale = 1, nullable = true)
   private BigDecimal occupiedSpace;
 
   @Column(nullable = false)
@@ -192,6 +201,30 @@ public class CaravanBeastJpaEntity {
 
   public void setCustomNotes(String customNotes) {
     this.customNotes = customNotes;
+  }
+
+  public Integer getConsumption() {
+    return consumption;
+  }
+
+  public void setConsumption(Integer consumption) {
+    this.consumption = consumption;
+  }
+
+  public String getAvailableRoleCodesCsv() {
+    return availableRoleCodesCsv;
+  }
+
+  public void setAvailableRoleCodesCsv(String availableRoleCodesCsv) {
+    this.availableRoleCodesCsv = availableRoleCodesCsv;
+  }
+
+  public String getActiveRoleCode() {
+    return activeRoleCode;
+  }
+
+  public void setActiveRoleCode(String activeRoleCode) {
+    this.activeRoleCode = activeRoleCode;
   }
 
   public String getAssignmentType() {

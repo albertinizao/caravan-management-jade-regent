@@ -19,5 +19,7 @@ public interface CaravanBeastRepositoryPort {
 
   Optional<CaravanBeast> findById(UUID caravanId, UUID beastId);
 
+  void deleteByCaravanIdAndId(UUID caravanId, UUID beastId);
+
   void deleteByCaravanId(UUID caravanId);
 }

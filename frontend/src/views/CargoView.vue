@@ -161,7 +161,10 @@ const categories = computed(() =>
 );
 
 const catalogQuantityValue = computed(() => parsePositiveInteger(catalogQuantity.value, selectedCatalogItem.value?.defaultQuantity ?? 1));
-const catalogCargoUnitsValue = computed(() => parsePositiveInteger(catalogCargoUnits.value, selectedCatalogItem.value?.defaultCargoUnits ?? 1));
+const catalogCargoUnitsValue = computed(() => {
+  const fallback = selectedCatalogItem.value?.defaultCargoUnits ?? 1;
+  return fallback === 0 ? parseNonNegativeInteger(catalogCargoUnits.value, fallback) : parsePositiveInteger(catalogCargoUnits.value, fallback);
+});
 const customQuantityValue = computed(() => parsePositiveInteger(customQuantity.value, 1));
 const customCargoUnitsValue = computed(() => parsePositiveInteger(customCargoUnits.value, 1));
 const selectedCargoLoad = computed(() => (selectedCargo.value ? totalCargoUnits(selectedCargo.value.quantity, selectedCargo.value.cargoUnits) : 0));
@@ -180,6 +183,7 @@ const customSelectedWagon = computed(() =>
 const selectedCargoAvailableWagons = computed(() => (selectedCargo.value ? filterWagonsForCargo(selectedCargo.value) : []));
 const catalogQuantityMax = computed(() => maxQuantityForWagon(catalogWagonId.value, catalogCargoUnitsValue.value));
 const customQuantityMax = computed(() => maxQuantityForWagon(customWagonId.value, customCargoUnitsValue.value));
+const catalogCargoUnitsMin = computed(() => (selectedCatalogItem.value?.defaultCargoUnits === 0 ? 0 : 1));
 const selectedCargoGroup = computed<GroupedCargoRow | null>(() => {
   const cargoId = selectedCargo.value?.id;
   if (!cargoId) {
@@ -304,6 +308,15 @@ function parsePositiveInteger(value: string, fallback: number) {
   return Math.floor(parsed);
 }
 
+function parseNonNegativeInteger(value: string, fallback: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+
+  return Math.floor(parsed);
+}
+
 function totalCargoUnits(quantity: number, cargoUnits: number) {
   return quantity * cargoUnits;
 }
@@ -369,7 +382,15 @@ function canFitCargoLoad(wagon: CaravanWagon, requiredCargoUnits: number, curren
 }
 
 function maxQuantityForWagon(wagonId: string, cargoUnits: number) {
-  if (!wagonId || cargoUnits < 1) {
+  if (!wagonId) {
+    return 1;
+  }
+
+  if (cargoUnits === 0) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  if (cargoUnits < 1) {
     return 1;
   }
 
@@ -996,7 +1017,7 @@ onMounted(refresh);
                 </label>
                 <label>
                   <span>Unidades de carga</span>
-                  <input v-model="catalogCargoUnits" type="number" min="1" :disabled="!selectedCatalogItem.cargoUnitsEditable" />
+                  <input v-model="catalogCargoUnits" type="number" :min="catalogCargoUnitsMin" :disabled="!selectedCatalogItem.cargoUnitsEditable" />
                 </label>
               </div>
 

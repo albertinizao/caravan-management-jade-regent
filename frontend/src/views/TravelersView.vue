@@ -32,6 +32,7 @@ const pendingAction = ref<string | null>(null);
 const error = ref<string | null>(null);
 const search = ref("");
 const roleFilter = ref("all");
+const availableRoleFilter = ref("all");
 const wagonFilter = ref("all");
 const selectedTraveler = ref<CaravanTraveler | null>(null);
 const travelerMode = ref<"view" | "edit">("view");
@@ -109,6 +110,9 @@ const visibleTravelers = computed(() => {
     .filter((traveler) => (query ? traveler.fullName.toLowerCase().includes(query) : true))
     .filter((traveler) =>
       roleFilter.value === "all" || traveler.activeRoleCodes.includes(roleFilter.value) || traveler.activeRoleCode === roleFilter.value,
+    )
+    .filter((traveler) =>
+      availableRoleFilter.value === "all" || traveler.availableRoleCodes.includes(availableRoleFilter.value),
     )
     .filter((traveler) => wagonFilter.value === "all" || traveler.wagonId === wagonFilter.value);
 });
@@ -877,6 +881,16 @@ onMounted(refresh);
             </label>
 
             <label>
+              <span>Rol disponible</span>
+              <select v-model="availableRoleFilter">
+                <option value="all">Todos</option>
+                <option v-for="role in roleFilterOptions" :key="`available-${role.code}`" :value="role.code">
+                  {{ role.name }}
+                </option>
+              </select>
+            </label>
+
+            <label>
               <span>Carro</span>
               <select v-model="wagonFilter">
                 <option value="all">Todos</option>
@@ -1399,7 +1413,7 @@ p {
 
 .filters {
   display: grid;
-  grid-template-columns: 1.4fr 0.9fr 0.9fr;
+  grid-template-columns: 1.4fr 0.9fr 0.9fr 0.9fr;
   gap: 0.75rem;
   margin: 1rem 0;
 }

@@ -25,7 +25,7 @@ import {
   repairCaravanWagon,
   updateCaravanWagon,
 } from "@/services/wagons";
-import { listCaravanTravelers, updateCaravanTravelerWagon } from "@/services/travelers";
+import { listCaravanTravelers, updateCaravanTraveler, updateCaravanTravelerWagon } from "@/services/travelers";
 import type { Caravan } from "@/types/caravan";
 import type { CaravanBeast } from "@/types/beast";
 import type { CaravanCargo, CaravanCargoSummary, CargoCatalogItem } from "@/types/cargo";
@@ -79,7 +79,8 @@ const wagonNameEditorOpen = ref(false);
 const selectedWagonCargo = ref<CaravanCargo[]>([]);
 const wagonCargoCatalog = ref<CargoCatalogItem[]>([]);
 const assignmentModalOpen = ref(false);
-const assignmentModalMode = ref<"traveler" | "beast-traveler" | "beast-draft">("traveler");
+const assignmentModalMode = ref<"traveler" | "carretero" | "beast-traveler" | "beast-draft">("traveler");
+const assignmentModalSearch = ref("");
 const assignmentModalError = ref<string | null>(null);
 const assignmentModalSuccess = ref<{ id: number; message: string } | null>(null);
 let assignmentModalSuccessId = 0;
@@ -114,6 +115,7 @@ const improvementSearch = ref("");
 const wagonsTypeFilter = ref<"all" | "viajeros" | "mercancias" | "especiales">("all");
 const wagonsSearch = ref("");
 const draftMediumSlotsPerLargeBeast = 4;
+const passengerRoleCode = "pasajero";
 const carreteroRoleCode = "carretero";
 const spaceFormatter = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 0,
@@ -168,6 +170,7 @@ interface WagonRowSummary {
   wagon: CaravanWagon;
   currentHitPoints: number;
   travelerCount: number;
+  travelerSpace: number;
   travelerBeastSpace: number;
   travelerCapacity: number;
   cargoLoad: number;
@@ -289,7 +292,11 @@ function wagonTravelerBeastsFor(wagonId: string) {
 }
 
 function wagonTravelerBeastSpaceFor(wagonId: string) {
-  return wagonTravelerBeastsFor(wagonId).length;
+  return wagonTravelerBeastsFor(wagonId).reduce((total, beast) => total + beast.occupiedSpace, 0);
+}
+
+function wagonTravelerBeastConsumptionFor(wagonId: string) {
+  return wagonTravelerBeastsFor(wagonId).reduce((total, beast) => total + beast.consumption, 0);
 }
 
 function wagonDraftBeastsFor(wagonId: string) {
@@ -467,7 +474,7 @@ function wagonAlertsFor(wagon: CaravanWagon): WagonAlert[] {
   const requirement = wagonDraftRequirementFor(wagon);
   const draftBeasts = wagonDraftBeastsFor(wagon.id);
   const carretero = wagonCarreteroFor(wagon.id);
-  const travelersCount = wagonTravelersFor(wagon.id).length;
+  const travelerSpace = wagonTravelersFor(wagon.id).reduce((total, traveler) => total + traveler.occupiedSpace, 0);
   const travelerBeastSpace = wagonTravelerBeastSpaceFor(wagon.id);
   const travelerCapacity = wagon.travelerCapacity;
   const cargoLoad = wagonCargoLoadFor(wagon.id);
@@ -497,11 +504,11 @@ function wagonAlertsFor(wagon: CaravanWagon): WagonAlert[] {
     });
   }
 
-  if (travelersCount + travelerBeastSpace > travelerCapacity) {
+  if (travelerSpace + travelerBeastSpace > travelerCapacity) {
     alerts.push({
       kind: "danger",
       title: "Capacidad de viajeros superada",
-      description: `Transporta ${formatSpace(travelersCount + travelerBeastSpace)} plazas ocupadas para una capacidad máxima de ${travelerCapacity}.`,
+      description: `Transporta ${formatSpace(travelerSpace + travelerBeastSpace)} plazas ocupadas para una capacidad máxima de ${travelerCapacity}.`,
     });
   }
 
@@ -520,6 +527,7 @@ function buildWagonRowSummary(wagon: CaravanWagon): WagonRowSummary {
   const draftRequirement = wagonDraftRequirementFor(wagon);
   const draftBeasts = wagonDraftBeastsFor(wagon.id);
   const travelerCount = wagonTravelersFor(wagon.id).length;
+  const travelerSpace = wagonTravelersFor(wagon.id).reduce((total, traveler) => total + traveler.occupiedSpace, 0);
   const travelerBeastSpace = wagonTravelerBeastSpaceFor(wagon.id);
   const travelerCapacity = wagon.travelerCapacity;
   const cargoLoad = wagonCargoLoadFor(wagon.id);
@@ -533,12 +541,14 @@ function buildWagonRowSummary(wagon: CaravanWagon): WagonRowSummary {
   const hasCarretero = wagonCarreteroFor(wagon.id) !== null;
   const speed = wagonSpeedFor(wagon);
   const totalConsumption = wagon.consumption
-    + wagonTravelersFor(wagon.id).reduce((total, traveler) => total + traveler.consumption, 0);
+    + wagonTravelersFor(wagon.id).reduce((total, traveler) => total + traveler.consumption, 0)
+    + wagonTravelerBeastConsumptionFor(wagon.id);
 
   return {
     wagon,
     currentHitPoints,
     travelerCount,
+    travelerSpace,
     travelerBeastSpace,
     travelerCapacity,
     cargoLoad,
@@ -560,6 +570,9 @@ function buildWagonRowSummary(wagon: CaravanWagon): WagonRowSummary {
 const visibleWagonRows = computed(() => visibleWagons.value.map((wagon) => buildWagonRowSummary(wagon)));
 const visibleWagonTotalConsumption = computed(() =>
   visibleWagonRows.value.reduce((total, row) => total + row.totalConsumption, 0),
+);
+const selectedWagonSummary = computed<WagonRowSummary | null>(() =>
+  selectedWagon.value ? buildWagonRowSummary(selectedWagon.value) : null,
 );
 const wagonAlertsSummary = computed<WagonRowSummary | null>(() =>
   wagonAlertsModalTarget.value ? buildWagonRowSummary(wagonAlertsModalTarget.value) : null,
@@ -584,6 +597,14 @@ const selectedWagonTravelerBeasts = computed(() =>
   selectedWagon.value
     ? beasts.value.filter((beast) => beast.assignmentType === "TRAVELER" && beast.assignedWagonId === selectedWagon.value?.id)
     : []
+);
+
+const selectedWagonTravelerSpace = computed(() =>
+  selectedWagonTravelers.value.reduce((total, traveler) => total + traveler.occupiedSpace, 0),
+);
+
+const selectedWagonTravelerBeastSpace = computed(() =>
+  selectedWagonTravelerBeasts.value.reduce((total, beast) => total + beast.occupiedSpace, 0),
 );
 
 const selectedWagonDraftBeasts = computed(() =>
@@ -645,6 +666,7 @@ const selectedWagonTotalConsumption = computed(() =>
   selectedWagon.value
     ? selectedWagon.value.consumption
       + selectedWagonTravelers.value.reduce((total, traveler) => total + traveler.consumption, 0)
+      + selectedWagonTravelerBeasts.value.reduce((total, beast) => total + beast.consumption, 0)
     : 0,
 );
 
@@ -669,8 +691,12 @@ const selectedCargoCatalogItem = computed(() =>
 );
 
 const cargoQuantityValue = computed(() => parsePositiveInteger(cargoQuantity.value, selectedCargoCatalogItem.value?.defaultQuantity ?? 1));
-const cargoUnitsValue = computed(() => parsePositiveInteger(cargoUnits.value, selectedCargoCatalogItem.value?.defaultCargoUnits ?? 1));
+const cargoUnitsValue = computed(() => {
+  const fallback = selectedCargoCatalogItem.value?.defaultCargoUnits ?? 1;
+  return fallback === 0 ? parseNonNegativeInteger(cargoUnits.value, fallback) : parsePositiveInteger(cargoUnits.value, fallback);
+});
 const cargoQuantityMax = computed(() => maxQuantityForCargo(cargoUnitsValue.value));
+const cargoUnitsMin = computed(() => (selectedCargoCatalogItem.value?.defaultCargoUnits === 0 ? 0 : 1));
 const selectedCargoRequiredMetadataKeys = computed(
   () => selectedCargoCatalogItem.value?.requiredMetadataKeys ?? [],
 );
@@ -751,8 +777,8 @@ const unassignedTravelers = computed(() => travelers.value.filter((traveler) => 
 const unassignedBeasts = computed(() => beasts.value.filter((beast) => beast.assignmentType === "NONE"));
 
 const selectedWagonOccupancy = computed(() =>
-  selectedWagonTravelers.value.length
-  + selectedWagonTravelerBeasts.value.length,
+  selectedWagonTravelerSpace.value
+  + selectedWagonTravelerBeastSpace.value,
 );
 const selectedWagonCapacityRemaining = computed(() =>
   selectedWagon.value ? Math.max(0, selectedWagon.value.travelerCapacity - selectedWagonOccupancy.value) : 0
@@ -763,13 +789,13 @@ const selectedWagonCrewSegments = computed<WagonMeterSegment[]>(() => {
     [
       {
         key: "crew-travelers",
-        label: `${selectedWagonTravelers.value.length} viajeros`,
-        amount: selectedWagonTravelers.value.length,
+        label: `${formatSpace(selectedWagonTravelerSpace.value)} de viajeros`,
+        amount: selectedWagonTravelerSpace.value,
       },
       {
         key: "crew-beasts",
-        label: `${selectedWagonTravelerBeasts.value.length} bestias viajeras`,
-        amount: selectedWagonTravelerBeasts.value.length,
+        label: `${selectedWagonTravelerBeastSpace.value} bestias viajeras`,
+        amount: selectedWagonTravelerBeastSpace.value,
       },
     ],
     capacity,
@@ -808,10 +834,52 @@ const selectedWagonDraftOccupancySegments = computed<WagonMeterSegment[]>(() => 
   );
 });
 const availableTravelersForSelectedWagon = computed(() =>
-  selectedWagonCapacityRemaining.value >= 1 ? unassignedTravelers.value : []
+  selectedWagon.value
+    ? unassignedTravelers.value.filter((traveler) => traveler.occupiedSpace <= selectedWagonCapacityRemaining.value)
+    : []
 );
+const availableCarreterosForSelectedWagon = computed(() =>
+  selectedWagon.value
+    ? travelers.value.filter((traveler) =>
+      traveler.activeRoleCode === passengerRoleCode
+      && traveler.activeRoleCodes.includes(passengerRoleCode)
+      && traveler.availableRoleCodes.includes(carreteroRoleCode)
+      && traveler.drivingWagonId == null,
+    ).slice().sort((left, right) => {
+      const leftInSelectedWagon = left.wagonId === selectedWagon.value?.id ? 1 : 0;
+      const rightInSelectedWagon = right.wagonId === selectedWagon.value?.id ? 1 : 0;
+      if (leftInSelectedWagon !== rightInSelectedWagon) {
+        return rightInSelectedWagon - leftInSelectedWagon;
+      }
+
+      return left.fullName.localeCompare(right.fullName);
+    })
+    : []
+);
+const filteredAvailableTravelersForSelectedWagon = computed(() => {
+  if (assignmentModalMode.value !== "traveler" && assignmentModalMode.value !== "carretero") {
+    return [];
+  }
+
+  const query = assignmentModalSearch.value.trim().toLowerCase();
+  if (!query) {
+    return assignmentModalMode.value === "carretero"
+      ? availableCarreterosForSelectedWagon.value
+      : availableTravelersForSelectedWagon.value;
+  }
+
+  const travelers = assignmentModalMode.value === "carretero"
+    ? availableCarreterosForSelectedWagon.value
+    : availableTravelersForSelectedWagon.value;
+
+  return travelers.filter((traveler) =>
+    traveler.fullName.toLowerCase().includes(query)
+    || traveler.activeRoleName.toLowerCase().includes(query)
+    || traveler.availableRoleCodes.some((roleCode) => roleCode.toLowerCase().includes(query)),
+  );
+});
 const availableTravelerBeastsForSelectedWagon = computed(() =>
-  selectedWagon.value && selectedWagonCapacityRemaining.value >= 1
+  selectedWagon.value && selectedWagonCapacityRemaining.value >= 0.5
     ? unassignedBeasts.value
     : []
 );
@@ -828,6 +896,9 @@ const assignmentModalTitle = computed(() => {
   if (assignmentModalMode.value === "traveler") {
     return "Asignar viajeros sin carro";
   }
+  if (assignmentModalMode.value === "carretero") {
+    return "Asignar carretero";
+  }
   if (assignmentModalMode.value === "beast-traveler") {
     return "Asignar bestias como viajeras";
   }
@@ -840,9 +911,15 @@ const assignmentModalHint = computed(() => {
   }
 
   if (assignmentModalMode.value === "traveler") {
-    return selectedWagonCapacityRemaining.value < 1
-      ? "Este carro ya no tiene plazas libres para viajeros."
-      : `Se mostrarán solo viajeros sin asignar. Quedan ${formatSpace(selectedWagonCapacityRemaining.value)} plazas libres en este carro.`;
+    return availableTravelersForSelectedWagon.value.length === 0
+      ? "Este carro ya no tiene espacio para viajeros."
+      : `Se mostrarán solo viajeros sin asignar que todavía quepan en este carro. Queda ${formatSpace(selectedWagonCapacityRemaining.value)} de espacio libre en este carro.`;
+  }
+
+  if (assignmentModalMode.value === "carretero") {
+    return availableCarreterosForSelectedWagon.value.length === 0
+      ? "No hay viajeros de este carro que puedan asumir el rol de carretero."
+      : "Se mostrarán primero los viajeros que ya están en este carro. También aparecerán otros viajeros válidos que pueden ejercer como carretero.";
   }
 
   if (assignmentModalMode.value === "beast-traveler") {
@@ -1035,13 +1112,18 @@ function closeWagonAlertsModal() {
   wagonAlertsModalTarget.value = null;
 }
 
-function openAssignmentModal(mode: "traveler" | "beast-traveler" | "beast-draft") {
+function openAssignmentModal(mode: "traveler" | "carretero" | "beast-traveler" | "beast-draft") {
   if (!selectedWagon.value) {
+    return;
+  }
+
+  if (mode === "carretero" && selectedWagon.value.carreteroId) {
     return;
   }
 
   if (
     (mode === "traveler" && availableTravelersForSelectedWagon.value.length === 0)
+    || (mode === "carretero" && availableCarreterosForSelectedWagon.value.length === 0)
     || (mode === "beast-traveler" && availableTravelerBeastsForSelectedWagon.value.length === 0)
     || (mode === "beast-draft" && availableDraftBeastsForSelectedWagon.value.length === 0)
   ) {
@@ -1049,6 +1131,7 @@ function openAssignmentModal(mode: "traveler" | "beast-traveler" | "beast-draft"
   }
 
   assignmentModalMode.value = mode;
+  assignmentModalSearch.value = "";
   assignmentModalError.value = null;
   assignmentModalSuccess.value = null;
   assignmentModalOpen.value = true;
@@ -1056,6 +1139,7 @@ function openAssignmentModal(mode: "traveler" | "beast-traveler" | "beast-draft"
 
 function closeAssignmentModal() {
   assignmentModalOpen.value = false;
+  assignmentModalSearch.value = "";
   assignmentModalError.value = null;
   assignmentModalSuccess.value = null;
   if (assignmentModalSuccessTimer !== null) {
@@ -1256,6 +1340,15 @@ function parsePositiveInteger(value: string, fallback: number) {
   return Math.floor(parsed);
 }
 
+function parseNonNegativeInteger(value: string, fallback: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+
+  return Math.floor(parsed);
+}
+
 function totalCargoUnits(quantity: number, cargoUnits: number) {
   return quantity * cargoUnits;
 }
@@ -1269,7 +1362,15 @@ function selectedWagonRemainingCargoUnits(wagon: CaravanWagon | null) {
 }
 
 function maxQuantityForCargo(cargoUnits: number) {
-  if (!selectedWagon.value || cargoUnits < 1) {
+  if (!selectedWagon.value) {
+    return 1;
+  }
+
+  if (cargoUnits === 0) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  if (cargoUnits < 1) {
     return 1;
   }
 
@@ -1529,8 +1630,10 @@ async function assignTravelerToSelectedWagon(traveler: CaravanTraveler) {
     return;
   }
 
-  if (selectedWagonCapacityRemaining.value < 1) {
-    assignmentModalError.value = "Este carro ya no tiene plazas libres para viajeros.";
+  if (traveler.occupiedSpace > selectedWagonCapacityRemaining.value) {
+    assignmentModalError.value = traveler.occupiedSpace === 0
+      ? "Este carro ya no tiene espacio para viajeros."
+      : "Este carro ya no tiene suficiente espacio para este viajero.";
     return;
   }
 
@@ -1548,6 +1651,82 @@ async function assignTravelerToSelectedWagon(traveler: CaravanTraveler) {
     await refresh();
   } catch (cause) {
     assignmentModalError.value = cause instanceof Error ? cause.message : "Failed to assign traveler";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+async function assignCarreteroToSelectedWagon(traveler: CaravanTraveler) {
+  if (!activeCaravan.value || !selectedWagon.value) {
+    return;
+  }
+
+  if (!traveler.availableRoleCodes.includes(carreteroRoleCode)) {
+    assignmentModalError.value = "Este viajero no puede ejercer el rol de carretero.";
+    return;
+  }
+
+  if (traveler.activeRoleCode !== passengerRoleCode) {
+    assignmentModalError.value = "Solo puedes asignar como carretero a viajeros que estén ejerciendo el rol de pasajero.";
+    return;
+  }
+
+  if (traveler.drivingWagonId && traveler.drivingWagonId !== selectedWagon.value.id) {
+    assignmentModalError.value = "Este viajero ya conduce otro carro.";
+    return;
+  }
+
+  if (selectedWagon.value.carreteroId && selectedWagon.value.carreteroId !== traveler.id) {
+    assignmentModalError.value = "Este carro ya tiene otro carretero asignado.";
+    return;
+  }
+
+  const currentActiveRoleCodes = [...traveler.activeRoleCodes];
+  let nextActiveRoleCodes = currentActiveRoleCodes;
+
+  if (!currentActiveRoleCodes.includes(carreteroRoleCode)) {
+    if (currentActiveRoleCodes.length < traveler.maxActiveRoleCount) {
+      nextActiveRoleCodes = [...currentActiveRoleCodes, carreteroRoleCode];
+    } else {
+      const passengerIndex = currentActiveRoleCodes.indexOf(passengerRoleCode);
+      if (passengerIndex === -1) {
+        assignmentModalError.value = "No se puede asignar el rol carretero sin liberar un hueco de roles.";
+        return;
+      }
+
+      nextActiveRoleCodes = currentActiveRoleCodes.map((code, index) =>
+        index === passengerIndex ? carreteroRoleCode : code,
+      );
+    }
+  }
+
+  submitting.value = true;
+  pendingAction.value = `assign-carretero:${traveler.id}`;
+  assignmentModalError.value = null;
+  error.value = null;
+
+  try {
+    await updateCaravanTraveler(activeCaravan.value.id, traveler.id, {
+      fullName: traveler.fullName,
+      description: traveler.description,
+      availableRoleCodes: traveler.availableRoleCodes,
+      activeRoleCodes: nextActiveRoleCodes,
+      activeRoleCode: carreteroRoleCode,
+      maxActiveRoleCount: traveler.maxActiveRoleCount,
+      wagonId: traveler.wagonId,
+      drivingWagonId: selectedWagon.value.id,
+      salary: traveler.salary,
+      contractConditions: traveler.contractConditions,
+      consumption: traveler.consumption,
+      occupiedSpace: traveler.occupiedSpace,
+      servedTravelerId: traveler.servedTravelerId,
+    });
+    showAssignmentSuccess(`Carretero asignado: ${traveler.fullName}.`);
+    showToast(`Carretero asignado al carro: ${traveler.fullName}.`);
+    await refresh();
+  } catch (cause) {
+    assignmentModalError.value = cause instanceof Error ? cause.message : "Failed to assign carretero";
   } finally {
     submitting.value = false;
     pendingAction.value = null;
@@ -1580,7 +1759,7 @@ async function assignBeastToSelectedWagon(beast: CaravanBeast, assignmentType: "
     return;
   }
 
-  if (assignmentType === "TRAVELER" && selectedWagonCapacityRemaining.value < 1) {
+  if (assignmentType === "TRAVELER" && selectedWagonCapacityRemaining.value < 0.5) {
     assignmentModalError.value = "Este carro ya no tiene plazas libres para bestias viajeras.";
     return;
   }
@@ -2095,15 +2274,15 @@ onMounted(refresh);
                   </td>
                   <td>{{ row.wagon.hardness }}</td>
                   <td>
-                    <strong>{{ formatSpace(row.travelerCount + row.travelerBeastSpace) }} / {{ row.travelerCapacity }}</strong>
+                    <strong>{{ formatSpace(row.travelerSpace + row.travelerBeastSpace) }} / {{ row.travelerCapacity }}</strong>
                     <div
                       class="capacity-meter"
-                      :aria-label="`Viajeros ocupados ${formatSpace(row.travelerCount + row.travelerBeastSpace)} de ${row.travelerCapacity}`"
-                      :title="`Ocupación: ${formatSpace(row.travelerCount + row.travelerBeastSpace)} / ${row.travelerCapacity}`"
+                      :aria-label="`Viajeros ocupados ${formatSpace(row.travelerSpace + row.travelerBeastSpace)} de ${row.travelerCapacity}`"
+                      :title="`Ocupación: ${formatSpace(row.travelerSpace + row.travelerBeastSpace)} / ${row.travelerCapacity}`"
                     >
                       <span
                         class="capacity-meter-fill capacity-meter-fill--travelers"
-                        :style="{ width: `${percentageOf(row.travelerCount + row.travelerBeastSpace, row.travelerCapacity)}%` }"
+                        :style="{ width: `${percentageOf(row.travelerSpace + row.travelerBeastSpace, row.travelerCapacity)}%` }"
                       ></span>
                     </div>
                   </td>
@@ -2406,15 +2585,15 @@ onMounted(refresh);
             </label>
           </div>
 
-          <section v-if="wagonAlertsSummary" class="info-block">
+          <section v-if="selectedWagonSummary" class="info-block">
             <h3>Detalle de alertas</h3>
-            <div v-if="wagonAlertsSummary.alerts.length === 0" class="muted">
+            <div v-if="selectedWagonSummary.alerts.length === 0" class="muted">
               Este carro no tiene alertas activas.
             </div>
             <div v-else class="alerts-list">
               <article
-                v-for="alert in wagonAlertsSummary.alerts"
-                :key="`${wagonAlertsSummary.wagon.id}-${alert.title}`"
+                v-for="alert in selectedWagonSummary.alerts"
+                :key="`${selectedWagonSummary.wagon.id}-${alert.title}`"
                 class="alert-item"
                 :class="alert.kind"
               >
@@ -2484,6 +2663,14 @@ onMounted(refresh);
                 <h3>Carretero del carro</h3>
                 <p class="muted">El viajero que debe estar asignado a este carro para moverlo.</p>
               </div>
+              <button
+                class="secondary-button"
+                type="button"
+                :disabled="loading || submitting || Boolean(selectedWagon.carreteroId) || availableCarreterosForSelectedWagon.length === 0"
+                @click="openAssignmentModal('carretero')"
+              >
+                Asignar carretero
+              </button>
             </div>
 
             <div v-if="selectedWagonCarretero || selectedWagon.carreteroName" class="assignment-item assignment-item--stacked">
@@ -2960,12 +3147,30 @@ onMounted(refresh);
             <div class="alert-summary-grid">
               <div>
                 <span>Viajeros</span>
-                <strong>{{ formatSpace(wagonAlertsSummary.travelerCount + wagonAlertsSummary.travelerBeastSpace) }} / {{ wagonAlertsSummary.travelerCapacity }}</strong>
+                <strong>{{ formatSpace(wagonAlertsSummary.travelerSpace + wagonAlertsSummary.travelerBeastSpace) }} / {{ wagonAlertsSummary.travelerCapacity }}</strong>
               </div>
               <div><span>Carga</span><strong>{{ wagonAlertsSummary.cargoLoad }} / {{ wagonAlertsSummary.cargoCapacity }}</strong></div>
               <div><span>Carretero</span><strong>{{ wagonAlertsSummary.hasCarretero ? "Asignado" : "Pendiente" }}</strong></div>
               <div><span>Tiro</span><strong>{{ wagonAlertsSummary.draftStrength }} / {{ wagonAlertsSummary.draftRequirement?.minimumStrength ?? 0 }}</strong></div>
               <div><span>Velocidad</span><strong>{{ wagonAlertsSummary.speed }} mi/día</strong></div>
+            </div>
+          </section>
+
+          <section class="info-block">
+            <h3>Detalle de alertas</h3>
+            <div v-if="wagonAlertsSummary.alerts.length === 0" class="muted">
+              Este carro no tiene alertas activas.
+            </div>
+            <div v-else class="alerts-list">
+              <article
+                v-for="alert in wagonAlertsSummary.alerts"
+                :key="`${wagonAlertsSummary.wagon.id}-${alert.title}`"
+                class="alert-item"
+                :class="alert.kind"
+              >
+                <strong>{{ alert.title }}</strong>
+                <p>{{ alert.description }}</p>
+              </article>
             </div>
           </section>
 
@@ -3011,7 +3216,7 @@ onMounted(refresh);
                 <input
                   v-model="cargoUnits"
                   type="number"
-                  min="1"
+                  :min="cargoUnitsMin"
                   :disabled="!selectedCargoCatalogItem.cargoUnitsEditable"
                 />
               </label>
@@ -3238,26 +3443,77 @@ onMounted(refresh);
             </p>
           </Transition>
 
-          <div v-if="assignmentModalMode === 'traveler'" class="assignment-list">
-            <div v-if="availableTravelersForSelectedWagon.length === 0" class="muted">
-              No hay viajeros sin asignar.
-            </div>
-            <article
-              v-for="traveler in availableTravelersForSelectedWagon"
-              :key="traveler.id"
-              class="assignment-item assignment-item--stacked"
-            >
-              <div>
-                <strong>{{ traveler.fullName }}</strong>
-                <p class="muted">{{ traveler.activeRoleName }}</p>
+          <div v-if="assignmentModalMode === 'traveler' || assignmentModalMode === 'carretero'">
+            <label class="search-field assignment-search">
+              <span>{{ assignmentModalMode === 'carretero' ? "Buscar carretero" : "Buscar viajero" }}</span>
+              <input
+                v-model="assignmentModalSearch"
+                type="search"
+                placeholder="Nombre o rol"
+                autocomplete="off"
+              >
+            </label>
+            <p v-if="assignmentModalMode === 'carretero'" class="muted assignment-order-note">
+              Primero aparecen los viajeros que ya están asignados a este carro.
+            </p>
+            <div class="assignment-list">
+              <div v-if="filteredAvailableTravelersForSelectedWagon.length === 0" class="muted">
+                {{
+                  assignmentModalSearch.trim()
+                    ? (assignmentModalMode === 'carretero'
+                      ? "No hay viajeros válidos que puedan asumir el rol de carretero y coincidan con el buscador."
+                      : "No hay viajeros sin asignar que coincidan con el buscador.")
+                    : (assignmentModalMode === 'carretero'
+                      ? "No hay viajeros válidos que puedan asumir el rol de carretero."
+                      : "No hay viajeros sin asignar.")
+                }}
               </div>
-              <button class="primary-button" type="button" :disabled="loading || submitting" @click="assignTravelerToSelectedWagon(traveler)">
-                <span class="button-with-spinner">
-                  <span v-if="isPending(`assign-traveler:${traveler.id}`)" class="button-spinner" aria-hidden="true"></span>
-                  <span>{{ isPending(`assign-traveler:${traveler.id}`) ? "Asignando…" : "Asignar al carro" }}</span>
-                </span>
-              </button>
-            </article>
+              <article
+                v-for="traveler in filteredAvailableTravelersForSelectedWagon"
+                :key="traveler.id"
+                class="assignment-item assignment-item--stacked"
+              >
+                <div>
+                  <strong>{{ traveler.fullName }}</strong>
+                  <p class="muted">{{ traveler.activeRoleName }} · Ocupa {{ formatSpace(traveler.occupiedSpace) }}</p>
+                </div>
+                <div class="assignment-tags">
+                  <span
+                    v-if="assignmentModalMode === 'carretero' && traveler.wagonId === selectedWagon?.id"
+                    class="pill pill--success"
+                  >
+                    Ya viaja aquí
+                  </span>
+                  <span
+                    v-else-if="assignmentModalMode === 'carretero'"
+                    class="pill pill--neutral"
+                  >
+                    Viene de otro carro
+                  </span>
+                </div>
+                <button
+                  class="primary-button"
+                  type="button"
+                  :disabled="loading || submitting"
+                  @click="assignmentModalMode === 'carretero' ? assignCarreteroToSelectedWagon(traveler) : assignTravelerToSelectedWagon(traveler)"
+                >
+                  <span class="button-with-spinner">
+                    <span
+                      v-if="isPending(assignmentModalMode === 'carretero' ? `assign-carretero:${traveler.id}` : `assign-traveler:${traveler.id}`)"
+                      class="button-spinner"
+                      aria-hidden="true"
+                    ></span>
+                    <span>
+                      {{
+                        assignmentModalMode === 'carretero'
+                          ? (isPending(`assign-carretero:${traveler.id}`) ? "Asignando…" : "Asignar carretero")
+                          : (isPending(`assign-traveler:${traveler.id}`) ? "Asignando…" : "Asignar al carro")
+                      }}
+                    </span>
+                  </span>
+                </button>
+              </article>
+            </div>
           </div>
 
           <div v-else class="assignment-list">
@@ -3995,6 +4251,32 @@ dd {
   gap: 0.65rem;
   max-height: 320px;
   overflow: auto;
+}
+
+.assignment-search {
+  margin-bottom: 0.75rem;
+}
+
+.assignment-order-note {
+  margin: -0.35rem 0 0.75rem;
+}
+
+.assignment-tags {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.pill--success {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+
+.pill--neutral {
+  background: #e2e8f0;
+  color: #334155;
+  border: 1px solid #cbd5e1;
 }
 
 .assignment-item {

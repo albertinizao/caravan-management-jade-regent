@@ -71,6 +71,14 @@ public record CaravanMainStats(
     return new CaravanMainStats(offense, defense, mobility, morale, unassignedPoints);
   }
 
+  public CaravanMainStats adjustUnassignedPoints(int delta) {
+    var adjustedUnassignedPoints = unassignedPoints + delta;
+    if (adjustedUnassignedPoints < 0) {
+      throw new IllegalArgumentException("unassignedPoints must be greater than or equal to 0");
+    }
+    return new CaravanMainStats(offense, defense, mobility, morale, adjustedUnassignedPoints);
+  }
+
   private static void validateBoundedStat(String name, int value) {
     if (value < 0 || value > MAX_STAT_VALUE) {
       throw new IllegalArgumentException(name + " must be between 0 and 10");

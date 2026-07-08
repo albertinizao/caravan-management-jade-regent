@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.gestioncaravana.application.port.in.AddCaravanBeastUseCase.AddCaravanBeastCommand;
+import com.gestioncaravana.application.port.in.DeleteUnassignedCaravanBeastsUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanBeastAssignmentUseCase.UpdateCaravanBeastAssignmentCommand;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
@@ -105,19 +106,147 @@ class BeastManagementServiceTest {
     var assignedDraft = service.execute(
         caravan.id(),
         catalogBeast.id(),
-        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id()));
+        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id(), null, null));
     var assignedTraveler = service.execute(
         caravan.id(),
         customBeast.id(),
-        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.TRAVELER, travelerWagon.id()));
+        new UpdateCaravanBeastAssignmentCommand(
+            CaravanBeastAssignmentType.TRAVELER,
+            travelerWagon.id(),
+            List.of("pasajero", "carretero"),
+            "carretero"));
 
     assertThat(assignedDraft.assignmentType()).isEqualTo(CaravanBeastAssignmentType.DRAFT);
     assertThat(assignedDraft.assignedWagonId()).isEqualTo(draftWagon.id());
     assertThat(assignedTraveler.assignmentType()).isEqualTo(CaravanBeastAssignmentType.TRAVELER);
+    assertThat(assignedTraveler.availableRoleCodes()).containsExactly("pasajero", "carretero");
+    assertThat(assignedTraveler.activeRoleCode()).isEqualTo("carretero");
     assertThat(assignedTraveler.customNotes()).isEqualTo("Notas internas");
     assertThat(service.list(caravan.id(), null, "catalog", "draft", draftWagon.id())).hasSize(1);
     assertThat(service.list(caravan.id(), "mula", "custom", "traveler", travelerWagon.id())).hasSize(1);
     assertThat(service.getById(caravan.id(), catalogBeast.id()).assignedWagonName()).isEqualTo("Carro Escuela");
+  }
+
+  @Test
+  void deletesBeastsById() {
+    var caravan = createCaravan();
+    var beast = addCatalogBeast(caravan.id(), "poni");
+
+    service.delete(caravan.id(), beast.id());
+
+    assertThat(service.list(caravan.id(), null, null, null, null)).isEmpty();
+    assertThatThrownBy(() -> service.getById(caravan.id(), beast.id()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Beast not found");
+  }
+
+  @Test
+  void createsMultipleBeastsWhenQuantityIsProvided() {
+    var caravan = createCaravan();
+
+    service.execute(
+        caravan.id(),
+        new AddCaravanBeastCommand(
+            CaravanBeastSourceType.CATALOG,
+            "yak",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            3));
+
+    assertThat(service.list(caravan.id(), null, null, null, null)).hasSize(3);
+  }
+
+  @Test
+  void defaultsCustomTravelerAssignmentsToPassengerWhenNoRoleDataIsProvided() {
+    var caravan = createCaravan();
+    var travelerWagon = createWagon(caravan.id(), "carro-cubierto");
+    var customBeast = service.execute(
+        caravan.id(),
+        new AddCaravanBeastCommand(
+            CaravanBeastSourceType.CUSTOM,
+            null,
+            "Mula propia",
+            "M",
+            2,
+            30,
+            null,
+            null,
+            null,
+            true,
+            "Ninguno",
+            "Bestia personalizada",
+            "Notas internas"));
+
+    var assignedTraveler = service.execute(
+        caravan.id(),
+        customBeast.id(),
+        new UpdateCaravanBeastAssignmentCommand(
+            CaravanBeastAssignmentType.TRAVELER,
+            travelerWagon.id(),
+            null,
+            null));
+
+    assertThat(assignedTraveler.availableRoleCodes()).containsExactly("pasajero");
+    assertThat(assignedTraveler.activeRoleCode()).isEqualTo("pasajero");
+  }
+
+  @Test
+  void rejectsCustomTravelerAssignmentsWhenTheActiveRoleIsNotInTheAvailableList() {
+    var caravan = createCaravan();
+    var travelerWagon = createWagon(caravan.id(), "carro-cubierto");
+    var customBeast = service.execute(
+        caravan.id(),
+        new AddCaravanBeastCommand(
+            CaravanBeastSourceType.CUSTOM,
+            null,
+            "Mula propia",
+            "M",
+            2,
+            30,
+            null,
+            null,
+            null,
+            true,
+            "Ninguno",
+            "Bestia personalizada",
+            "Notas internas"));
+
+    assertThatThrownBy(() -> service.execute(
+        caravan.id(),
+        customBeast.id(),
+        new UpdateCaravanBeastAssignmentCommand(
+            CaravanBeastAssignmentType.TRAVELER,
+            travelerWagon.id(),
+            List.of("pasajero"),
+            "carretero")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("activeRoleCode");
+  }
+
+  @Test
+  void deletesOnlyUnassignedBeasts() {
+    var caravan = createCaravan();
+    var unassigned = addCatalogBeast(caravan.id(), "yak");
+    var assigned = addCatalogBeast(caravan.id(), "caballo-pesado");
+    var draftWagon = createWagon(caravan.id(), "carro-escuela");
+    service.execute(caravan.id(), assigned.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id(), null, null));
+
+    service.delete(caravan.id());
+
+    assertThat(service.list(caravan.id(), null, null, null, null)).singleElement().extracting("id").isEqualTo(assigned.id());
+    assertThatThrownBy(() -> service.getById(caravan.id(), unassigned.id()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Beast not found");
   }
 
   @Test
@@ -129,13 +258,13 @@ class BeastManagementServiceTest {
     var second = addCatalogBeast(caravan.id(), "bisonte");
     var third = addCatalogBeast(caravan.id(), "yak");
 
-    service.execute(caravan.id(), first.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id()));
-    service.execute(caravan.id(), second.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id()));
+    service.execute(caravan.id(), first.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id(), null, null));
+    service.execute(caravan.id(), second.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id(), null, null));
 
     assertThatThrownBy(() -> service.execute(
         caravan.id(),
         third.id(),
-        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id())))
+        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id(), null, null)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("large-beast limit");
   }
@@ -148,12 +277,12 @@ class BeastManagementServiceTest {
     var largeBeast = addCatalogBeast(caravan.id(), "caballo-ligero");
     var mediumBeast = addCatalogBeast(caravan.id(), "perro-de-monta");
 
-    service.execute(caravan.id(), largeBeast.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id()));
+    service.execute(caravan.id(), largeBeast.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id(), null, null));
 
     assertThatThrownBy(() -> service.execute(
         caravan.id(),
         mediumBeast.id(),
-        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id())))
+        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id(), null, null)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("medium-beast limit");
   }
@@ -165,12 +294,12 @@ class BeastManagementServiceTest {
     var travelerWagon = createWagon(caravan.id(), "carro-escuela");
 
     var beast = addCatalogBeast(caravan.id(), "caballo-ligero");
-    service.execute(caravan.id(), beast.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id()));
+    service.execute(caravan.id(), beast.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id(), null, null));
 
     assertThatThrownBy(() -> service.execute(
         caravan.id(),
         beast.id(),
-        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.TRAVELER, travelerWagon.id())))
+        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.TRAVELER, travelerWagon.id(), null, null)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("unassigned");
   }
@@ -189,8 +318,8 @@ class BeastManagementServiceTest {
     var first = addCatalogBeast(caravan.id(), "caballo-pesado");
     var second = addCatalogBeast(caravan.id(), "bisonte");
 
-    service.execute(caravan.id(), first.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id()));
-    service.execute(caravan.id(), second.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id()));
+    service.execute(caravan.id(), first.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id(), null, null));
+    service.execute(caravan.id(), second.id(), new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.DRAFT, draftWagon.id(), null, null));
 
     assertThat(service.list(caravan.id(), null, "catalog", "draft", draftWagon.id())).hasSize(2);
   }
@@ -221,9 +350,72 @@ class BeastManagementServiceTest {
     assertThatThrownBy(() -> service.execute(
         caravan.id(),
         beast.id(),
-        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.TRAVELER, wagon.id())))
+        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.TRAVELER, wagon.id(), null, null)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Wagon capacity reached");
+  }
+
+  @Test
+  void allowsTravelerBeastWhenTheRemainingSpaceIsFractional() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id(), "carro-cubierto");
+    for (var index = 0; index < 4; index++) {
+      travelerRepository.save(CaravanTraveler.create(
+          UUID.randomUUID(),
+          caravan.id(),
+          "Traveler " + index,
+          null,
+          List.of("pasajero"),
+          List.of("pasajero"),
+          null,
+          1,
+          TravelerRoleData.empty(),
+          wagon.id(),
+          null,
+          1,
+          NOW));
+    }
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Traveler zero",
+        null,
+        List.of("pasajero"),
+        List.of("pasajero"),
+        null,
+        1,
+        TravelerRoleData.empty(),
+        wagon.id(),
+        null,
+        0,
+        NOW));
+
+    var beast = service.execute(
+        caravan.id(),
+        new AddCaravanBeastCommand(
+            CaravanBeastSourceType.CUSTOM,
+            null,
+            "Perro de Renji",
+            "M",
+            2,
+            30,
+            null,
+            null,
+            null,
+            true,
+            "Ninguno",
+            "Bestia personalizada",
+            "Notas internas",
+            1,
+            BigDecimal.valueOf(0.5)));
+
+    var assignedTraveler = service.execute(
+        caravan.id(),
+        beast.id(),
+        new UpdateCaravanBeastAssignmentCommand(CaravanBeastAssignmentType.TRAVELER, wagon.id(), null, null));
+
+    assertThat(assignedTraveler.assignmentType()).isEqualTo(CaravanBeastAssignmentType.TRAVELER);
+    assertThat(assignedTraveler.assignedWagonId()).isEqualTo(wagon.id());
   }
 
   private CaravanBeastView addCatalogBeast(UUID caravanId, String catalogCode) {
@@ -320,6 +512,11 @@ class BeastManagementServiceTest {
       return beasts.stream()
           .filter(beast -> beast.caravanId().equals(caravanId) && beast.id().equals(beastId))
           .findFirst();
+    }
+
+    @Override
+    public void deleteByCaravanIdAndId(UUID caravanId, UUID beastId) {
+      beasts.removeIf(beast -> beast.caravanId().equals(caravanId) && beast.id().equals(beastId));
     }
 
     @Override
@@ -442,3 +639,4 @@ class BeastManagementServiceTest {
     }
   }
 }
+

@@ -5,9 +5,11 @@ import {
   advanceCaravanDayCycle,
   createCaravan,
   deleteCaravan,
+  exportCaravanBackup,
   getActiveCaravan,
   getCaravanStatistics,
   listCaravans,
+  importCaravanBackup,
   previewCaravanDayCycle,
   selectActiveCaravan,
   updateCaravanDiscontent,
@@ -49,6 +51,7 @@ const dayCycleError = ref<string | null>(null);
 const dayCycleChoices = ref<Record<string, "HUNT" | "EXPLORE">>({});
 const editableMainStats = ref<CaravanMainStats | null>(null);
 const mainStatsSubmitting = ref(false);
+const backupFileInput = ref<HTMLInputElement | null>(null);
 const { showToast } = useToast();
 
 const hiddenContributionStats = new Set([
@@ -142,6 +145,35 @@ function progressMarkerStyle(value: number, max: number) {
 
 function isPending(action: string) {
   return pendingAction.value === action;
+}
+
+function openBackupImportDialog() {
+  backupFileInput.value?.click();
+}
+
+function buildBackupFilename(caravanName: string) {
+  const safeName = caravanName
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "caravana";
+
+  return `${safeName}-backup-${new Date().toISOString().slice(0, 10)}.json`;
+}
+
+function downloadBackupFile(fileName: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.rel = "noreferrer";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function openCreateModal() {
@@ -419,6 +451,59 @@ async function handleDelete(caravan: Caravan) {
   }
 }
 
+async function handleExportBackup() {
+  if (!selectedCaravan.value) {
+    return;
+  }
+
+  const caravan = selectedCaravan.value;
+  pendingAction.value = "export-backup";
+  error.value = null;
+
+  try {
+    const backup = await exportCaravanBackup(caravan.id);
+    downloadBackupFile(buildBackupFilename(caravan.name), backup);
+    showToast(`Backup exportado: ${caravan.name}.`);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "No se pudo exportar el backup";
+  } finally {
+    pendingAction.value = null;
+  }
+}
+
+async function handleImportBackup(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+
+  if (!file) {
+    return;
+  }
+
+  const confirmed = window.confirm(
+    "La importación reemplazará la caravana del backup si ya existe. ¿Quieres continuar?",
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  pendingAction.value = "import-backup";
+  error.value = null;
+
+  try {
+    const rawBackup = await file.text();
+    const backup = JSON.parse(rawBackup) as Parameters<typeof importCaravanBackup>[0];
+    const restored = await importCaravanBackup(backup);
+    await refresh();
+    showToast(`Backup importado: ${restored.name}.`);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "No se pudo importar el backup";
+  } finally {
+    pendingAction.value = null;
+  }
+}
+
 async function adjustCaravanLevel(delta: number) {
   if (!selectedCaravan.value) {
     return;
@@ -493,6 +578,25 @@ onMounted(refresh);
           <button class="secondary-button" type="button" :disabled="loading || submitting || !selectedCaravan" @click="openDayCycleModal">
             Pasar el día
           </button>
+          <button
+            class="secondary-button"
+            type="button"
+            :disabled="loading || submitting || !selectedCaravan || isPending('export-backup') || isPending('import-backup')"
+            @click="handleExportBackup"
+          >
+            <span class="button-with-spinner">
+              <span v-if="isPending('export-backup')" class="button-spinner" aria-hidden="true"></span>
+              <span>{{ isPending('export-backup') ? "Exportando…" : "Exportar backup" }}</span>
+            </span>
+          </button>
+          <button
+            class="secondary-button"
+            type="button"
+            :disabled="loading || submitting || isPending('export-backup') || isPending('import-backup')"
+            @click="openBackupImportDialog"
+          >
+            Importar backup
+          </button>
           <button class="secondary-button" type="button" :disabled="loading || submitting" @click="openCreateModal">
             Crear caravana
           </button>
@@ -504,6 +608,14 @@ onMounted(refresh);
           </button>
         </div>
       </header>
+
+      <input
+        ref="backupFileInput"
+        accept="application/json,.json"
+        type="file"
+        style="display: none"
+        @change="handleImportBackup"
+      />
 
       <p v-if="error" class="error">{{ error }}</p>
 

@@ -6,13 +6,14 @@
 
 ## 1. Summary
 
-The application must allow the user to **view**, **add**, and **edit** the caravan’s feats inside the active caravan context.
+The application must allow the user to **view**, **add**, **edit**, and **delete** the caravan’s feats inside the active caravan context.
 
 The feature must provide:
 
 - a dedicated list of the caravan’s feats,
 - the ability to add a new feat to the active caravan,
 - the ability to edit an owned feat entry,
+- the ability to delete an owned feat entry,
 - a clear acquisition source for every feat, indicating whether it came from a level-up or from another cause,
 - automatic visibility of feats that are currently inactive because their rule conditions are not met.
 
@@ -39,10 +40,11 @@ Without a dedicated feat management flow:
    - level-up selection must store the level that granted the feat,
    - any other acquisition must store the cause text.
 4. Allow the user to edit the acquisition metadata of an owned feat entry.
-5. Support repeatable feats without losing individual acquisition history.
-6. Show whether each feat is currently active, inactive, or repeatable with remaining availability.
-7. Keep feat data persistent and scoped to the selected caravan.
-8. Keep feat rule evaluation in the domain/application layer, not in the UI.
+5. Allow the user to delete an owned feat entry.
+6. Support repeatable feats without losing individual acquisition history.
+7. Show whether each feat is currently active, inactive, or repeatable with remaining availability.
+8. Keep feat data persistent and scoped to the selected caravan.
+9. Keep feat rule evaluation in the domain/application layer, not in the UI.
 
 ## 4. Non-Goals
 
@@ -51,12 +53,9 @@ This specification does **not** define:
 - combat resolution,
 - the full rules engine for every feat effect in the book,
 - automatic feat selection on level-up,
-- feat deletion workflows,
 - cloud synchronization,
 - multiplayer collaboration,
 - full campaign history auditing beyond the current caravan record.
-
-If feat deletion or automatic level-up assignment is required later, it should be defined as a separate rule decision.
 
 ## 5. User Stories
 
@@ -76,7 +75,11 @@ As a user, I want to mark whether a feat came from a level-up or from another ca
 
 As a user, I want to edit the acquisition metadata of an owned feat so that I can correct or refine how it was recorded.
 
-### US-5: Inspect feat activity
+### US-5: Delete an owned feat entry
+
+As a user, I want to delete an owned feat so that I can remove an incorrect or obsolete entry from the caravan.
+
+### US-6: Inspect feat activity
 
 As a user, I want to know whether a feat is currently active or inactive so that I can understand whether its effects are applying right now.
 
@@ -304,4 +307,3 @@ Suggested HTTP endpoints, if needed:
 - `GET /api/caravans/{caravanId}/feats/{featId}`
 - `POST /api/caravans/{caravanId}/feats`
 - `PUT /api/caravans/{caravanId}/feats/{featId}`
-

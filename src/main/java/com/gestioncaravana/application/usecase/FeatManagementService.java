@@ -4,6 +4,7 @@ import com.gestioncaravana.application.model.CaravanFeatCatalogItemView;
 import com.gestioncaravana.application.model.CaravanFeatView;
 import com.gestioncaravana.application.model.CaravanStatisticsView;
 import com.gestioncaravana.application.port.in.AddCaravanFeatUseCase;
+import com.gestioncaravana.application.port.in.DeleteCaravanFeatUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanFeatUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanStatisticsUseCase;
 import com.gestioncaravana.application.port.in.ListCaravanFeatCatalogUseCase;
@@ -33,9 +34,12 @@ public class FeatManagementService
         ListCaravanFeatsUseCase,
         GetCaravanFeatUseCase,
         AddCaravanFeatUseCase,
+        DeleteCaravanFeatUseCase,
         UpdateCaravanFeatUseCase {
 
   private static final Pattern NUMBER_PATTERN = Pattern.compile("(\\d+)");
+  private static final String CARAVANA_MEJORADA_CODE = "caravana-mejorada";
+  private static final int CARAVANA_MEJORADA_FREE_POINTS = 2;
 
   private final CaravanCampaignRepositoryPort caravanRepository;
   private final CaravanFeatRepositoryPort featRepository;
@@ -113,12 +117,7 @@ public class FeatManagementService
       throw new IllegalArgumentException(blockedReason);
     }
 
-    var selectionIndex =
-        (int)
-                owned.stream()
-                    .filter(feat -> feat.featTypeCode().equals(featType.code()))
-                    .count()
-            + 1;
+    var selectionIndex = nextSelectionIndex(owned, featType.code());
     var created =
         CaravanFeat.create(
             UUID.randomUUID(),
@@ -133,8 +132,22 @@ public class FeatManagementService
             resolveManualAppliesReason(featType, command.manualAppliesReason()),
             clock.instant());
     var saved = featRepository.save(created);
+    applyCaravanaMejoradaBonus(caravanId, featType.code(), false, saved.active());
     var refreshedOwned = featRepository.findAllByCaravanId(caravanId);
     return toView(caravan, saved, refreshedOwned, stats);
+  }
+
+  @Override
+  public void delete(UUID caravanId, UUID featId) {
+    requireCaravan(caravanId);
+    var existing =
+        featRepository
+            .findById(caravanId, featId)
+            .orElseThrow(() -> new IllegalArgumentException("Feat not found: " + featId));
+    var featType = requireFeatType(existing.featTypeCode());
+
+    applyCaravanaMejoradaBonus(caravanId, featType.code(), existing.active(), false);
+    featRepository.deleteById(caravanId, featId);
   }
 
   @Override
@@ -161,6 +174,7 @@ public class FeatManagementService
             resolveManualAppliesReason(featType, command.manualAppliesReason()),
             clock.instant());
     var saved = featRepository.save(updated);
+    applyCaravanaMejoradaBonus(caravanId, featType.code(), existing.active(), saved.active());
     var stats = statisticsUseCase.getById(caravanId);
     var owned = featRepository.findAllByCaravanId(caravanId);
     return toView(caravan, saved, owned, stats);
@@ -440,6 +454,28 @@ public class FeatManagementService
 
   private int ownedCount(List<CaravanFeat> owned, String featTypeCode) {
     return (int) owned.stream().filter(feat -> feat.featTypeCode().equals(featTypeCode)).count();
+  }
+
+  private int nextSelectionIndex(List<CaravanFeat> owned, String featTypeCode) {
+    return owned.stream()
+        .filter(feat -> feat.featTypeCode().equals(featTypeCode))
+        .mapToInt(CaravanFeat::selectionIndex)
+        .max()
+        .orElse(0) + 1;
+  }
+
+  private void applyCaravanaMejoradaBonus(
+      UUID caravanId,
+      String featTypeCode,
+      boolean previousActive,
+      boolean currentActive) {
+    if (!CARAVANA_MEJORADA_CODE.equals(featTypeCode) || previousActive == currentActive) {
+      return;
+    }
+
+    var delta = currentActive ? CARAVANA_MEJORADA_FREE_POINTS : -CARAVANA_MEJORADA_FREE_POINTS;
+    var caravan = requireCaravan(caravanId);
+    caravanRepository.save(caravan.adjustUnassignedPoints(delta, clock.instant()));
   }
 
   private boolean isManualContract(CaravanFeatType featType) {

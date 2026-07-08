@@ -350,9 +350,11 @@ public class TravelerManagementService
         .filter(traveler -> excludedTravelerId == null || !traveler.id().equals(excludedTravelerId))
         .map(CaravanTraveler::occupiedSpace)
         .reduce(BigDecimal.ZERO, BigDecimal::add);
-    var beastCount = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
-        caravanId, wagonId, com.gestioncaravana.domain.CaravanBeastAssignmentType.TRAVELER).size();
-    return travelerSpace.add(BigDecimal.valueOf(beastCount));
+    var beastSpace = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
+        caravanId, wagonId, com.gestioncaravana.domain.CaravanBeastAssignmentType.TRAVELER).stream()
+        .map(com.gestioncaravana.domain.CaravanBeast::occupiedSpace)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
+    return travelerSpace.add(beastSpace);
   }
 
   private void validateDrivingWagonAssignment(UUID caravanId, UUID travelerId, UUID drivingWagonId, List<String> activeRoleCodes) {

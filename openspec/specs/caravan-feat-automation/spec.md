@@ -213,15 +213,14 @@ Automation requirements:
 
 ### 6.6 Caravana Mejorada
 
-Category: Selection-based / Passive
+Category: Passive / repeatable bonus
 
 Automation requirements:
 
-1. Each selection must choose exactly two main stats.
-2. Each chosen stat increases by 1.
-3. The global maximum per stat is 10.
-4. The chosen pair must be stored per selection.
-5. The caravan statistics must be recalculated after every selection.
+1. Each active instance grants 2 free main-stat points.
+2. The bonus is added to the caravan's unassigned main-stat points.
+3. The bonus stacks once per active instance.
+4. The caravan statistics must be recalculated after every feat change.
 
 ### 6.7 Caravana De Renombre
 

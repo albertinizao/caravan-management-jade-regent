@@ -252,11 +252,19 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
     var wagonConsumption = consumption;
     var travelerConsumption = 0;
     for (var traveler : travelers) {
+      var effectiveConsumption = effectiveTravelerConsumption(traveler);
+      travelerConsumption += effectiveConsumption;
       if (traveler.hasActiveRole("batidor")) {
-        contributions.add(contribution("consumption", "ROLE", traveler.id().toString(), traveler.fullName(), "-" + traveler.consumption(), "ADD", "Los batidores no cuentan para el consumo"));
+        contributions.add(contribution(
+            "consumption",
+            "ROLE",
+            traveler.id().toString(),
+            traveler.fullName(),
+            String.valueOf(effectiveConsumption),
+            "ADD",
+            "Los batidores no cuentan para el consumo"));
       } else {
-        travelerConsumption += traveler.consumption();
-        contributions.add(contribution("consumption", "TRAVELER", traveler.id().toString(), traveler.fullName(), "+" + traveler.consumption(), "ADD", "Consumo del viajero"));
+        contributions.add(contribution("consumption", "TRAVELER", traveler.id().toString(), traveler.fullName(), "+" + effectiveConsumption, "ADD", "Consumo del viajero"));
       }
     }
 
@@ -394,6 +402,10 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
 
   private int countTravelersWithRole(List<CaravanTraveler> travelers, String roleCode) {
     return (int) travelers.stream().filter(traveler -> traveler.hasActiveRole(roleCode)).count();
+  }
+
+  private int effectiveTravelerConsumption(CaravanTraveler traveler) {
+    return traveler.hasActiveRole("batidor") ? 0 : traveler.consumption();
   }
 
   private int countActiveFeats(List<com.gestioncaravana.domain.CaravanFeat> feats, String featTypeCode) {

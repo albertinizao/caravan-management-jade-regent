@@ -214,7 +214,7 @@ class CaravanDayCycleServiceTest {
         false,
         List.of()));
 
-    assertThat(secondDay.warnings()).contains("Se pierde 1 unidad de suministros por no tener hueco.");
+    assertThat(secondDay.warnings()).contains("Se pierde 1 carga de suministros por no tener hueco.");
     assertThat(secondDay.totalGeneration()).isEqualTo(0);
     assertThat(travelerRepository.findById(caravan.id(), farmer.id()))
         .hasValueSatisfying(traveler -> assertThat(traveler.roleSpecificData().generatingFood()).isFalse());
@@ -232,7 +232,7 @@ class CaravanDayCycleServiceTest {
     assertThat(service.preview(twoCookCaravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of())).expectedGeneration())
         .isEqualTo(32);
     assertThat(service.preview(threeCookCaravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of())).expectedGeneration())
-        .isEqualTo(32);
+        .isEqualTo(37);
   }
 
   @Test
@@ -343,9 +343,841 @@ class CaravanDayCycleServiceTest {
 
     var preview = service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of()));
 
-    assertThat(preview.currentReserve()).isEqualTo(20);
+    assertThat(preview.currentReserve()).isEqualTo(0);
     assertThat(preview.expectedGeneration()).isEqualTo(5);
-    assertThat(preview.expectedReserveAfterResolution()).isEqualTo(24);
+    assertThat(preview.expectedReserveAfterResolution()).isEqualTo(4);
+  }
+
+  @Test
+  void cookGeneratedCargoConsumedForShortageIsNotReportedAgain() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Cook-Shortage", null, Instant.parse("2026-01-01T00:00:00Z")));
+    var wagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-suministros", null, Instant.parse("2026-01-01T00:00:00Z")));
+
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Cocinero",
+        null,
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        1,
+        TravelerRoleData.empty(),
+        wagon.id(),
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+
+    for (var i = 0; i < 30; i++) {
+      travelerRepository.save(CaravanTraveler.create(
+          UUID.randomUUID(),
+          caravan.id(),
+          "Pasajero " + i,
+          null,
+          List.of("pasajero"),
+          List.of("pasajero"),
+          "pasajero",
+          1,
+          TravelerRoleData.empty(),
+          wagon.id(),
+          null,
+          1,
+          Instant.parse("2025-12-30T00:00:00Z")));
+    }
+
+    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
+
+    var preview = service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of()));
+
+    assertThat(preview.contributions())
+        .noneMatch(contribution ->
+            "CARGO".equals(contribution.sourceType())
+                && contribution.reason().contains("generados por los cocineros"));
+    assertThat(preview.cargoMovementSummary()).isEqualTo("+ 0 cargas de suministros");
+  }
+
+  @Test
+  void cooksCanUseSameDayFarmProductionWhenComputingTheirBonus() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Farmer-Cook", null, Instant.parse("2026-01-01T00:00:00Z")));
+    var supplyWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-suministros", null, Instant.parse("2026-01-01T00:00:00Z")));
+
+    for (var i = 0; i < 10; i++) {
+      travelerRepository.save(CaravanTraveler.create(
+          UUID.randomUUID(),
+          caravan.id(),
+          "Agricultor " + i,
+          null,
+          List.of("pasajero", "agricultor"),
+          List.of("agricultor"),
+          "agricultor",
+          1,
+          new TravelerRoleData(null, true),
+          supplyWagon.id(),
+          null,
+          1,
+          Instant.parse("2025-12-30T00:00:00Z")));
+    }
+
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Cocinero",
+        null,
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        1,
+        TravelerRoleData.empty(),
+        supplyWagon.id(),
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+
+    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 100, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
+
+    var preview = service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of()));
+
+    assertThat(preview.expectedGeneration()).isEqualTo(5);
+    assertThat(preview.contributions())
+        .anyMatch(contribution -> contribution.sourceName().equals("Cocinero") && contribution.quantity() == 15);
+  }
+
+  @Test
+  void cooksAreReportedOnceEvenWhenTheyBoostBothGenerationAndCargo() {
+    var caravan = createCookBonusScenario(1);
+
+    cargoRepository.save(CaravanCargo.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        CaravanCargoSourceType.CATALOG,
+        "suministros",
+        "Suministros",
+        "Artículos de mercancía",
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        null,
+        Instant.parse("2025-12-30T00:00:00Z")).withCurrentProvisions(10, false, Instant.parse("2026-01-01T00:00:00Z")));
+    cargoRepository.save(CaravanCargo.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        CaravanCargoSourceType.CATALOG,
+        "cocina-portatil",
+        "Cocina Portátil",
+        "Artículos de mejora",
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        null,
+        Instant.parse("2025-12-30T00:00:00Z")));
+
+    var preview = service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of()));
+
+    assertThat(preview.expectedGeneration()).isEqualTo(32);
+    assertThat(preview.contributions())
+        .filteredOn(contribution -> contribution.sourceName().equals("Cocinero 0"))
+        .hasSize(1)
+        .first()
+        .satisfies(contribution -> assertThat(contribution.quantity()).isEqualTo(20));
+  }
+
+  @Test
+  void cookConsumedCargoDoesNotCreateDuplicateContributionLinesAndReportsFinalCargoDelta() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Cook-Consumption", null, Instant.parse("2026-01-01T00:00:00Z")));
+
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Cocinero",
+        null,
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        1,
+        TravelerRoleData.empty(),
+        null,
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+
+    for (var i = 0; i < 30; i++) {
+      travelerRepository.save(CaravanTraveler.create(
+          UUID.randomUUID(),
+          caravan.id(),
+          "Pasajero " + i,
+          null,
+          List.of("pasajero"),
+          List.of("pasajero"),
+          "pasajero",
+          1,
+          TravelerRoleData.empty(),
+          null,
+          null,
+          1,
+          Instant.parse("2025-12-30T00:00:00Z")));
+    }
+
+    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
+
+    var preview = service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of()));
+
+    assertThat(preview.cargoMovementSummary()).isEqualTo("+ 0 cargas de suministros");
+    assertThat(preview.contributions())
+        .noneMatch(contribution -> contribution.sourceType().equals("CARGO")
+            && contribution.reason().contains("cocineros"));
+    assertThat(preview.contributions())
+        .filteredOn(contribution -> contribution.sourceName().equals("Cocinero"))
+        .hasSize(1);
+  }
+
+  @Test
+  void sameDayFarmProductionCanCoverPartOfTheShortage() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Farm-Shortage", null, Instant.parse("2026-01-01T00:00:00Z")));
+    var wagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-suministros", null, Instant.parse("2026-01-01T00:00:00Z")));
+
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Agricultor",
+        null,
+        List.of("pasajero", "agricultor"),
+        List.of("agricultor"),
+        "agricultor",
+        1,
+        new TravelerRoleData(null, true),
+        wagon.id(),
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+
+    for (var i = 0; i < 10; i++) {
+      travelerRepository.save(CaravanTraveler.create(
+          UUID.randomUUID(),
+          caravan.id(),
+          "Pasajero " + i,
+          null,
+          List.of("pasajero"),
+          List.of("pasajero"),
+          "pasajero",
+          1,
+          TravelerRoleData.empty(),
+          null,
+          null,
+          3,
+          Instant.parse("2025-12-30T00:00:00Z")));
+    }
+
+    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
+
+    var preview = service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of()));
+
+    assertThat(preview.expectedGeneration()).isEqualTo(0);
+    assertThat(preview.expectedShortage()).isEqualTo(22);
+    assertThat(preview.contributions())
+        .anyMatch(contribution -> contribution.sourceType().equals("CARGO")
+            && contribution.reason().contains("generados por los agricultores"));
+  }
+
+  @Test
+  void openedSupplyUnitsAreConsumedBeforeClosedOnesAndClosedOnesBecomeOpenedWhenPartiallyConsumed() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Opened-First", null, Instant.parse("2026-01-01T00:00:00Z")));
+
+    var openedCargo = cargoRepository.save(CaravanCargo.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        CaravanCargoSourceType.CATALOG,
+        "suministros",
+        "Suministros",
+        "Artículos de mercancía",
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        null,
+        Instant.parse("2025-12-30T00:00:00Z")).withCurrentProvisions(9, true, Instant.parse("2026-01-01T00:00:00Z")));
+
+    var unopenedCargo = cargoRepository.save(CaravanCargo.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        CaravanCargoSourceType.CATALOG,
+        "suministros",
+        "Suministros",
+        "Artículos de mercancía",
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        null,
+        Instant.parse("2025-12-30T00:00:00Z")).withCurrentProvisions(10, false, Instant.parse("2026-01-01T00:00:00Z")));
+
+    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
+
+    for (var i = 0; i < 12; i++) {
+      travelerRepository.save(CaravanTraveler.create(
+          UUID.randomUUID(),
+          caravan.id(),
+          "Pasajero " + i,
+          null,
+          List.of("pasajero"),
+          List.of("pasajero"),
+          "pasajero",
+          1,
+          TravelerRoleData.empty(),
+          null,
+          null,
+          1,
+          Instant.parse("2025-12-30T00:00:00Z")));
+    }
+
+    var preview = service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of()));
+
+    assertThat(preview.cargoMovementSummary()).isEqualTo(String.join("\n", List.of(
+        "+ 2 cargas de suministros",
+        "+ 1 carga de suministros con 7 de comida restante")));
+    service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
+        "opened-first-order",
+        false,
+        List.of()));
+
+    assertThat(cargoRepository.findById(caravan.id(), openedCargo.id())).isEmpty();
+    assertThat(cargoRepository.findById(caravan.id(), unopenedCargo.id())).hasValueSatisfying(entry -> {
+      assertThat(entry.currentProvisions()).isEqualTo(7);
+      assertThat(entry.dayPassed()).isTrue();
+    });
+  }
+
+  @Test
+  void openedSupplyUnitsWithLessFoodAreConsumedFirst() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Opened-Priority", null, Instant.parse("2026-01-01T00:00:00Z")));
+
+    var richerOpenedCargo = cargoRepository.save(CaravanCargo.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        CaravanCargoSourceType.CATALOG,
+        "suministros",
+        "Suministros",
+        "Artículos de mercancía",
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        null,
+        Instant.parse("2025-12-30T00:00:00Z")).withCurrentProvisions(8, true, Instant.parse("2026-01-01T00:00:00Z")));
+
+    var poorerOpenedCargo = cargoRepository.save(CaravanCargo.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        CaravanCargoSourceType.CATALOG,
+        "suministros",
+        "Suministros",
+        "Artículos de mercancía",
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        null,
+        Instant.parse("2025-12-30T00:00:00Z")).withCurrentProvisions(3, true, Instant.parse("2026-01-01T00:00:00Z")));
+
+    for (var i = 0; i < 1; i++) {
+      travelerRepository.save(CaravanTraveler.create(
+          UUID.randomUUID(),
+          caravan.id(),
+          "Pasajero " + i,
+          null,
+          List.of("pasajero"),
+          List.of("pasajero"),
+          "pasajero",
+          1,
+          TravelerRoleData.empty(),
+          null,
+          null,
+          1,
+          Instant.parse("2025-12-30T00:00:00Z")));
+    }
+
+    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
+
+    service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
+        "opened-priority-order",
+        false,
+        List.of()));
+
+    assertThat(cargoRepository.findById(caravan.id(), poorerOpenedCargo.id())).hasValueSatisfying(entry ->
+        assertThat(entry.currentProvisions()).isEqualTo(2));
+    assertThat(cargoRepository.findById(caravan.id(), richerOpenedCargo.id())).hasValueSatisfying(entry ->
+        assertThat(entry.currentProvisions()).isEqualTo(8));
+  }
+
+  @Test
+  void cargoMovementSummaryListsOpenedLoadsAndPartiallyConsumedRemainingFood() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Cargo-Summary", null, Instant.parse("2026-01-01T00:00:00Z")));
+    for (var i = 0; i < 3; i++) {
+      cargoRepository.save(CaravanCargo.create(
+          UUID.randomUUID(),
+          caravan.id(),
+          CaravanCargoSourceType.CATALOG,
+          "suministros",
+          "Suministros",
+          "Artículos de mercancía",
+          1,
+          1,
+          null,
+          null,
+          null,
+          null,
+          null,
+          Instant.parse("2025-12-30T00:00:00Z")).withCurrentProvisions(10, false, Instant.parse("2026-01-01T00:00:00Z")));
+    }
+
+    for (var i = 0; i < 7; i++) {
+      travelerRepository.save(CaravanTraveler.create(
+          UUID.randomUUID(),
+          caravan.id(),
+          "Pasajero " + i,
+          null,
+          List.of("pasajero"),
+          List.of("pasajero"),
+          "pasajero",
+          1,
+          TravelerRoleData.empty(),
+          null,
+          null,
+          3,
+          Instant.parse("2025-12-30T00:00:00Z")));
+    }
+
+    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
+
+    var result = service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
+        "cargo-summary",
+        false,
+        List.of()));
+
+    assertThat(result.cargoMovementSummary()).isEqualTo(String.join("\n", List.of(
+        "+ 3 cargas de suministros",
+        "+ 1 carga de suministros con 9 de comida restante")));
+  }
+
+  @Test
+  void cookContributionsAreSplitByIndividualTravelerWhenPreviewingTheDayCycle() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Cook-Split", null, Instant.parse("2026-01-01T00:00:00Z")));
+
+    cargoRepository.save(CaravanCargo.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        CaravanCargoSourceType.CATALOG,
+        "suministros",
+        "Suministros",
+        "Artículos de mercancía",
+        3,
+        3,
+        null,
+        null,
+        null,
+        null,
+        null,
+        Instant.parse("2025-12-30T00:00:00Z")).withCurrentProvisions(30, false, Instant.parse("2026-01-01T00:00:00Z")));
+    cargoRepository.save(CaravanCargo.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        CaravanCargoSourceType.CATALOG,
+        "cocina-portatil",
+        "Cocina Portátil",
+        "Artículos de mejora",
+        3,
+        3,
+        null,
+        null,
+        null,
+        null,
+        null,
+        Instant.parse("2025-12-30T00:00:00Z")));
+
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Cocinero A",
+        null,
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        1,
+        TravelerRoleData.empty(),
+        null,
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Cocinero B",
+        null,
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        1,
+        TravelerRoleData.empty(),
+        null,
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Cocinero C",
+        null,
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        1,
+        TravelerRoleData.empty(),
+        null,
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+
+    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
+
+    var preview = service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of()));
+
+    assertThat(preview.contributions())
+        .extracting(contribution -> contribution.sourceName())
+        .contains("Cocinero A", "Cocinero B", "Cocinero C");
+    assertThat(preview.contributions())
+        .extracting(contribution -> contribution.sourceName())
+        .doesNotContain("Cocineros");
+  }
+
+  @Test
+  void portableKitchenAppliesOneToOneToCooksAndTeamworkBoostsTheFinalOutput() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Cook-Kitchen-Team", null, Instant.parse("2026-01-01T00:00:00Z")));
+
+    cargoRepository.save(CaravanCargo.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        CaravanCargoSourceType.CATALOG,
+        "suministros",
+        "Suministros",
+        "Artículos de mercancía",
+        3,
+        3,
+        null,
+        null,
+        null,
+        null,
+        null,
+        Instant.parse("2025-12-30T00:00:00Z")).withCurrentProvisions(30, false, Instant.parse("2026-01-01T00:00:00Z")));
+    for (var i = 0; i < 3; i++) {
+      cargoRepository.save(CaravanCargo.create(
+          UUID.randomUUID(),
+          caravan.id(),
+          CaravanCargoSourceType.CATALOG,
+          "cocina-portatil",
+          "Cocina Portátil",
+          "Artículos de mejora",
+          1,
+          1,
+          null,
+          null,
+          null,
+          null,
+          null,
+          Instant.parse("2025-12-30T00:00:00Z")));
+    }
+
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Cocinero A",
+        null,
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        1,
+        TravelerRoleData.empty(),
+        null,
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Cocinero B",
+        null,
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        1,
+        TravelerRoleData.empty(),
+        null,
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Cocinero C",
+        null,
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        1,
+        TravelerRoleData.empty(),
+        null,
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+
+    featRepository.save(CaravanFeat.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "trabajo-en-equipo",
+        CaravanFeatAcquisitionSourceType.OTHER,
+        null,
+        "test",
+        1,
+        true,
+        null,
+        null,
+        Instant.parse("2026-01-01T00:00:00Z")));
+
+    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
+
+    var preview = service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of()));
+
+    assertThat(preview.contributions())
+        .anySatisfy(contribution -> {
+          assertThat(contribution.sourceName()).isEqualTo("Cocinero A");
+          assertThat(contribution.quantity()).isEqualTo(20);
+        });
+    assertThat(preview.contributions())
+        .anySatisfy(contribution -> {
+          assertThat(contribution.sourceName()).isEqualTo("Cocinero B");
+          assertThat(contribution.quantity()).isEqualTo(20);
+        });
+    assertThat(preview.contributions())
+        .anySatisfy(contribution -> {
+          assertThat(contribution.sourceName()).isEqualTo("Cocinero C");
+          assertThat(contribution.quantity()).isEqualTo(20);
+        });
+    assertThat(preview.contributions())
+        .anyMatch(contribution -> contribution.sourceName().equals("Trabajo En Equipo")
+            && contribution.quantity() == 30
+            && contribution.reason().contains("Los cocineros"));
+  }
+
+  @Test
+  void teamworkBonusCarriesOverBetweenDaysForBatidores() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Team-Batidor", null, Instant.parse("2026-01-01T00:00:00Z")));
+    featRepository.save(CaravanFeat.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "autonomia-extrema",
+        CaravanFeatAcquisitionSourceType.OTHER,
+        null,
+        "test",
+        1,
+        true,
+        null,
+        null,
+        Instant.parse("2026-01-01T00:00:00Z")));
+    featRepository.save(CaravanFeat.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "trabajo-en-equipo",
+        CaravanFeatAcquisitionSourceType.OTHER,
+        null,
+        "test",
+        1,
+        true,
+        null,
+        null,
+        Instant.parse("2026-01-01T00:00:00Z")));
+
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Batidor A",
+        null,
+        List.of("pasajero", "batidor"),
+        List.of("batidor"),
+        "batidor",
+        1,
+        TravelerRoleData.empty(),
+        null,
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Batidor B",
+        null,
+        List.of("pasajero", "batidor"),
+        List.of("batidor"),
+        "batidor",
+        1,
+        TravelerRoleData.empty(),
+        null,
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+
+    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 100, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
+
+    var firstDay = service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand("team-batidor-1", false, List.of()));
+    var secondDay = service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand("team-batidor-2", false, List.of()));
+
+    assertThat(firstDay.totalGeneration()).isEqualTo(2);
+    assertThat(secondDay.totalGeneration()).isEqualTo(3);
+    assertThat(supplyStateRepository.findByCaravanId(caravan.id()))
+        .hasValueSatisfying(state -> assertThat(state.sharedJobProductivityState()).contains("batidor="));
+  }
+
+  @Test
+  void teamworkBonusCarriesOverBetweenDaysForCooks() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Team-Cook", null, Instant.parse("2026-01-01T00:00:00Z")));
+    featRepository.save(CaravanFeat.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "trabajo-en-equipo",
+        CaravanFeatAcquisitionSourceType.OTHER,
+        null,
+        "test",
+        1,
+        true,
+        null,
+        null,
+        Instant.parse("2026-01-01T00:00:00Z")));
+
+    for (var i = 0; i < 4; i++) {
+      cargoRepository.save(CaravanCargo.create(
+          UUID.randomUUID(),
+          caravan.id(),
+          CaravanCargoSourceType.CATALOG,
+          "suministros",
+          "Suministros",
+          "Artículos de mercancía",
+          1,
+          1,
+          null,
+          null,
+          null,
+          null,
+          null,
+          Instant.parse("2025-12-30T00:00:00Z")).withCurrentProvisions(10, false, Instant.parse("2026-01-01T00:00:00Z")));
+    }
+
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Cocinero A",
+        null,
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        1,
+        TravelerRoleData.empty(),
+        null,
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Cocinero B",
+        null,
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        1,
+        TravelerRoleData.empty(),
+        null,
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+
+    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 100, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
+
+    var firstDay = service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand("team-cook-1", false, List.of()));
+    var secondDay = service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand("team-cook-2", false, List.of()));
+
+    assertThat(firstDay.totalGeneration()).isEqualTo(17);
+    assertThat(secondDay.totalGeneration()).isEqualTo(18);
+    assertThat(supplyStateRepository.findByCaravanId(caravan.id()))
+        .hasValueSatisfying(state -> assertThat(state.sharedJobProductivityState()).contains("cocinero="));
+  }
+
+  @Test
+  void teamworkDoesNotTurnFarmerCarryoverIntoSpuriousCargoUnitsOnTheFirstDay() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Team-Farmer", null, Instant.parse("2026-01-01T00:00:00Z")));
+    var wagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-suministros", null, Instant.parse("2026-01-01T00:00:00Z")));
+    featRepository.save(CaravanFeat.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "trabajo-en-equipo",
+        CaravanFeatAcquisitionSourceType.OTHER,
+        null,
+        "test",
+        1,
+        true,
+        null,
+        null,
+        Instant.parse("2026-01-01T00:00:00Z")));
+
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Agricultor A",
+        null,
+        List.of("pasajero", "agricultor"),
+        List.of("agricultor"),
+        "agricultor",
+        1,
+        new TravelerRoleData(null, true, 1),
+        wagon.id(),
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        "Agricultor B",
+        null,
+        List.of("pasajero", "agricultor"),
+        List.of("agricultor"),
+        "agricultor",
+        1,
+        new TravelerRoleData(null, true, 1),
+        wagon.id(),
+        null,
+        1,
+        Instant.parse("2025-12-30T00:00:00Z")));
+
+    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 100, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
+
+    var firstDay = service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand("team-farmer-1", false, List.of()));
+
+    assertThat(firstDay.totalGeneration()).isZero();
+    assertThat(cargoRepository.findAllByCaravanId(caravan.id()))
+        .hasSize(2)
+        .allSatisfy(entry -> assertThat(entry.quantity()).isEqualTo(1));
+    assertThat(supplyStateRepository.findByCaravanId(caravan.id()))
+        .hasValueSatisfying(state -> assertThat(state.sharedJobProductivityState()).contains("agricultor="));
   }
 
   @Test
@@ -401,11 +1233,12 @@ class CaravanDayCycleServiceTest {
 
     var dayFourPreview = service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of()));
     assertThat(dayFourPreview.contributions())
-        .anySatisfy(contribution -> {
-          assertThat(contribution.sourceName()).isEqualTo("Agricultor");
-          assertThat(contribution.quantity()).isEqualTo(30);
-          assertThat(contribution.reason()).contains("ayuda de sus sirvientes");
-        });
+        .anyMatch(contribution ->
+            contribution.sourceName().equals("Agricultor")
+                && contribution.sourceRoleName().equals("Agricultor")
+                && contribution.quantity() == 3
+                && "cargas de suministros".equals(contribution.quantityUnit())
+                && contribution.reason().contains("ayuda de sus sirvientes"));
   }
 
   @Test
@@ -446,11 +1279,12 @@ class CaravanDayCycleServiceTest {
 
     var dayTwoPreview = service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of()));
     assertThat(dayTwoPreview.contributions())
-        .anySatisfy(contribution -> {
-          assertThat(contribution.sourceName()).isEqualTo("Agricultor");
-          assertThat(contribution.quantity()).isEqualTo(20);
-          assertThat(contribution.reason()).contains("ayuda de su sirviente");
-        });
+        .anyMatch(contribution ->
+            contribution.sourceName().equals("Agricultor")
+                && contribution.sourceRoleName().equals("Agricultor")
+                && contribution.quantity() == 2
+                && "cargas de suministros".equals(contribution.quantityUnit())
+                && contribution.reason().contains("ayuda de su sirviente"));
   }
 
   @Test
@@ -629,7 +1463,7 @@ class CaravanDayCycleServiceTest {
   }
 
   @Test
-  void deletesConsumedPerishableUnitImmediatelyWhenConsumptionUsesItUp() {
+  void deletesConsumedSupplyUnitImmediatelyWhenConsumptionUsesItUp() {
     var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
     var wagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-suministros", null, Instant.parse("2026-01-01T00:00:00Z")));
 
@@ -648,12 +1482,12 @@ class CaravanDayCycleServiceTest {
         2,
         Instant.parse("2025-12-30T00:00:00Z")));
 
-    var perishableCargo = cargoRepository.save(CaravanCargo.create(
+    var supplyCargo = cargoRepository.save(CaravanCargo.create(
         UUID.randomUUID(),
         caravan.id(),
         CaravanCargoSourceType.CATALOG,
-        "suministros-perecederos",
-        "Suministros Perecederos",
+        "suministros",
+        "Suministros",
         "Artículos de mercancía",
         1,
         1,
@@ -666,12 +1500,18 @@ class CaravanDayCycleServiceTest {
 
     supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
 
-    service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
+    var result = service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
         "day-consumption-delete",
         false,
         List.of()));
 
-    assertThat(cargoRepository.findById(caravan.id(), perishableCargo.id())).isEmpty();
+    assertThat(result.cargoMovementSummary()).isEqualTo("+ 1 cargas de suministros");
+    assertThat(result.warnings()).isEmpty();
+    assertThat(resolutionRepository.findAllByCaravanId(caravan.id()))
+        .singleElement()
+        .extracting(CaravanDayResolution::cargoMovementSummary)
+        .isEqualTo("+ 1 cargas de suministros");
+    assertThat(cargoRepository.findById(caravan.id(), supplyCargo.id())).isEmpty();
   }
 
   @Test

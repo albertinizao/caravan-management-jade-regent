@@ -108,7 +108,7 @@ public class CaravanBackupService implements ExportCaravanBackupUseCase, ImportC
   @Override
   public CaravanCampaignView execute(CaravanBackupView backup) {
     var caravanId = backup.caravan().id();
-    deleteCaravanUseCase.delete(caravanId);
+    campaignRepository.findById(caravanId).ifPresent(existing -> deleteCaravanUseCase.delete(existing.id()));
 
     var savedCampaign = campaignRepository.save(toCampaign(backup.caravan()));
     supplyStateRepository.save(toSupplyState(backup.supplyState()));
@@ -194,7 +194,8 @@ public class CaravanBackupService implements ExportCaravanBackupUseCase, ImportC
         state.standardReserve(),
         state.perishableReserve(),
         state.daysPassed(),
-        state.updatedAt());
+        state.updatedAt(),
+        state.sharedJobProductivityState());
   }
 
   private static CaravanSupplyState toSupplyState(SupplyStateSnapshot snapshot) {
@@ -204,7 +205,8 @@ public class CaravanBackupService implements ExportCaravanBackupUseCase, ImportC
         snapshot.standardReserve(),
         snapshot.perishableReserve(),
         snapshot.daysPassed(),
-        snapshot.updatedAt());
+        snapshot.updatedAt(),
+        snapshot.sharedJobProductivityState());
   }
 
   private static WagonSnapshot toWagonSnapshot(CaravanWagon wagon) {
@@ -427,6 +429,7 @@ public class CaravanBackupService implements ExportCaravanBackupUseCase, ImportC
         resolution.totalGeneration(),
         resolution.netDelta(),
         resolution.shortage(),
+        resolution.cargoMovementSummary(),
         resolution.choicesSummary(),
         resolution.contributionsSummary(),
         resolution.warningsSummary());
@@ -445,6 +448,7 @@ public class CaravanBackupService implements ExportCaravanBackupUseCase, ImportC
         snapshot.totalGeneration(),
         snapshot.netDelta(),
         snapshot.shortage(),
+        snapshot.cargoMovementSummary(),
         snapshot.choicesSummary(),
         snapshot.contributionsSummary(),
         snapshot.warningsSummary());

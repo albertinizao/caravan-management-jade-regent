@@ -194,6 +194,7 @@ class CaravanBackupServiceTest {
         2,
         -2,
         0,
+        "+ 0 cargas de suministros",
         "choices",
         "contributions",
         "warnings"));
@@ -238,6 +239,73 @@ class CaravanBackupServiceTest {
     assertThat(wagonImprovementRepository.findAllByCaravanIdAndWagonId(created.id(), wagonId)).hasSize(1);
     assertThat(dayResolutionRepository.findAllByCaravanId(created.id())).hasSize(1);
     assertThat(activeSelection.getActiveCaravanId()).contains(created.id());
+  }
+
+  @Test
+  void preservesSharedJobProductivityStateDuringBackupRoundTrip() {
+    var created = managementService.execute(new CreateCaravanCommand("Teamwork Caravan", "Shared job state", 2, 1, 1, 1));
+    supplyStateRepository.save(new CaravanSupplyState(
+        created.id(),
+        12,
+        0,
+        0,
+        4,
+        Instant.parse("2026-01-01T00:00:00Z"),
+        "batidor=0.5=traveler-a,traveler-b|cocinero=0.25=traveler-c,traveler-d"));
+
+    var backup = backupService.export(created.id());
+    assertThat(backup.supplyState().sharedJobProductivityState())
+        .isEqualTo("batidor=0.5=traveler-a,traveler-b|cocinero=0.25=traveler-c,traveler-d");
+
+    backupService.execute(backup);
+
+    assertThat(supplyStateRepository.findByCaravanId(created.id()))
+        .hasValueSatisfying(state -> assertThat(state.sharedJobProductivityState())
+            .isEqualTo("batidor=0.5=traveler-a,traveler-b|cocinero=0.25=traveler-c,traveler-d"));
+  }
+
+  @Test
+  void importsVersionTwoBackupIntoAnEmptyDatabase() {
+    var caravanId = UUID.randomUUID();
+    var backup = new CaravanBackupView(
+        2,
+        true,
+        new CaravanBackupView.CaravanSnapshot(
+            caravanId,
+            "Restored Caravan",
+            "Recovered from backup",
+            4,
+            CaravanMainStats.withUpdatedAllocation(2, 2, 2, 2, 10),
+            0,
+            com.gestioncaravana.domain.CaravanCampaignStatus.ACTIVE,
+            Instant.parse("2026-07-08T10:00:00Z"),
+            Instant.parse("2026-07-08T10:00:00Z")),
+        new CaravanBackupView.SupplyStateSnapshot(
+            caravanId,
+            0,
+            0,
+            0,
+            0,
+            Instant.parse("2026-07-08T10:00:00Z"),
+            null),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of());
+
+    var restored = backupService.execute(backup);
+
+    assertThat(restored.id()).isEqualTo(caravanId);
+    assertThat(campaignRepository.findById(caravanId)).hasValueSatisfying(campaign -> {
+      assertThat(campaign.name()).isEqualTo("Restored Caravan");
+      assertThat(campaign.level()).isEqualTo(4);
+    });
+    assertThat(supplyStateRepository.findByCaravanId(caravanId)).hasValueSatisfying(state ->
+        assertThat(state.daysPassed()).isEqualTo(0));
+    assertThat(activeSelection.getActiveCaravanId()).contains(caravanId);
   }
 
   private static final class InMemoryCaravanRepository implements CaravanCampaignRepositoryPort {

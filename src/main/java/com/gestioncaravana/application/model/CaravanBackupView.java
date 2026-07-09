@@ -26,10 +26,10 @@ public record CaravanBackupView(
     List<FeatSnapshot> feats,
     List<DayResolutionSnapshot> dayResolutions) {
 
-  public static final int CURRENT_SCHEMA_VERSION = 2;
+  public static final int CURRENT_SCHEMA_VERSION = 3;
 
   public CaravanBackupView {
-    if (schemaVersion != CURRENT_SCHEMA_VERSION) {
+    if (schemaVersion != CURRENT_SCHEMA_VERSION && schemaVersion != 2) {
       throw new IllegalArgumentException("Unsupported backup schema version: " + schemaVersion);
     }
     if (caravan == null) {
@@ -85,7 +85,8 @@ public record CaravanBackupView(
       int standardReserve,
       int perishableReserve,
       int daysPassed,
-      Instant updatedAt) {}
+      Instant updatedAt,
+      String sharedJobProductivityState) {}
 
   public record WagonSnapshot(
       UUID id,
@@ -191,6 +192,7 @@ public record CaravanBackupView(
       int totalGeneration,
       int netDelta,
       int shortage,
+      String cargoMovementSummary,
       String choicesSummary,
       String contributionsSummary,
       String warningsSummary) {}

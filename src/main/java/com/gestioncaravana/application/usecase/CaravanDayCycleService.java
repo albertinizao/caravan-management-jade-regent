@@ -4,6 +4,7 @@ import com.gestioncaravana.application.model.CaravanDailyChoiceView;
 import com.gestioncaravana.application.model.CaravanDailyContributionView;
 import com.gestioncaravana.application.model.CaravanDayPreviewView;
 import com.gestioncaravana.application.model.CaravanDayResolutionView;
+import com.gestioncaravana.application.model.CaravanSupplyConsumptionView;
 import com.gestioncaravana.application.port.in.AdvanceCaravanDayCycleUseCase;
 import com.gestioncaravana.application.port.in.PreviewCaravanDayCycleUseCase;
 import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
@@ -27,6 +28,8 @@ import com.gestioncaravana.domain.TravelerRoleCatalog;
 import com.gestioncaravana.domain.WagonCatalog;
 import com.gestioncaravana.domain.WagonImprovementCatalog;
 import com.gestioncaravana.domain.WagonType;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -45,9 +48,11 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
   private static final String AGRICULTURIST_ROLE = "agricultor";
   private static final String COOK_ROLE = "cocinero";
   private static final String SERVANT_ROLE = "sirviente";
+  private static final String TEAMWORK_FEAT = "trabajo-en-equipo";
   private static final String AUTONOMY_FEAT = "autonomia-extrema";
   private static final String FASTING_FEAT = "ayuno-intermitente";
   private static final String EFFICIENT_CONSUMPTION_FEAT = "consumo-eficiente";
+  private static final int TEAMWORK_MAX_TRAVELERS = 3;
   private static final String PORTABLE_KITCHEN_CODE = "cocina-portatil";
   private static final String SUPPLIES_CODE = "suministros";
   private static final String PERISHABLE_SUPPLIES_CODE = "suministros-perecederos";
@@ -125,6 +130,7 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
         computation.totalGeneration(),
         computation.netDelta(),
         computation.shortage(),
+        computation.cargoMovementSummary(),
         computation.choicesSummary(),
         computation.contributionsSummary(),
         computation.warningsSummary());
@@ -135,7 +141,8 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
         0,
         0,
         state.daysPassed() + 1,
-        now));
+        now,
+        computation.sharedJobProductivityState()));
     return toView(resolutionRepository.save(resolution), computation);
   }
 
@@ -152,10 +159,13 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
     var now = clock.instant();
     var cargo = advancePerishableCargoDayMarker(caravan.id(), cargoRepository.findAllByCaravanId(caravan.id()), now, persistCargoChanges);
     var travelersForDay = advanceServantServiceDays(travelers, persistCargoChanges, now);
+    var cargoMovementSummary = new CargoMovementSummaryBuilder();
+    var generatedProvisions = 0;
 
-    var cargoReserveBefore = cargo.stream().mapToInt(this::cargoProvisions).sum();
-    var startingReserve = state.provisionReserve() + cargoReserveBefore;
+    var startingReserve = state.provisionReserve();
     var generatedReserveBefore = state.provisionReserve();
+    var displayCurrentReserve = reserveSupplyCargoQuantity(cargo);
+    var initialProvisionsInConsumption = openedSupplyConsumptionViews(cargo, List.of(), java.util.Set.of());
 
     var baseConsumption = statistics.otherStats().consumption();
     var travelerConsumption = travelersForDay.stream()
@@ -173,6 +183,7 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
         "Caravana",
         "ADD",
         baseConsumption,
+        "provisiones",
         "Consumo base diario calculado a partir de viajeros y carros",
         true,
         null));
@@ -186,6 +197,7 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
           "Ayuno Intermitente",
           "ADD",
           reducedTravelerConsumption - travelerConsumption,
+          "provisiones",
           "Reduce a la mitad el consumo de los viajeros",
           true,
           null));
@@ -202,6 +214,7 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
           "Consumo Eficiente",
           "ADD",
           reduced - totalConsumption,
+          "provisiones",
           "Reduce el consumo total en 2 sin bajar del consumo base de carros",
           true,
           null));
@@ -213,6 +226,15 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
     var rawGeneration = 0;
     var stagedGeneratedCargo = new ArrayList<CaravanCargo>();
     var autonomy = hasActiveFeat(feats, AUTONOMY_FEAT);
+    var teamworkActive = hasActiveFeat(feats, TEAMWORK_FEAT);
+    var sharedJobProductivityState = SharedJobProductivityTracker.parse(state.sharedJobProductivityState());
+    if (!teamworkActive) {
+      sharedJobProductivityState.clear();
+    }
+    var farmerBaseGeneration = BigDecimal.ZERO;
+    var farmerContributorIds = new ArrayList<UUID>();
+    var batidorBaseGeneration = BigDecimal.ZERO;
+    var batidorContributorIds = new ArrayList<UUID>();
     var servantsByMaster = travelersForDay.stream()
         .filter(traveler -> traveler.hasActiveRole(SERVANT_ROLE))
         .filter(traveler -> traveler.roleSpecificData() != null && traveler.roleSpecificData().servedTravelerId() != null)
@@ -238,14 +260,16 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
                 traveler.consumption(),
                 now));
           }
-          generationContributions.add(contribution(
+        generationContributions.add(contribution(
               "generation",
               "TRAVELER",
               traveler.id().toString(),
               traveler.fullName(),
+              "Agricultor",
               "ADD",
               0,
-              "El agricultor deja la siguiente unidad preparada para el día siguiente",
+              "cargas de suministros",
+              "El agricultor deja la siguiente carga preparada para el día siguiente",
               true,
               null));
           continue;
@@ -281,26 +305,33 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
               "TRAVELER",
               traveler.id().toString(),
               traveler.fullName(),
+              "Agricultor",
               "ADD",
               0,
-              "El agricultor genera una unidad de suministros",
+              "cargas de suministros",
+              "El agricultor genera una carga de suministros",
               false,
               "No hay hueco para almacenar la unidad de suministros"));
           warnings.add(generatedQuantity == 1
-              ? "Se pierde 1 unidad de suministros por no tener hueco."
-              : "Se pierden " + generatedQuantity + " unidades de suministros por no tener hueco.");
+              ? "Se pierde 1 carga de suministros por no tener hueco."
+              : "Se pierden " + generatedQuantity + " cargas de suministros por no tener hueco.");
           continue;
         }
 
         stagedGeneratedCargo.add(generatedCargo);
         var amount = cargoProvisions(generatedCargo);
+        generatedProvisions += generatedQuantity;
+        farmerBaseGeneration = farmerBaseGeneration.add(BigDecimal.valueOf(amount));
+        farmerContributorIds.add(traveler.id());
         generationContributions.add(contribution(
               "generation",
               "TRAVELER",
               traveler.id().toString(),
               traveler.fullName(),
+              "Agricultor",
               "ADD",
-              amount,
+              generatedQuantity,
+              "cargas de suministros",
               farmerContributionReason(servants, generatedQuantity),
               true,
               null));
@@ -312,8 +343,10 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
               "TRAVELER",
               traveler.id().toString(),
               traveler.fullName(),
+              "Batidor",
               "ADD",
               0,
+              "de comida",
               "El batidor se centró en explorar",
               true,
               null));
@@ -322,14 +355,37 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
 
         var amount = (autonomy ? 1 : 2) + servantBoost(traveler.id(), servantsByMaster);
         rawGeneration += amount;
+        batidorBaseGeneration = batidorBaseGeneration.add(BigDecimal.valueOf(amount));
+        batidorContributorIds.add(traveler.id());
         generationContributions.add(contribution(
             "generation",
             "TRAVELER",
             traveler.id().toString(),
             traveler.fullName(),
+            "Batidor",
             "ADD",
             amount,
+            "de comida",
             autonomy ? "Autonomía Extrema reduce la producción del batidor" : "Batidor en modo caza",
+            true,
+            null));
+      }
+    }
+
+    if (teamworkActive && batidorBaseGeneration.compareTo(BigDecimal.ZERO) > 0) {
+      var teamworkBonus = sharedJobProductivityState.apply(BATIDOR_ROLE, batidorContributorIds, batidorBaseGeneration);
+      if (teamworkBonus.compareTo(BigDecimal.ZERO) > 0) {
+        rawGeneration += teamworkBonus.intValueExact();
+        generationContributions.add(contribution(
+            "generation",
+            "FEAT",
+            TEAMWORK_FEAT,
+            "Trabajo En Equipo",
+            "Batidor",
+            "ADD",
+            teamworkBonus.intValueExact(),
+            "de comida",
+            batidorTeamworkReason(batidorContributorIds.size()),
             true,
             null));
       }
@@ -339,93 +395,265 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
         .filter(traveler -> traveler.hasActiveRole(COOK_ROLE))
         .toList();
     var cookCount = travelersForDay.stream().filter(traveler -> traveler.hasActiveRole(COOK_ROLE)).count();
-    var portableKitchenCount = (int) cargo.stream().filter(entry -> PORTABLE_KITCHEN_CODE.equals(entry.catalogCode())).count();
-    var cookGenerationBonus = calculateCookBonus(rawGeneration, cookTravelersForDay, servantsByMaster, portableKitchenCount);
-    var cookCargoBonus = calculateCookBonus(cargo.stream().mapToInt(this::cargoProvisions).sum(), cookTravelersForDay, servantsByMaster, portableKitchenCount);
-
-    var totalGeneration = rawGeneration + cookGenerationBonus + cookCargoBonus;
-    if (cookGenerationBonus > 0) {
-      generationContributions.add(contribution(
-          "generation",
-          "ROLE",
-          COOK_ROLE,
-          "Cocineros",
-          "ADD",
-          cookGenerationBonus,
-          portableKitchenCount > 0
-              ? "La Cocina Portátil duplica el rendimiento del cocinero asignado"
-              : "Cada cocinero aprovecha un bloque completo de 10 suministros para aportar 5 extra",
-          true,
-          null));
+    var cookGeneratedCargo = new ArrayList<CaravanCargo>();
+    for (var cook : cookTravelersForDay) {
+      cookGeneratedCargo.add(createUnassignedSupplyForCook(caravan.id(), now));
     }
-    if (cookCargoBonus > 0) {
-      generationContributions.add(contribution(
-          "generation",
-          "ROLE",
+    var cookGeneratedCargoIds = cookGeneratedCargo.stream().map(CaravanCargo::id).collect(java.util.stream.Collectors.toUnmodifiableSet());
+
+    var cargoAvailableForCooking = new ArrayList<CaravanCargo>(cargo);
+    cargoAvailableForCooking.addAll(stagedGeneratedCargo);
+    cargoAvailableForCooking.addAll(cookGeneratedCargo);
+    var cookableSupplyEntries = cargoAvailableForCooking.stream()
+        .filter(this::isCookableSupply)
+        .sorted(Comparator.comparing((CaravanCargo entry) -> entry.wagonId() == null)
+            .reversed()
+            .thenComparing(CaravanCargo::updatedAt)
+            .thenComparing(CaravanCargo::id))
+        .toList();
+    var portableKitchenCount = cargoAvailableForCooking.stream()
+        .filter(entry -> PORTABLE_KITCHEN_CODE.equals(entry.catalogCode()))
+        .mapToInt(CaravanCargo::quantity)
+        .sum();
+    var cookBonusBreakdown = calculateCookBonus(
+        cookableSupplyEntries.stream().mapToInt(this::cargoProvisions).sum(),
+        cookTravelersForDay,
+        servantsByMaster,
+        portableKitchenCount,
+        "Convierte 1 unidad de suministros en 15 de comida",
+        "Convierte 1 unidad de suministros en 20 de comida");
+    var cookBaseOutput = cookBonusBreakdown.totalOutputBeforeTeamwork();
+
+    applyCookedSupplyState(
+        cookableSupplyEntries,
+        cookBonusBreakdown.contributions(),
+        cargo,
+        stagedGeneratedCargo,
+        cookGeneratedCargo,
+        now,
+        persistCargoChanges);
+
+    if (!cookBonusBreakdown.contributions().isEmpty()) {
+      generationContributions.addAll(cookBonusBreakdown.contributions());
+    }
+
+    var cookTeamworkBonus = 0;
+    if (teamworkActive && cookBaseOutput > 0) {
+      var teamworkBonus = sharedJobProductivityState.apply(
           COOK_ROLE,
-          "Cocineros",
-          "ADD",
-          cookCargoBonus,
-          portableKitchenCount > 0
-              ? "La Cocina Portátil duplica el rendimiento del cocinero asignado sobre los suministros consumidos"
-              : "El cocinero mejora los suministros almacenados al gastarse",
-          true,
-          null));
+          cookTravelersForDay.stream().map(CaravanTraveler::id).toList(),
+          BigDecimal.valueOf(cookBaseOutput));
+      if (teamworkBonus.compareTo(BigDecimal.ZERO) > 0) {
+        cookTeamworkBonus = teamworkBonus.intValueExact();
+        generationContributions.add(contribution(
+            "generation",
+            "FEAT",
+            TEAMWORK_FEAT,
+            "Trabajo En Equipo",
+            "Cocinero",
+            "ADD",
+            teamworkBonus.intValueExact(),
+            "de comida",
+            cookTeamworkReason(cookTravelersForDay.size()),
+            true,
+            null));
+      }
+    }
+
+    if (teamworkActive && farmerBaseGeneration.compareTo(BigDecimal.ZERO) > 0) {
+      var teamworkBonus = sharedJobProductivityState.apply(AGRICULTURIST_ROLE, farmerContributorIds, farmerBaseGeneration);
+      if (teamworkBonus.compareTo(BigDecimal.ZERO) > 0) {
+        var teamworkCargoQuantity = teamworkBonus
+            .divide(BigDecimal.valueOf(STANDARD_SUPPLY_VALUE), 0, RoundingMode.FLOOR)
+            .intValueExact();
+        if (teamworkCargoQuantity <= 0) {
+          generationContributions.add(contribution(
+              "generation",
+              "FEAT",
+              TEAMWORK_FEAT,
+              "Trabajo En Equipo",
+              "Agricultor",
+              "ADD",
+              teamworkBonus.intValueExact(),
+              "provisiones",
+              farmerTeamworkReason(farmerContributorIds.size()),
+              true,
+              null));
+        } else {
+          var placementCargo = new ArrayList<CaravanCargo>(cargo);
+          placementCargo.addAll(stagedGeneratedCargo);
+          var generatedCargo = createAndPlaceSupplyForTraveler(
+              caravan.id(),
+              wagons,
+              placementCargo,
+              now,
+              teamworkCargoQuantity);
+          if (generatedCargo == null) {
+            generationContributions.add(contribution(
+                "generation",
+                "FEAT",
+                TEAMWORK_FEAT,
+                "Trabajo En Equipo",
+                "Agricultor",
+                "ADD",
+                0,
+                "provisiones",
+                farmerTeamworkReason(farmerContributorIds.size()),
+                false,
+                "No hay hueco para almacenar la producción adicional del equipo"));
+            warnings.add(teamworkCargoQuantity == 1
+                ? "Se pierde 1 unidad adicional por falta de hueco para el trabajo en equipo."
+                : "Se pierden " + teamworkCargoQuantity + " unidades adicionales por falta de hueco para el trabajo en equipo.");
+          } else {
+            stagedGeneratedCargo.add(generatedCargo);
+            generatedProvisions += teamworkCargoQuantity;
+            generationContributions.add(contribution(
+                "generation",
+                "FEAT",
+                TEAMWORK_FEAT,
+                "Trabajo En Equipo",
+                "Agricultor",
+                "ADD",
+                teamworkCargoQuantity,
+                "cargas de suministros",
+                farmerTeamworkReason(farmerContributorIds.size()),
+                true,
+                null));
+          }
+        }
+      }
     }
 
     if (fastingEnabled && !hasActiveFeat(feats, FASTING_FEAT)) {
       throw new IllegalArgumentException("Ayuno Intermitente solo está disponible si la caravana tiene la dote activa");
     }
 
-    consumeCargoForShortage(
+    var foodBeforeLateSupply = rawGeneration + cookBaseOutput + cookTeamworkBonus;
+    var deficitBeforeGeneratedCargo = Math.max(0, totalConsumption - foodBeforeLateSupply);
+    var cookFoodConsumed = consumeGeneratedCargoForShortage(
         caravan.id(),
-        cargo,
-        generatedReserveBefore,
-        totalGeneration,
-        totalConsumption,
+        cookGeneratedCargo,
+        deficitBeforeGeneratedCargo,
         now,
         generationContributions,
-        persistCargoChanges);
+        persistCargoChanges,
+        false,
+        false,
+        false,
+        cargoMovementSummary,
+        "Los suministros generados por los cocineros se usan para cubrir el consumo del día");
+
+    var deficitAfterCookGeneratedCargo = deficitBeforeGeneratedCargo;
+    var openedStoredCargoConsumed = consumeCargoPoolForShortage(
+          caravan.id(),
+          cargo,
+          deficitAfterCookGeneratedCargo,
+          now,
+          generationContributions,
+          persistCargoChanges,
+          entry -> isOpenedCargo(entry) && !cookGeneratedCargoIds.contains(entry.id()),
+          false,
+          true,
+          cargoMovementSummary,
+          "Los suministros almacenados ya abiertos se consumen para cubrir el consumo del día");
+
+    var deficitAfterOpenedStoredCargo = Math.max(0, deficitAfterCookGeneratedCargo - openedStoredCargoConsumed);
+    var generatedCargoConsumed = consumeGeneratedCargoForShortage(
+        caravan.id(),
+        stagedGeneratedCargo,
+        deficitAfterOpenedStoredCargo,
+        now,
+        generationContributions,
+        persistCargoChanges,
+        true,
+        true,
+        true,
+        cargoMovementSummary,
+        "Los suministros generados por los agricultores se usan para cubrir el consumo del día");
+
+    var deficitAfterGeneratedCargo = Math.max(0, deficitAfterOpenedStoredCargo - generatedCargoConsumed);
+    consumeCargoPoolForShortage(
+        caravan.id(),
+        cargo,
+        deficitAfterGeneratedCargo,
+        now,
+        generationContributions,
+        persistCargoChanges,
+        this::isUnopenedCargo,
+        true,
+        true,
+        cargoMovementSummary,
+        "Los suministros almacenados se abren para cubrir el consumo del día");
 
     if (portableKitchenCount > 0 && cookCount == 0) {
       warnings.add("La Cocina Portátil está presente, pero no hay cocineros asignados.");
     }
 
+    var lateSupplyLoadsConsumed = cargoMovementSummary.consumedLoads();
+    var lateSupplyFoodGenerated = lateSupplyLoadsConsumed * STANDARD_SUPPLY_VALUE;
+    var totalGeneration = foodBeforeLateSupply + lateSupplyFoodGenerated;
+    var displayTotalGeneration = totalGeneration;
+
     var netDelta = totalGeneration - totalConsumption;
-    var endingReserveRaw = startingReserve + netDelta;
-    var shortage = Math.max(0, totalConsumption - startingReserve - totalGeneration);
+    var endingReserveRaw = startingReserve + generatedProvisions - lateSupplyLoadsConsumed;
+    var shortage = deficitAfterGeneratedCargo;
     var endingReserve = Math.max(0, endingReserveRaw);
     if (persistCargoChanges) {
       for (var generatedCargo : stagedGeneratedCargo) {
         cargoRepository.save(generatedCargo);
       }
     }
+    if (shortage == 0) {
+      storeGeneratedCookCargo(caravan.id(), cookGeneratedCargo, wagons, cargo, stagedGeneratedCargo, now, persistCargoChanges);
+    } else if (persistCargoChanges) {
+      for (var generatedCargo : cookGeneratedCargo) {
+        cargoRepository.save(generatedCargo);
+      }
+    }
 
-    var generatedEndingReserve = Math.max(0, generatedReserveBefore + totalGeneration - totalConsumption);
+    var generatedEndingReserve = Math.max(0, generatedReserveBefore + generatedProvisions - lateSupplyLoadsConsumed);
+    var displayEndingReserve = Math.max(0, displayCurrentReserve + generatedProvisions - lateSupplyLoadsConsumed);
+    var sharedJobProductivitySerialized = sharedJobProductivityState.serialize();
 
     var choiceViews = choicesToViews(batidorModes, fastingEnabled);
+      var provisionsInConsumption = openedSupplyConsumptionViews(cargo, stagedGeneratedCargo, cookGeneratedCargoIds);
+    var consumedCookProvisions = (int) Math.ceil(cookFoodConsumed / (double) STANDARD_SUPPLY_VALUE);
+    var consumedProvisions = consumedCookProvisions + lateSupplyLoadsConsumed + provisionsInConsumption.size();
+    var generatedFood = rawGeneration;
+    var surplusProvisions = Math.max(0, generatedProvisions - consumedProvisions);
     var contributions = new ArrayList<CaravanDailyContributionView>();
     contributions.addAll(consumptionContributions);
     contributions.addAll(generationContributions);
     contributions.sort(Comparator.comparing(CaravanDailyContributionView::effectCode).thenComparing(CaravanDailyContributionView::sourceName));
 
     return new CaravanDayComputation(
-        state.daysPassed() + 1,
-        startingReserve,
-        totalConsumption,
+          state.daysPassed() + 1,
+          startingReserve,
+          initialProvisionsInConsumption,
+          provisionsInConsumption,
+          totalConsumption,
         totalGeneration,
         netDelta,
         endingReserve,
         shortage,
+        generatedProvisions,
+        generatedFood,
+        consumedProvisions,
+        surplusProvisions,
         generatedEndingReserve,
+        displayCurrentReserve,
+        displayTotalGeneration,
+        displayEndingReserve,
         0,
         0,
         choiceViews,
         contributions,
         warnings,
+        cargoMovementSummary.toSummary(),
         join(choiceViews.stream().map(String::valueOf).toList()),
         join(contributions.stream().map(String::valueOf).toList()),
-        join(warnings));
+        join(warnings),
+        sharedJobProductivitySerialized);
   }
 
   private int servantBoost(UUID travelerId, Map<UUID, List<CaravanTraveler>> servantsByMaster) {
@@ -458,18 +686,20 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
     return roleData.withGeneratingFood(generatingFood);
   }
 
-  private int calculateCookBonus(
+  private CookBonusBreakdown calculateCookBonus(
       int baseValue,
       List<CaravanTraveler> cookTravelers,
       Map<UUID, List<CaravanTraveler>> servantsByMaster,
-      int portableKitchenCount) {
+      int portableKitchenCount,
+      String baseReason,
+      String kitchenReason) {
     if (baseValue <= 0 || cookTravelers.isEmpty()) {
-      return 0;
+      return new CookBonusBreakdown(0, 0, 0, List.of());
     }
 
     var availableBlocks = baseValue / STANDARD_SUPPLY_VALUE;
     if (availableBlocks <= 0) {
-      return 0;
+      return new CookBonusBreakdown(0, 0, 0, List.of());
     }
 
     var candidates = cookTravelers.stream()
@@ -490,12 +720,197 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
         .collect(java.util.stream.Collectors.toSet());
 
     var bonus = 0;
+    var outputBeforeTeamwork = 0;
+    var contributions = new ArrayList<CaravanDailyContributionView>();
     for (var candidate : candidates) {
-      bonus += assignedKitchenCookIds.contains(candidate.cook().id())
-          ? candidate.baseBonus() * 2
-          : candidate.baseBonus();
+      var hasPortableKitchen = assignedKitchenCookIds.contains(candidate.cook().id());
+      var individualBonus = candidate.baseBonus() + (hasPortableKitchen ? 5 : 0);
+      var individualOutput = STANDARD_SUPPLY_VALUE + individualBonus;
+      bonus += individualBonus;
+      outputBeforeTeamwork += individualOutput;
+      contributions.add(contribution(
+          "generation",
+          "ROLE",
+          candidate.cook().id().toString(),
+          candidate.cook().fullName(),
+          "Cocinero",
+          "ADD",
+          individualOutput,
+          "de comida",
+          hasPortableKitchen
+              ? kitchenReason
+              : baseReason,
+          true,
+          null));
     }
-    return bonus;
+    return new CookBonusBreakdown(bonus, outputBeforeTeamwork, candidates.size(), contributions);
+  }
+
+  private int consumeCargoFromPool(
+      List<CaravanCargo> cargoPool,
+      int provisionsToConsume,
+      java.time.Instant now,
+      boolean persistChanges,
+      boolean generatedCargoPool) {
+    if (provisionsToConsume <= 0 || cargoPool.isEmpty()) {
+      return provisionsToConsume;
+    }
+
+      var remaining = provisionsToConsume;
+    var updatedCargo = new ArrayList<CaravanCargo>(cargoPool.size());
+    var orderedCargo = cargoPool.stream()
+        .sorted(supplyConsumptionComparator())
+        .toList();
+    for (var entry : orderedCargo) {
+      if (remaining <= 0) {
+        updatedCargo.add(entry);
+        continue;
+      }
+
+      var availableProvisions = cargoProvisions(entry);
+      if (availableProvisions <= 0) {
+        updatedCargo.add(entry);
+        continue;
+      }
+
+      var consumedProvisions = Math.min(availableProvisions, remaining);
+      remaining -= consumedProvisions;
+
+      var remainingProvisions = availableProvisions - consumedProvisions;
+      if (remainingProvisions > 0) {
+        updatedCargo.add(entry.withCurrentProvisions(remainingProvisions, entry.dayPassed(), now));
+        if (!generatedCargoPool && persistChanges) {
+          cargoRepository.save(entry.withCurrentProvisions(remainingProvisions, entry.dayPassed(), now));
+        }
+      } else if (!generatedCargoPool && persistChanges) {
+        cargoRepository.deleteById(entry.caravanId(), entry.id());
+      }
+    }
+
+    cargoPool.clear();
+    cargoPool.addAll(updatedCargo);
+    return remaining;
+  }
+
+  private String batidorTeamworkReason(int teamSize) {
+    return teamSize <= 1
+        ? "El batidor trabaja en solitario"
+        : "Los batidores coordinan la caza y aprovechan mejor la ruta";
+  }
+
+  private String cookTeamworkReason(int teamSize) {
+    return teamSize <= 1
+        ? "El cocinero trabaja en solitario"
+        : "Los cocineros coordinan mejor la preparación de suministros";
+  }
+
+  private String farmerTeamworkReason(int teamSize) {
+    return teamSize <= 1
+        ? "El agricultor trabaja en solitario"
+        : "Los agricultores coordinan el trabajo y producen más suministros";
+  }
+
+  private CaravanCargo createUnassignedSupplyForCook(UUID caravanId, java.time.Instant now) {
+    var catalogItem = CargoCatalog.findByCode(SUPPLIES_CODE)
+        .orElseThrow(() -> new IllegalStateException("Unknown cargo catalog entry: " + SUPPLIES_CODE));
+    return CaravanCargo.create(
+        UUID.randomUUID(),
+        caravanId,
+        com.gestioncaravana.domain.CaravanCargoSourceType.CATALOG,
+        catalogItem.code(),
+        catalogItem.name(),
+        catalogItem.category(),
+        1,
+        catalogItem.resolvedDefaultCargoUnits(),
+        null,
+        null,
+        null,
+        null,
+        null,
+        now);
+  }
+
+  private boolean isCookableSupply(CaravanCargo entry) {
+    return SUPPLIES_CODE.equals(entry.catalogCode()) && !Boolean.TRUE.equals(entry.dayPassed());
+  }
+
+  private void applyCookedSupplyState(
+      List<CaravanCargo> cookableSupplyEntries,
+      List<CaravanDailyContributionView> cookContributions,
+      List<CaravanCargo> cargo,
+      List<CaravanCargo> stagedGeneratedCargo,
+      List<CaravanCargo> cookGeneratedCargo,
+      java.time.Instant now,
+      boolean persistChanges) {
+    if (cookableSupplyEntries.isEmpty() || cookContributions.isEmpty()) {
+      return;
+    }
+
+    var limit = Math.min(cookableSupplyEntries.size(), cookContributions.size());
+    for (var i = 0; i < limit; i++) {
+      var source = cookableSupplyEntries.get(i);
+      var contribution = cookContributions.get(i);
+      var cooked = source.withCurrentProvisions(contribution.quantity(), true, now);
+      var wasPersistedCargo = cargo.stream().anyMatch(entry -> entry.id().equals(source.id()));
+      replaceCargoEntryInPools(source.id(), cooked, cargo, stagedGeneratedCargo, cookGeneratedCargo);
+      if (persistChanges && wasPersistedCargo) {
+        cargoRepository.save(cooked);
+      }
+    }
+  }
+
+  private void replaceCargoEntryInPools(
+      UUID cargoId,
+      CaravanCargo replacement,
+      List<CaravanCargo> cargo,
+      List<CaravanCargo> stagedGeneratedCargo,
+      List<CaravanCargo> cookGeneratedCargo) {
+    replaceCargoEntry(cargoId, replacement, cargo);
+    replaceCargoEntry(cargoId, replacement, stagedGeneratedCargo);
+    replaceCargoEntry(cargoId, replacement, cookGeneratedCargo);
+  }
+
+  private void replaceCargoEntry(UUID cargoId, CaravanCargo replacement, List<CaravanCargo> pool) {
+    for (var index = 0; index < pool.size(); index++) {
+      if (pool.get(index).id().equals(cargoId)) {
+        pool.set(index, replacement);
+        return;
+      }
+    }
+  }
+
+  private void storeGeneratedCookCargo(
+      UUID caravanId,
+      List<CaravanCargo> generatedCargo,
+      List<CaravanWagon> wagons,
+      List<CaravanCargo> cargo,
+      List<CaravanCargo> stagedGeneratedCargo,
+      java.time.Instant now,
+      boolean persistChanges) {
+    if (generatedCargo.isEmpty()) {
+      return;
+    }
+
+    var remaining = new ArrayList<CaravanCargo>(generatedCargo.size());
+    for (var entry : generatedCargo) {
+      var placementCargo = new ArrayList<CaravanCargo>(cargo);
+      placementCargo.addAll(stagedGeneratedCargo);
+      placementCargo.addAll(remaining);
+      var wagon = selectWagonForGeneratedSupply(caravanId, wagons, placementCargo);
+      if (wagon == null) {
+        remaining.add(entry);
+        continue;
+      }
+
+      var stored = entry.assignWagon(wagon.id(), now);
+      remaining.add(stored);
+      if (persistChanges) {
+        cargoRepository.save(stored);
+      }
+    }
+
+    generatedCargo.clear();
+    generatedCargo.addAll(remaining);
   }
 
   private int farmerHelperBonusSupplies(CaravanTraveler master, String masterRoleCode, List<CaravanTraveler> servants) {
@@ -509,12 +924,14 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
 
   private String farmerContributionReason(List<CaravanTraveler> servants, int generatedQuantity) {
     if (servants.isEmpty()) {
-      return "El agricultor genera una unidad de suministros";
+      return generatedQuantity == 1
+          ? "El agricultor genera una carga de suministros"
+          : "El agricultor genera " + generatedQuantity + " cargas de suministros";
     }
     if (generatedQuantity > 1) {
-      return "El agricultor genera " + generatedQuantity + " unidades de suministros con ayuda de " + (servants.size() == 1 ? "su sirviente" : "sus sirvientes");
+      return "El agricultor genera " + generatedQuantity + " cargas de suministros con ayuda de " + (servants.size() == 1 ? "su sirviente" : "sus sirvientes");
     }
-    return "El agricultor genera una unidad de suministros con ayuda de su sirviente";
+    return "El agricultor genera una carga de suministros con ayuda de su sirviente";
   }
 
   private double masterBonusMultiplier(CaravanTraveler master, String masterRoleCode, List<CaravanTraveler> servants) {
@@ -558,52 +975,112 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
     return servant.availableRoleCodes().contains(roleCode);
   }
 
+  private static final class SharedJobProductivityTracker {
+    private final Map<String, SharedJobBucketState> buckets;
+
+    private SharedJobProductivityTracker(Map<String, SharedJobBucketState> buckets) {
+      this.buckets = buckets;
+    }
+
+    static SharedJobProductivityTracker parse(String serialized) {
+      var buckets = new HashMap<String, SharedJobBucketState>();
+      if (serialized != null && !serialized.isBlank()) {
+        for (var entry : serialized.split("\\|")) {
+          if (entry.isBlank()) {
+            continue;
+          }
+          var parts = entry.split("=", 3);
+          if (parts.length < 3 || parts[0].isBlank()) {
+            continue;
+          }
+          var carryover = parseBigDecimal(parts[1]);
+          buckets.put(parts[0], new SharedJobBucketState(parts[2], carryover));
+        }
+      }
+      return new SharedJobProductivityTracker(buckets);
+    }
+
+    void clear() {
+      buckets.clear();
+    }
+
+    BigDecimal apply(String jobCode, List<UUID> contributorIds, BigDecimal baseAmount) {
+      if (jobCode == null || jobCode.isBlank() || baseAmount == null || baseAmount.compareTo(BigDecimal.ZERO) <= 0) {
+        return BigDecimal.ZERO;
+      }
+
+      var signature = contributorIds == null || contributorIds.isEmpty()
+          ? ""
+          : contributorIds.stream().map(UUID::toString).sorted().reduce((left, right) -> left + "," + right).orElse("");
+      var contributorCount = contributorIds == null ? 0 : contributorIds.size();
+      if (contributorCount <= 1) {
+        buckets.put(jobCode, new SharedJobBucketState(signature, BigDecimal.ZERO));
+        return BigDecimal.ZERO;
+      }
+
+      var bucket = buckets.get(jobCode);
+      var carryover = bucket != null && signature.equals(bucket.signature()) ? bucket.carryover() : BigDecimal.ZERO;
+      var multiplier = BigDecimal.ONE.add(
+          BigDecimal.valueOf(Math.min(contributorCount, TEAMWORK_MAX_TRAVELERS) - 1).multiply(BigDecimal.valueOf(0.25)));
+      var adjusted = baseAmount.multiply(multiplier).add(carryover);
+      var produced = adjusted.setScale(0, RoundingMode.FLOOR);
+      var bonus = produced.subtract(baseAmount);
+      buckets.put(jobCode, new SharedJobBucketState(signature, adjusted.subtract(produced)));
+      return bonus;
+    }
+
+    String serialize() {
+      if (buckets.isEmpty()) {
+        return null;
+      }
+      return buckets.entrySet().stream()
+          .sorted(Map.Entry.comparingByKey())
+          .map(entry -> entry.getKey() + "=" + entry.getValue().carryover().toPlainString() + "=" + entry.getValue().signature())
+          .reduce((left, right) -> left + "|" + right)
+          .orElse(null);
+    }
+
+    private static BigDecimal parseBigDecimal(String value) {
+      if (value == null || value.isBlank()) {
+        return BigDecimal.ZERO;
+      }
+      try {
+        return new BigDecimal(value.trim());
+      } catch (NumberFormatException ex) {
+        return BigDecimal.ZERO;
+      }
+    }
+  }
+
+  private record SharedJobBucketState(String signature, BigDecimal carryover) {}
+
   private record CookBonusCandidate(CaravanTraveler cook, int baseBonus, List<CaravanTraveler> servants) {}
+
+  private record CookBonusBreakdown(int totalBonus, int totalOutputBeforeTeamwork, int consumedBlocks, List<CaravanDailyContributionView> contributions) {}
 
   private List<CaravanTraveler> servantsForMaster(UUID travelerId, Map<UUID, List<CaravanTraveler>> servantsByMaster) {
     return servantsByMaster.getOrDefault(travelerId, List.of());
   }
 
-  private int consumeCargoForShortage(
+  private int consumeCargoPoolForShortage(
       UUID caravanId,
       List<CaravanCargo> cargo,
-      int startingReserve,
-      int totalGeneration,
-      int totalConsumption,
-      java.time.Instant now,
-      List<CaravanDailyContributionView> generationContributions,
-      boolean persistChanges) {
-    var deficit = Math.max(0, totalConsumption - startingReserve - totalGeneration);
-    if (deficit <= 0) {
-      return 0;
-    }
-
-    var converted = 0;
-    converted += consumeCargoType(caravanId, cargo, PERISHABLE_SUPPLIES_CODE, deficit, now, generationContributions, persistChanges);
-    deficit = Math.max(0, deficit - converted);
-    if (deficit > 0) {
-      converted += consumeCargoType(caravanId, cargo, SUPPLIES_CODE, deficit, now, generationContributions, persistChanges);
-    }
-    return converted;
-  }
-
-  private int consumeCargoType(
-      UUID caravanId,
-      List<CaravanCargo> cargo,
-      String catalogCode,
       int deficit,
       java.time.Instant now,
       List<CaravanDailyContributionView> generationContributions,
-      boolean persistChanges) {
+      boolean persistChanges,
+      java.util.function.Predicate<CaravanCargo> filter,
+      boolean openRemaining,
+      boolean reportMovementSummary,
+      CargoMovementSummaryBuilder cargoMovementSummary,
+      String reason) {
     if (deficit <= 0) {
       return 0;
     }
 
     var entries = cargo.stream()
-        .filter(entry -> catalogCode.equals(entry.catalogCode()))
-        .sorted(Comparator.comparing((CaravanCargo entry) -> isStarted(entry)).reversed()
-            .thenComparing(CaravanCargo::updatedAt)
-            .thenComparing(CaravanCargo::id))
+        .filter(filter)
+        .sorted(supplyConsumptionComparator())
         .toList();
 
     var converted = 0;
@@ -615,45 +1092,160 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
 
       var availableProvisions = cargoProvisions(entry);
       if (availableProvisions <= 0) {
-        break;
+        continue;
       }
 
       var consumedProvisions = Math.min(availableProvisions, remainingDeficit);
       if (consumedProvisions <= 0) {
-        break;
+        continue;
       }
 
-      var produced = consumedProvisions;
-      converted += produced;
-      remainingDeficit -= produced;
+      converted += consumedProvisions;
+      remainingDeficit -= consumedProvisions;
       generationContributions.add(contribution(
           "generation",
           "CARGO",
           entry.id().toString(),
           entry.displayName(),
           "ADD",
-          produced,
-          catalogCode.equals(PERISHABLE_SUPPLIES_CODE)
-              ? "Los suministros perecederos se convierten en provisiones para cubrir el consumo del día"
-              : "Los suministros se convierten en provisiones para cubrir el consumo del día",
+          consumedProvisions,
+          "provisiones",
+          reason,
           true,
           null));
 
       var remainingProvisions = availableProvisions - consumedProvisions;
+      if (reportMovementSummary) {
+        cargoMovementSummary.recordConsumedLoad(remainingProvisions);
+      }
       if (persistChanges) {
         if (remainingProvisions <= 0) {
           cargoRepository.deleteById(caravanId, entry.id());
         } else {
-          cargoRepository.save(entry.withCurrentProvisions(remainingProvisions, entry.dayPassed(), now));
+          cargoRepository.save(entry.withCurrentProvisions(
+              remainingProvisions,
+              openRemaining || Boolean.TRUE.equals(entry.dayPassed()),
+              now));
         }
       }
+
+      var updatedEntry = remainingProvisions <= 0
+          ? null
+          : entry.withCurrentProvisions(
+              remainingProvisions,
+              openRemaining || Boolean.TRUE.equals(entry.dayPassed()),
+              now);
+      removeCargoEntry(cargo, entry.id(), updatedEntry);
     }
 
     return converted;
   }
 
-  private boolean isStarted(CaravanCargo entry) {
-    return cargoProvisions(entry) < initialCargoProvisions(entry);
+  private int consumeGeneratedCargoForShortage(
+      UUID caravanId,
+      List<CaravanCargo> generatedCargo,
+      int deficit,
+      java.time.Instant now,
+      List<CaravanDailyContributionView> generationContributions,
+      boolean persistChanges,
+      boolean openRemaining,
+      boolean reportContribution,
+      boolean reportMovementSummary,
+      CargoMovementSummaryBuilder cargoMovementSummary,
+      String reason) {
+    if (deficit <= 0 || generatedCargo.isEmpty()) {
+      return 0;
+    }
+
+    var converted = 0;
+    var remainingDeficit = deficit;
+    var remainingCargo = new ArrayList<CaravanCargo>(generatedCargo.size());
+    var orderedCargo = generatedCargo.stream()
+        .sorted(supplyConsumptionComparator())
+        .toList();
+    for (var entry : orderedCargo) {
+      if (remainingDeficit <= 0) {
+        remainingCargo.add(entry);
+        continue;
+      }
+
+      var availableProvisions = cargoProvisions(entry);
+      if (availableProvisions <= 0) {
+        continue;
+      }
+
+      var consumedProvisions = Math.min(availableProvisions, remainingDeficit);
+      if (consumedProvisions <= 0) {
+        remainingCargo.add(entry);
+        continue;
+      }
+
+      converted += consumedProvisions;
+      remainingDeficit -= consumedProvisions;
+      if (reportContribution) {
+        generationContributions.add(contribution(
+            "generation",
+            "CARGO",
+            entry.id().toString(),
+            entry.displayName(),
+            "ADD",
+            consumedProvisions,
+            "provisiones",
+            reason,
+            true,
+            null));
+      }
+      if (reportMovementSummary) {
+        cargoMovementSummary.recordConsumedLoad(consumedProvisions, availableProvisions - consumedProvisions);
+      }
+
+      var remainingProvisions = availableProvisions - consumedProvisions;
+      if (remainingProvisions > 0) {
+        remainingCargo.add(entry.withCurrentProvisions(
+            remainingProvisions,
+            openRemaining || Boolean.TRUE.equals(entry.dayPassed()),
+            now));
+      }
+    }
+
+    generatedCargo.clear();
+    generatedCargo.addAll(remainingCargo);
+    return converted;
+  }
+
+  private boolean isOpenedCargo(CaravanCargo entry) {
+    return Boolean.TRUE.equals(entry.dayPassed())
+        && (SUPPLIES_CODE.equals(entry.catalogCode()) || PERISHABLE_SUPPLIES_CODE.equals(entry.catalogCode()));
+  }
+
+  private Comparator<CaravanCargo> supplyConsumptionComparator() {
+    return Comparator
+        .comparingInt(CaravanDayCycleService::supplyRemainingProvisions)
+        .thenComparing(entry -> !PERISHABLE_SUPPLIES_CODE.equals(entry.catalogCode()))
+        .thenComparing(CaravanCargo::updatedAt)
+        .thenComparing(CaravanCargo::id);
+  }
+
+  private static int supplyRemainingProvisions(CaravanCargo entry) {
+    return entry.currentProvisions() == null ? 0 : entry.currentProvisions();
+  }
+
+  private boolean isUnopenedCargo(CaravanCargo entry) {
+    return !Boolean.TRUE.equals(entry.dayPassed())
+        && (SUPPLIES_CODE.equals(entry.catalogCode()) || PERISHABLE_SUPPLIES_CODE.equals(entry.catalogCode()));
+  }
+
+  private void removeCargoEntry(List<CaravanCargo> cargo, UUID cargoId, CaravanCargo replacement) {
+    for (var index = 0; index < cargo.size(); index++) {
+      if (cargo.get(index).id().equals(cargoId)) {
+        if (replacement == null) {
+          cargo.remove(index);
+        } else {
+          cargo.set(index, replacement);
+        }
+        return;
+      }
+    }
   }
 
   private List<CaravanCargo> advancePerishableCargoDayMarker(UUID caravanId, List<CaravanCargo> cargo, java.time.Instant now, boolean persistChanges) {
@@ -741,9 +1333,23 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
     return wagons.stream()
         .filter(wagon -> isSupplyWagon(wagon))
         .filter(wagon -> hasCargoCapacity(caravanId, wagon, cargo, 1))
+        .sorted(Comparator
+            .comparingInt((CaravanWagon wagon) -> cargo.stream()
+                .filter(entry -> wagon.id().equals(entry.wagonId()))
+                .mapToInt(entry -> entry.quantity() * entry.cargoUnits())
+                .sum())
+            .thenComparing(CaravanWagon::displayName, String.CASE_INSENSITIVE_ORDER)
+            .thenComparing(CaravanWagon::id))
         .findFirst()
         .orElseGet(() -> wagons.stream()
             .filter(wagon -> hasCargoCapacity(caravanId, wagon, cargo, 1))
+            .sorted(Comparator
+                .comparingInt((CaravanWagon wagon) -> cargo.stream()
+                    .filter(entry -> wagon.id().equals(entry.wagonId()))
+                    .mapToInt(entry -> entry.quantity() * entry.cargoUnits())
+                    .sum())
+                .thenComparing(CaravanWagon::displayName, String.CASE_INSENSITIVE_ORDER)
+                .thenComparing(CaravanWagon::id))
             .findFirst()
             .orElse(null));
   }
@@ -839,47 +1445,87 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
       String sourceName,
       String operation,
       int quantity,
+      String quantityUnit,
       String reason,
       boolean applied,
       String ignoredReason) {
-    return new CaravanDailyContributionView(effectCode, sourceType, sourceId, sourceName, operation, quantity, reason, applied, ignoredReason);
+    return contribution(effectCode, sourceType, sourceId, sourceName, null, operation, quantity, quantityUnit, reason, applied, ignoredReason);
+  }
+
+  private CaravanDailyContributionView contribution(
+      String effectCode,
+      String sourceType,
+      String sourceId,
+      String sourceName,
+      String sourceRoleName,
+      String operation,
+      int quantity,
+      String quantityUnit,
+      String reason,
+      boolean applied,
+      String ignoredReason) {
+    return new CaravanDailyContributionView(effectCode, sourceType, sourceId, sourceName, sourceRoleName, operation, quantity, quantityUnit, reason, applied, ignoredReason);
   }
 
   private String join(List<String> items) {
     return String.join("\n", items);
   }
 
+  private int supplyCargoQuantity(List<CaravanCargo> cargoEntries) {
+    return cargoEntries.stream()
+        .filter(entry -> SUPPLIES_CODE.equals(entry.catalogCode()) || PERISHABLE_SUPPLIES_CODE.equals(entry.catalogCode()))
+        .mapToInt(CaravanCargo::quantity)
+        .sum();
+  }
+
+  private int reserveSupplyCargoQuantity(List<CaravanCargo> cargoEntries) {
+    return cargoEntries.stream()
+        .filter(entry -> (SUPPLIES_CODE.equals(entry.catalogCode()) || PERISHABLE_SUPPLIES_CODE.equals(entry.catalogCode()))
+            && !Boolean.TRUE.equals(entry.dayPassed()))
+        .mapToInt(CaravanCargo::quantity)
+        .sum();
+  }
+
+  private String formatCargoMovementSummary(int cargoDelta) {
+    var sign = cargoDelta >= 0 ? "+" : "-";
+    return sign + " " + Math.abs(cargoDelta) + " cargas de suministros";
+  }
+
+  private List<CaravanSupplyConsumptionView> openedSupplyConsumptionViews(
+        List<CaravanCargo> cargoEntries,
+        List<CaravanCargo> stagedGeneratedCargo,
+        java.util.Set<UUID> excludedCargoIds) {
+    return java.util.stream.Stream.concat(cargoEntries.stream(), stagedGeneratedCargo.stream())
+        .filter(entry -> !excludedCargoIds.contains(entry.id()))
+        .filter(entry -> (SUPPLIES_CODE.equals(entry.catalogCode()) || PERISHABLE_SUPPLIES_CODE.equals(entry.catalogCode()))
+            && Boolean.TRUE.equals(entry.dayPassed())
+            && cargoProvisions(entry) > 0)
+        .sorted(Comparator.comparing(CaravanCargo::updatedAt).thenComparing(CaravanCargo::id))
+        .map(entry -> new CaravanSupplyConsumptionView(cargoProvisions(entry) % STANDARD_SUPPLY_VALUE))
+        .filter(view -> view.remainingFood() > 0)
+        .toList();
+  }
+
   private CaravanDayPreviewView toPreview(UUID caravanId, CaravanDayComputation computation) {
     return new CaravanDayPreviewView(
         caravanId,
         computation.dayIndex(),
-        computation.startingReserve(),
+        computation.displayCurrentReserve(),
+        computation.initialProvisionsInConsumption(),
+        computation.provisionsInConsumption(),
         computation.totalConsumption(),
-        computation.totalGeneration(),
-        computation.netDelta(),
-        computation.endingReserve(),
-        computation.shortage(),
+        computation.displayTotalGeneration(),
+        computation.displayTotalGeneration() - computation.totalConsumption(),
+        computation.displayEndingReserve(),
+        Math.max(computation.totalConsumption() - computation.displayTotalGeneration(), 0),
+        computation.generatedProvisions(),
+        computation.generatedFood(),
+        computation.consumedProvisions(),
+        computation.surplusProvisions(),
         computation.warnings(),
         computation.choices(),
-        computation.contributions());
-  }
-
-  private CaravanDayResolutionView toView(CaravanDayResolution resolution, CaravanDayComputation computation) {
-    return new CaravanDayResolutionView(
-        resolution.id(),
-        resolution.caravanId(),
-        resolution.idempotencyKey(),
-        resolution.resolvedDayIndex(),
-        resolution.resolvedAt(),
-        resolution.startingReserve(),
-        resolution.endingReserve(),
-        resolution.totalConsumption(),
-        resolution.totalGeneration(),
-        resolution.netDelta(),
-        resolution.shortage(),
-        computation.choices(),
         computation.contributions(),
-        computation.warnings());
+        computation.cargoMovementSummary());
   }
 
   private CaravanDayResolutionView toView(CaravanDayResolution resolution) {
@@ -890,14 +1536,46 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
         resolution.resolvedDayIndex(),
         resolution.resolvedAt(),
         resolution.startingReserve(),
+        List.of(),
+        List.of(),
         resolution.endingReserve(),
         resolution.totalConsumption(),
         resolution.totalGeneration(),
         resolution.netDelta(),
         resolution.shortage(),
+        0,
+        0,
+        0,
+        0,
         List.of(),
         List.of(),
-        splitLines(resolution.warningsSummary()));
+        splitLines(resolution.warningsSummary()),
+        resolution.cargoMovementSummary());
+  }
+
+  private CaravanDayResolutionView toView(CaravanDayResolution resolution, CaravanDayComputation computation) {
+    return new CaravanDayResolutionView(
+        resolution.id(),
+        resolution.caravanId(),
+        resolution.idempotencyKey(),
+        resolution.resolvedDayIndex(),
+        resolution.resolvedAt(),
+        computation.displayCurrentReserve(),
+        computation.initialProvisionsInConsumption(),
+        computation.provisionsInConsumption(),
+        computation.displayEndingReserve(),
+        resolution.totalConsumption(),
+        computation.displayTotalGeneration(),
+        computation.displayTotalGeneration() - resolution.totalConsumption(),
+        Math.max(resolution.totalConsumption() - computation.displayTotalGeneration(), 0),
+        computation.generatedProvisions(),
+        computation.generatedFood(),
+        computation.consumedProvisions(),
+        computation.surplusProvisions(),
+        computation.choices(),
+        computation.contributions(),
+        computation.warnings(),
+        resolution.cargoMovementSummary());
   }
 
   private List<String> splitLines(String text) {
@@ -907,21 +1585,65 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Ad
     return List.of(text.split("\\R"));
   }
 
+  private static final class CargoMovementSummaryBuilder {
+    private int consumedLoads;
+    private Integer partialRemainingProvisions;
+
+    void recordConsumedLoad(int remainingProvisions) {
+      recordConsumedLoad(1, remainingProvisions);
+    }
+
+    void recordConsumedLoad(int consumedProvisions, int remainingProvisions) {
+      consumedLoads += (int) Math.ceil(consumedProvisions / (double) STANDARD_SUPPLY_VALUE);
+      var normalizedRemainingProvisions = remainingProvisions % STANDARD_SUPPLY_VALUE;
+      if (normalizedRemainingProvisions > 0) {
+        partialRemainingProvisions = normalizedRemainingProvisions;
+      }
+    }
+
+    String toSummary() {
+      if (consumedLoads <= 0) {
+        return "+ 0 cargas de suministros";
+      }
+      var lines = new ArrayList<String>();
+      lines.add("+ " + consumedLoads + " cargas de suministros");
+      if (partialRemainingProvisions != null && partialRemainingProvisions > 0) {
+        lines.add("+ 1 carga de suministros con " + partialRemainingProvisions + " de comida restante");
+      }
+      return String.join("\n", lines);
+    }
+
+    int consumedLoads() {
+      return consumedLoads;
+    }
+  }
+
   private record CaravanDayComputation(
       int dayIndex,
       int startingReserve,
+      List<CaravanSupplyConsumptionView> initialProvisionsInConsumption,
+      List<CaravanSupplyConsumptionView> provisionsInConsumption,
       int totalConsumption,
       int totalGeneration,
       int netDelta,
       int endingReserve,
       int shortage,
+      int generatedProvisions,
+      int generatedFood,
+      int consumedProvisions,
+      int surplusProvisions,
       int generatedEndingReserve,
+      int displayCurrentReserve,
+      int displayTotalGeneration,
+      int displayEndingReserve,
       int endingStandardReserve,
       int endingPerishableReserve,
       List<CaravanDailyChoiceView> choices,
       List<CaravanDailyContributionView> contributions,
       List<String> warnings,
+      String cargoMovementSummary,
       String choicesSummary,
       String contributionsSummary,
-      String warningsSummary) {}
+      String warningsSummary,
+      String sharedJobProductivityState) {}
 }

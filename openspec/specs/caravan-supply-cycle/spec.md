@@ -152,6 +152,7 @@ As a user, I want the day pass action to be safe against repeated clicks or retr
   - **Agricultors**: 1 unit of supplies every 2 days,
   - **Batidores**: 2 units of provisions when they hunt,
   - and any other supply-generating source already defined by the rulebook or added later.
+- If the caravan has **Trabajo En Equipo**, the engine must resolve shared jobs using the productivity contract defined in `openspec/specs/caravan-feat-automation/spec.md`, including the 25% per additional traveler bonus and any persisted fractional carry-over.
 - The engine must respect role availability rules, including wagon restrictions such as **Carro Huerto** for agriculturists.
 - When cargo supplies are consumed, the backend must remove them from inventory and consume **suministros perecederos** before **suministros**.
 - If a traveler’s role or target assignment is invalid on the day of resolution, that source must not generate supplies and the UI must report why.
@@ -162,6 +163,7 @@ As a user, I want the day pass action to be safe against repeated clicks or retr
 - Each cook may convert one full block of 10 supplies into 5 additional supplies, whether those supplies come from generation or from stored cargo/reserve being spent.
 - The number of effective cook bonuses in a day is limited by the number of full 10-supply blocks available in each affected pool.
 - If the caravan has a **Cocina Portátil**, the cook bonus is doubled.
+- Cook output must be treated as a shared job bucket when multiple cooks are assigned, so **Trabajo En Equipo** can increase the effective cook bonus using the shared-job productivity contract.
 - The resolution breakdown must show how many full blocks were converted, how many cooks were effective, and whether the kitchen bonus was applied.
 
 ### 6.8 Role synergies and support roles

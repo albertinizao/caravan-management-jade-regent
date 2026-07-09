@@ -112,6 +112,21 @@ class CaravanStatisticsServiceTest {
     travelerRepository.save(CaravanTraveler.create(
         UUID.randomUUID(),
         caravan.id(),
+        "Batidor",
+        null,
+        List.of("pasajero", "batidor"),
+        List.of("batidor"),
+        "batidor",
+        1,
+        TravelerRoleData.empty(),
+        wagon.id(),
+        null,
+        1,
+        Instant.parse("2026-01-01T00:00:00Z")));
+
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravan.id(),
         "Encargado",
         null,
         List.of("pasajero", "encargado-de-suministros"),
@@ -183,6 +198,11 @@ class CaravanStatisticsServiceTest {
     assertThat(statistics.otherStats().cargoCapacity()).isEqualTo(4);
     assertThat(statistics.otherStats().cargoLoad()).isEqualTo(1);
     assertThat(statistics.otherStats().consumption()).isEqualTo(5);
+    assertThat(statistics.contributions()).anyMatch(contribution ->
+        contribution.statCode().equals("consumption")
+            && contribution.sourceType().equals("ROLE")
+            && contribution.sourceName().equals("Batidor")
+            && contribution.modifier().equals("0"));
     assertThat(statistics.warnings()).anyMatch(message -> message.contains("adivino"));
   }
 

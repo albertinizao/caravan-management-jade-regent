@@ -64,6 +64,16 @@ Use **Maven** for the backend and **npm** for the frontend.
 ## Commit Attribution
 Do not add `Co-Authored-By` or any AI attribution. Use conventional commits only.
 
+## Destructive Changes Policy
+
+Before making any code change, schema change, migration, or test that could delete, truncate, drop, recreate, or overwrite data in the real database, the agent must:
+
+1. Identify the destructive impact.
+2. Stop and ask for explicit user confirmation.
+3. Proceed only after confirmation.
+
+This is an AI workflow rule, not an application behavior rule.
+
 ## References
 - `README.md`
 - `docs/architecture.md`

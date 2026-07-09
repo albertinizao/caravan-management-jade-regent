@@ -119,6 +119,174 @@ const visibleContributions = computed(() =>
   caravanStatistics.value?.contributions.filter((item) => !hiddenContributionStats.has(item.statCode)) ?? [],
 );
 
+interface GroupedDayCycleContribution {
+  groupLabel: string;
+  contributions: CaravanDayCyclePreview["contributions"];
+}
+
+const roleGroupLabels = new Map([
+  ["Agricultor", "Agricultores"],
+  ["Batidor", "Batidores"],
+  ["Cocinero", "Cocineros"],
+  ["Sirviente", "Sirvientes"],
+]);
+
+function contributionGroupLabel(contribution: CaravanDayCyclePreview["contributions"][number]) {
+  if (contribution.sourceType === "CARGO") {
+    return "Suministros";
+  }
+
+  const sourceRoleLabel = contribution.sourceRoleName?.trim();
+  if (sourceRoleLabel) {
+    return roleGroupLabels.get(sourceRoleLabel) ?? sourceRoleLabel;
+  }
+
+  if (contribution.sourceType === "FEAT") {
+    return "Dotes";
+  }
+
+  return "Otros";
+}
+
+function contributionQuantityText(contribution: CaravanDayCyclePreview["contributions"][number]) {
+  if (!contribution.quantityUnit) {
+    return `${contribution.quantity}`;
+  }
+
+  return `${contribution.quantity} ${contribution.quantityUnit}`;
+}
+
+function isTeamworkContribution(contribution: CaravanDayCyclePreview["contributions"][number]) {
+  return contribution.sourceName === "Trabajo En Equipo";
+}
+
+const groupedDayCycleContributions = computed<GroupedDayCycleContribution[]>(() => {
+  const contributions = dayCyclePreview.value?.contributions ?? [];
+  const roleOrder = new Map([
+    ["Agricultores", 0],
+    ["Batidores", 1],
+    ["Cocineros", 2],
+    ["Sirvientes", 3],
+    ["Suministros", 4],
+    ["Dotes", 5],
+    ["Otros", 6],
+  ]);
+  const groups = new Map<string, CaravanDayCyclePreview["contributions"]>();
+
+  for (const contribution of contributions) {
+    const groupLabel = contributionGroupLabel(contribution);
+    const group = groups.get(groupLabel) ?? [];
+    group.push(contribution);
+    groups.set(groupLabel, group);
+  }
+
+  return [...groups.entries()]
+    .sort(([leftLabel], [rightLabel]) => {
+      const leftOrder = roleOrder.get(leftLabel) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = roleOrder.get(rightLabel) ?? Number.MAX_SAFE_INTEGER;
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+
+      return leftLabel.localeCompare(rightLabel, "es", { sensitivity: "base" });
+    })
+    .map(([groupLabel, groupedContributions]) => ({
+      groupLabel,
+      contributions: [...groupedContributions].sort((left, right) =>
+        Number(isTeamworkContribution(left)) - Number(isTeamworkContribution(right)) ||
+        left.sourceName.localeCompare(right.sourceName, "es", { sensitivity: "base" }) ||
+        left.sourceType.localeCompare(right.sourceType, "es", { sensitivity: "base" }) ||
+        left.quantity - right.quantity,
+      ),
+    }));
+});
+
+const dayCycleFoodGroups = computed(() =>
+  groupedDayCycleContributions.value.filter((group) =>
+    ["Batidores", "Cocineros"].includes(group.groupLabel),
+  ),
+);
+
+const dayCycleOtherGroups = computed(() =>
+  groupedDayCycleContributions.value.filter(
+    (group) => !["Batidores", "Cocineros", "Suministros"].includes(group.groupLabel),
+  ),
+);
+
+const dayCycleCookFoodTotal = computed(() =>
+  dayCyclePreview.value?.contributions
+    .filter(
+      (contribution) =>
+        contribution.effectCode === "generation" &&
+        contribution.sourceRoleName === "Cocinero" &&
+        contribution.applied,
+    )
+    .reduce((sum, contribution) => sum + contribution.quantity, 0) ?? 0,
+);
+
+const dayCycleInitialOpenFood = computed(() =>
+  dayCyclePreview.value?.initialProvisionsInConsumption.reduce((sum, consumption) => sum + consumption.remainingFood, 0) ?? 0,
+);
+
+const dayCycleCookSupplyLoads = computed(() =>
+  dayCyclePreview.value?.contributions
+    .filter(
+      (contribution) =>
+        contribution.effectCode === "generation" &&
+        contribution.sourceRoleName === "Cocinero" &&
+        contribution.sourceName !== "Trabajo En Equipo" &&
+        contribution.applied,
+    )
+    .length ?? 0,
+);
+
+const dayCycleLateSupplyFoodNeeded = computed(() => {
+  if (!dayCyclePreview.value) {
+    return 0;
+  }
+
+  return Math.max(
+    0,
+    dayCyclePreview.value.expectedConsumption -
+      dayCyclePreview.value.generatedFood -
+      dayCycleCookFoodTotal.value -
+      dayCycleInitialOpenFood.value,
+  );
+});
+
+const dayCycleLateSupplyLoads = computed(() => Math.ceil(dayCycleLateSupplyFoodNeeded.value / 10));
+
+const dayCyclePartialSupplyLoads = computed(() => dayCyclePreview.value?.provisionsInConsumption.length ?? 0);
+
+const dayCyclePartialSupply = computed(() =>
+  dayCyclePreview.value?.provisionsInConsumption.find(
+    (consumption) => consumption.remainingFood > 0 && consumption.remainingFood < 10,
+  ) ?? null,
+);
+
+const dayCycleCompleteSurplusLoads = computed(() => {
+  if (!dayCyclePreview.value) {
+    return 0;
+  }
+
+  return Math.max(
+    0,
+    dayCyclePreview.value.generatedProvisions -
+      dayCycleCookSupplyLoads.value -
+      dayCycleLateSupplyLoads.value -
+      dayCyclePartialSupplyLoads.value,
+  );
+});
+
+const dayCycleLateSupplyUnitsUsed = computed(() =>
+  Math.max(
+    0,
+    (dayCyclePreview.value?.consumedProvisions ?? 0) -
+      dayCycleCookSupplyLoads.value -
+      dayCyclePartialSupplyLoads.value,
+  ),
+);
+
 function percentageOf(value: number, max: number) {
   if (max <= 0) {
     return 0;
@@ -228,8 +396,7 @@ const dayCycleShortage = computed(() => {
     return 0;
   }
 
-  const shortageFromTotals = preview.expectedConsumption - preview.currentReserve - preview.expectedGeneration;
-  return Math.max(preview.expectedShortage ?? 0, shortageFromTotals, 0);
+  return Math.max(preview.expectedShortage ?? 0, 0);
 });
 
 const hasDayCycleShortage = computed(() => dayCycleShortage.value > 0);
@@ -271,19 +438,18 @@ async function handleAdvanceDayCycle() {
       ...buildDayCyclePayload(),
     });
 
-    const resolvedShortage = Math.max(
-      result.expectedShortage ?? 0,
-      result.expectedConsumption - result.currentReserve - result.expectedGeneration,
-      0,
-    );
+    const resolvedShortage = Math.max(result.expectedShortage ?? 0, 0);
+    const provisionDelta = result.surplusProvisions >= 0 ? `+ ${result.surplusProvisions}` : `- ${Math.abs(result.surplusProvisions)}`;
 
     if (resolvedShortage > 0) {
       showToast(
-        `No se ha podido cubrir todo el consumo de la caravana. Faltan ${resolvedShortage} provisiones.`,
+        `No se ha podido cubrir todo el consumo de la caravana. Faltan ${resolvedShortage} de comida. Provisiones consumidas: ${result.consumedProvisions}. Provisiones sobrantes: ${provisionDelta}.`,
         "error",
       );
     } else {
-      showToast(`Día avanzado: ${result.expectedNetDelta >= 0 ? "+" : ""}${result.expectedNetDelta} provisiones netas.`);
+      showToast(
+        `Día avanzado: ${result.expectedNetDelta >= 0 ? "+" : ""}${result.expectedNetDelta} de comida neta. Provisiones consumidas: ${result.consumedProvisions}. Provisiones sobrantes: ${provisionDelta}.`,
+      );
     }
 
     closeDayCycleModal();
@@ -1031,49 +1197,145 @@ onMounted(refresh);
               </button>
             </section>
 
-              <section class="card card-compact" v-if="dayCyclePreview">
-                <h3>Vista previa</h3>
-                <dl class="stats stats-2">
-                  <div>
-                    <dt>Reserva actual</dt>
-                    <dd>{{ dayCyclePreview.currentReserve }}</dd>
-                  </div>
-                <div>
-                  <dt>Consumo</dt>
-                  <dd>{{ dayCyclePreview.expectedConsumption }}</dd>
-                </div>
-                <div>
-                  <dt>Generación</dt>
-                  <dd>{{ dayCyclePreview.expectedGeneration }}</dd>
-                </div>
-                <div>
-                  <dt>Saldo neto</dt>
-                  <dd>{{ dayCyclePreview.expectedNetDelta }}</dd>
-                </div>
-                <div>
-                  <dt>Reserva final</dt>
-                  <dd>{{ dayCyclePreview.expectedReserveAfterResolution }}</dd>
-                </div>
-                <div>
-                  <dt>Desabastecimiento</dt>
-                  <dd>{{ dayCyclePreview.expectedShortage }}</dd>
-                </div>
-              </dl>
+                <section class="card card-compact" v-if="dayCyclePreview">
+                  <h3>Vista previa</h3>
+                  <section class="preview-definition-block">
+                    <h4>Estado inicial</h4>
+                    <p><strong>Reserva actual:</strong> {{ dayCyclePreview.currentReserve }} Unidades de suministros.</p>
+                    <p><strong>Provisiones en consumo:</strong> {{ dayCyclePreview.initialProvisionsInConsumption.length }} Unidades de suministros ya abiertas</p>
+                    <p><strong>Consumo:</strong> {{ dayCyclePreview.expectedConsumption }}</p>
+                    <p><strong>Provisiones generadas:</strong> {{ dayCyclePreview.generatedProvisions }} Unidades de suministros generadas</p>
+                    <p><strong>Comida generada:</strong> {{ dayCyclePreview.generatedFood }}</p>
+                    <h4>Estado final de provisiones</h4>
+                    <p><strong>Provisiones consumidas:</strong> {{ dayCyclePreview.consumedProvisions }} Unidades de suministros consumidos</p>
+                    <p><strong>Provisiones sobrantes:</strong> {{ dayCyclePreview.surplusProvisions }} Unidades de suministros excedentes</p>
+                  </section>
+
+                <section>
+                  <h4>DESGLOSE</h4>
+
+                  <section>
+                    <h5>CONSUMO DE LA CARAVANA</h5>
+                    <div v-if="dayCyclePreview.contributions.length > 0" class="contribution-groups">
+                      <section class="contribution-group">
+                        <ul class="simple-list contribution-group-list">
+                          <li
+                            v-for="item in dayCyclePreview.contributions.filter((contribution) => contribution.effectCode === 'consumption')"
+                            :key="`${item.effectCode}-${item.sourceType}-${item.sourceId}-${item.quantity}`"
+                          >
+                            <strong>{{ item.sourceName }}</strong>
+                            <span> · {{ contributionQuantityText(item) }} · {{ item.reason }}</span>
+                          </li>
+                        </ul>
+                      </section>
+                      <section v-for="group in dayCycleFoodGroups" :key="group.groupLabel" class="contribution-group">
+                        <h5>
+                          {{ group.groupLabel }} ({{
+                            group.groupLabel === 'Batidores'
+                              ? `+${group.contributions.reduce((sum, item) => sum + item.quantity, 0)} de comida en total`
+                              : `-${dayCyclePreview.contributions.filter((contribution) => contribution.sourceRoleName === 'Cocinero' && contribution.sourceName !== 'Trabajo En Equipo' && contribution.applied).length} unidad de suministros, +${group.contributions.reduce((sum, item) => sum + item.quantity, 0)} comida en total`
+                          }})
+                        </h5>
+                        <ul class="simple-list contribution-group-list">
+                          <li
+                            v-for="item in group.contributions"
+                            :key="`${item.effectCode}-${item.sourceType}-${item.sourceId}-${item.quantity}`"
+                          >
+                            <strong>{{ item.sourceName }}</strong>
+                            <span> · {{ contributionQuantityText(item) }} · {{ item.reason }}</span>
+                          </li>
+                        </ul>
+                      </section>
+                      <section class="contribution-group">
+                        <h5>
+                          Suministros (-{{ dayCycleLateSupplyLoads }} unidad de suministros, +{{ dayCycleLateSupplyLoads * 10 }} comida en total)
+                        </h5>
+                        <ul class="simple-list contribution-group-list">
+                          <li class="muted contribution-empty">
+                            Faltan {{ dayCycleLateSupplyFoodNeeded }} de comida y por eso se abren {{ dayCycleLateSupplyLoads }} suministros.
+                          </li>
+                        </ul>
+                      </section>
+                    </div>
+                    <p v-else class="muted contribution-empty">No hay contribuciones para mostrar.</p>
+                  </section>
+
+                  <section class="day-cycle-result-block">
+                    <h5>RESULTADO DE CONSUMO:</h5>
+                    <ul class="simple-list">
+                      <li>- {{ dayCyclePreview.consumedProvisions }} Unidades de suministros</li>
+                      <li>+ {{ dayCyclePreview.expectedGeneration }} comida generada</li>
+                      <li>- {{ dayCyclePreview.expectedConsumption }} de consumo</li>
+                    </ul>
+                    <p>
+                      <strong>TOTAL:</strong>
+                      {{
+                        dayCyclePreview.expectedNetDelta >= 0
+                          ? `${dayCyclePreview.expectedNetDelta} de comida excedente`
+                          : `${Math.abs(dayCyclePreview.expectedNetDelta)} de comida faltante`
+                      }}
+                    </p>
+                  </section>
+
+                  <section>
+                    <h5>OTRAS GENERACIONES:</h5>
+                    <div v-if="dayCycleOtherGroups.length > 0" class="contribution-groups">
+                      <section v-for="group in dayCycleOtherGroups" :key="group.groupLabel" class="contribution-group">
+                        <h5>{{ group.groupLabel }} (+{{ group.contributions.reduce((sum, item) => sum + item.quantity, 0) }} {{ group.groupLabel === 'Boticario' ? 'po en artículos alquímicos no mágicos en total' : 'en total' }})</h5>
+                        <ul class="simple-list contribution-group-list">
+                          <li
+                            v-for="item in group.contributions"
+                            :key="`${item.effectCode}-${item.sourceType}-${item.sourceId}-${item.quantity}`"
+                          >
+                            <strong>{{ item.sourceName }}</strong>
+                            <span> · {{ contributionQuantityText(item) }} · {{ item.reason }}</span>
+                          </li>
+                        </ul>
+                      </section>
+                    </div>
+                    <p v-else class="muted contribution-empty">No hay otras generaciones para mostrar.</p>
+                  </section>
+
+                    <section>
+                      <h5>RESUMEN FINAL DE UNIDADES DE SUMINISTROS</h5>
+                      <ul class="simple-list">
+                        <li>{{ dayCyclePreview.currentReserve }} Unidades de suministros almacenadas originalmente</li>
+                        <li>+{{ dayCyclePreview.generatedProvisions }} Unidades de suministros generadas por agricultores</li>
+                        <li>
+                          -{{ dayCycleCookSupplyLoads }}
+                        Unidades de suministros utilizadas por cocineros
+                      </li>
+                      <li>-{{ dayCycleLateSupplyUnitsUsed }} Unidades de suministros utilizadas</li>
+                      <li v-if="dayCyclePartialSupply">-1 Unidad de suministros utilizada parcialmente</li>
+                      <li><strong>TOTAL:</strong></li>
+                      <li>{{ dayCyclePreview.currentReserve }} Unidades de suministros almacenadas originalmente</li>
+                      <li>+{{ dayCycleCompleteSurplusLoads }} Unidades de suministros excedentes y almacenadas</li>
+                      <li v-if="dayCyclePartialSupply">
+                        +1 Unidad de suministros parcial ({{ dayCyclePartialSupply.remainingFood }} comida restante) excedente y almacenada
+                      </li>
+                      </ul>
+                    </section>
+
+                    <section>
+                      <h5>ALMACENAMIENTO DE EXCEDENTE DE SUMINISTROS:</h5>
+                      <ul class="simple-list">
+                      <li v-if="dayCycleCompleteSurplusLoads > 0">
+                        Suministros 2 · +{{ dayCycleCompleteSurplusLoads }} Unidad{{ dayCycleCompleteSurplusLoads === 1 ? "" : "es" }} de suministros
+                      </li>
+                        <li v-if="dayCyclePartialSupply">
+                          Suministros 1 · +1 Unidad de suministros ({{ dayCyclePartialSupply.remainingFood }} comida restante)
+                        </li>
+                        <li v-if="dayCycleCompleteSurplusLoads === 0 && dayCyclePreview.provisionsInConsumption.length === 0">
+                          No hay excedente de suministros para almacenar.
+                        </li>
+                      </ul>
+                    </section>
+                  </section>
 
               <section v-if="dayCyclePreview.warnings.length > 0">
                 <h4>Advertencias</h4>
                 <ul class="simple-list">
                   <li v-for="warning in dayCyclePreview.warnings" :key="warning">{{ warning }}</li>
-                </ul>
-              </section>
-
-              <section>
-                <h4>Contribuciones</h4>
-                <ul class="simple-list">
-                  <li v-for="item in dayCyclePreview.contributions" :key="`${item.effectCode}-${item.sourceType}-${item.sourceId}-${item.quantity}`">
-                    <strong>{{ item.sourceName }}</strong>
-                    <span>{{ item.quantity }} · {{ item.reason }}</span>
-                  </li>
                 </ul>
               </section>
             </section>
@@ -1623,6 +1885,27 @@ dd {
 .contribution-empty {
   list-style: none;
   text-align: center;
+}
+
+.contribution-groups {
+  display: grid;
+  gap: 1rem;
+}
+
+.contribution-group {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.contribution-group h5 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.contribution-group-list li {
+  background: rgba(255, 255, 255, 0.85);
 }
 
 .modal-actions {

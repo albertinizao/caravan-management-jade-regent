@@ -2,6 +2,7 @@ package com.gestioncaravana.adapter.out.persistence;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.Lob;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
@@ -28,6 +29,10 @@ public class CaravanSupplyStateJpaEntity {
 
   @Column(nullable = false)
   private Instant updatedAt;
+
+  @Lob
+  @Column
+  private String sharedJobProductivityState;
 
   protected CaravanSupplyStateJpaEntity() {}
 
@@ -77,5 +82,13 @@ public class CaravanSupplyStateJpaEntity {
 
   public void setUpdatedAt(Instant updatedAt) {
     this.updatedAt = updatedAt;
+  }
+
+  public String getSharedJobProductivityState() {
+    return sharedJobProductivityState;
+  }
+
+  public void setSharedJobProductivityState(String sharedJobProductivityState) {
+    this.sharedJobProductivityState = sharedJobProductivityState;
   }
 }

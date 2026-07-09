@@ -80,25 +80,38 @@ export interface CaravanDailyContribution {
   sourceType: string;
   sourceId: string;
   sourceName: string;
+  sourceRoleName: string | null;
   operation: string;
   quantity: number;
+  quantityUnit: string | null;
   reason: string;
   applied: boolean;
   ignoredReason: string | null;
+}
+
+export interface CaravanSupplyConsumption {
+  remainingFood: number;
 }
 
 export interface CaravanDayCyclePreview {
   caravanId: string;
   dayIndex: number;
   currentReserve: number;
+  initialProvisionsInConsumption: CaravanSupplyConsumption[];
+  provisionsInConsumption: CaravanSupplyConsumption[];
   expectedConsumption: number;
   expectedGeneration: number;
   expectedNetDelta: number;
   expectedReserveAfterResolution: number;
   expectedShortage: number;
+  generatedProvisions: number;
+  generatedFood: number;
+  consumedProvisions: number;
+  surplusProvisions: number;
   warnings: string[];
   requiredChoices: CaravanDailyChoice[];
   contributions: CaravanDailyContribution[];
+  cargoMovementSummary: string;
 }
 
 export interface CaravanDayCycleResult {
@@ -106,15 +119,22 @@ export interface CaravanDayCycleResult {
   idempotencyKey: string;
   dayIndex: number;
   currentReserve: number;
+  initialProvisionsInConsumption: CaravanSupplyConsumption[];
+  provisionsInConsumption: CaravanSupplyConsumption[];
   expectedConsumption: number;
   expectedGeneration: number;
   expectedNetDelta: number;
   expectedReserveAfterResolution: number;
   expectedShortage: number;
+  generatedProvisions: number;
+  generatedFood: number;
+  consumedProvisions: number;
+  surplusProvisions: number;
   resolvedAt: string;
   choices: CaravanDailyChoice[];
   contributions: CaravanDailyContribution[];
   warnings: string[];
+  cargoMovementSummary: string;
 }
 
 export interface CaravanBackupTravelerContract {
@@ -250,11 +270,17 @@ export interface CaravanBackup {
     resolvedDayIndex: number;
     resolvedAt: string;
     startingReserve: number;
+    provisionsInConsumption: CaravanSupplyConsumption[];
     endingReserve: number;
     totalConsumption: number;
     totalGeneration: number;
     netDelta: number;
     shortage: number;
+    generatedProvisions: number;
+    generatedFood: number;
+    consumedProvisions: number;
+    surplusProvisions: number;
+    cargoMovementSummary: string;
     choicesSummary: string;
     contributionsSummary: string;
     warningsSummary: string;

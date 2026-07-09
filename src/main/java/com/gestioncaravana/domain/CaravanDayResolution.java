@@ -15,6 +15,7 @@ public record CaravanDayResolution(
     int totalGeneration,
     int netDelta,
     int shortage,
+    String cargoMovementSummary,
     String choicesSummary,
     String contributionsSummary,
     String warningsSummary) {
@@ -37,6 +38,9 @@ public record CaravanDayResolution(
     }
     if (startingReserve < 0 || endingReserve < 0 || totalConsumption < 0 || totalGeneration < 0 || shortage < 0) {
       throw new IllegalArgumentException("numeric fields must be greater than or equal to 0");
+    }
+    if (cargoMovementSummary == null) {
+      cargoMovementSummary = "";
     }
     if (choicesSummary == null) {
       choicesSummary = "";

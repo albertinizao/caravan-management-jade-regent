@@ -21,6 +21,8 @@ public record CaravanCargoResponse(
     String specificCommodity,
     String deity,
     String notes,
+    Integer currentProvisions,
+    Boolean dayPassed,
     String priceExpression,
     Instant createdAt,
     Instant updatedAt) {}

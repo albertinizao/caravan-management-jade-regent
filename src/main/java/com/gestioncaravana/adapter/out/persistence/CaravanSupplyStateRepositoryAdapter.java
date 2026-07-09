@@ -38,6 +38,7 @@ public class CaravanSupplyStateRepositoryAdapter implements CaravanSupplyStateRe
     entity.setPerishableReserve(state.perishableReserve());
     entity.setDaysPassed(state.daysPassed());
     entity.setUpdatedAt(state.updatedAt());
+    entity.setSharedJobProductivityState(state.sharedJobProductivityState());
     return entity;
   }
 
@@ -48,7 +49,8 @@ public class CaravanSupplyStateRepositoryAdapter implements CaravanSupplyStateRe
         valueOrZero(entity.getStandardReserve()),
         valueOrZero(entity.getPerishableReserve()),
         valueOrZero(entity.getDaysPassed()),
-        entity.getUpdatedAt());
+        entity.getUpdatedAt(),
+        entity.getSharedJobProductivityState());
   }
 
   private int valueOrZero(Integer value) {

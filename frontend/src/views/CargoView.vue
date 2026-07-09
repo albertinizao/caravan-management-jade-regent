@@ -27,6 +27,9 @@ interface GroupedCargoRow {
   totalCargoLoad: number;
 }
 
+const SUPPLY_CATALOG_CODES = new Set(["suministros", "suministros-perecederos"]);
+const STANDARD_SUPPLY_VALUE = 10;
+
 const activeCaravan = ref<Caravan | null>(null);
 const cargo = ref<CaravanCargo[]>([]);
 const cargoSummary = ref<CaravanCargoSummary[]>([]);
@@ -155,6 +158,19 @@ const visibleCargo = computed<GroupedCargoRow[]>(() => {
   return Array.from(groups.values());
 });
 
+const visibleSupplies = computed(() =>
+  visibleCargo.value.filter((entry) => isSupplyCargo(entry.representative)),
+);
+const completedSupplies = computed(() =>
+  visibleSupplies.value.filter((entry) => !isOpenedSupplyCargo(entry.representative)),
+);
+const openedSupplies = computed(() =>
+  visibleSupplies.value.filter((entry) => isOpenedSupplyCargo(entry.representative)),
+);
+const otherCargo = computed(() =>
+  visibleCargo.value.filter((entry) => !isSupplyCargo(entry.representative)),
+);
+
 const categories = computed(() =>
   Array.from(new Set([...catalog.value.map((item) => item.category), ...cargo.value.map((item) => item.category)]))
     .sort(),
@@ -166,7 +182,7 @@ const catalogCargoUnitsValue = computed(() => {
   return fallback === 0 ? parseNonNegativeInteger(catalogCargoUnits.value, fallback) : parsePositiveInteger(catalogCargoUnits.value, fallback);
 });
 const customQuantityValue = computed(() => parsePositiveInteger(customQuantity.value, 1));
-const customCargoUnitsValue = computed(() => parsePositiveInteger(customCargoUnits.value, 1));
+const customCargoUnitsValue = computed(() => parseNonNegativeInteger(customCargoUnits.value, 1));
 const selectedCargoLoad = computed(() => (selectedCargo.value ? totalCargoUnits(selectedCargo.value.quantity, selectedCargo.value.cargoUnits) : 0));
 const catalogAvailableWagons = computed(() =>
   filterWagonsForCatalog(
@@ -326,6 +342,8 @@ function cargoGroupKey(item: CaravanCargo) {
     item.wagonId ?? "",
     item.sourceType,
     item.catalogCode ?? "",
+    item.dayPassed ? "opened" : "closed",
+    item.currentProvisions ?? "",
     item.displayName,
     item.category,
     item.origin ?? "",
@@ -334,6 +352,58 @@ function cargoGroupKey(item: CaravanCargo) {
     item.notes ?? "",
     item.priceExpression ?? "",
   ].join("\u0001");
+}
+
+function isSupplyCargo(entry: CaravanCargo | null) {
+  return !!entry && entry.catalogCode !== null && SUPPLY_CATALOG_CODES.has(entry.catalogCode);
+}
+
+function isOpenedSupplyCargo(entry: CaravanCargo | null) {
+  return !!entry && isSupplyCargo(entry) && entry.dayPassed;
+}
+
+function supplyRemainingFood(entry: CaravanCargo | null) {
+  return entry?.currentProvisions ?? STANDARD_SUPPLY_VALUE;
+}
+
+function supplyStatusLabel(entry: CaravanCargo | null) {
+  if (!isSupplyCargo(entry)) {
+    return null;
+  }
+
+  const quantity = entry?.quantity ?? 1;
+  const remaining = supplyRemainingFood(entry);
+  const stateLabel = entry?.dayPassed
+    ? quantity === 1
+      ? "Abierto"
+      : "Abiertos"
+    : quantity === 1
+      ? "Completo"
+      : "Completos";
+
+  return entry?.dayPassed
+    ? `${stateLabel} · ${remaining} de comida restante por unidad`
+    : `${stateLabel} · ${remaining} de comida por unidad`;
+}
+
+function supplyListNote(entry: CaravanCargo | null) {
+  if (!isSupplyCargo(entry)) {
+    return null;
+  }
+
+  const quantity = entry?.quantity ?? 1;
+  const remaining = supplyRemainingFood(entry);
+  const stateLabel = entry?.dayPassed
+    ? quantity === 1
+      ? "Abierto"
+      : "Abiertos"
+    : quantity === 1
+      ? "Completo"
+      : "Completos";
+
+  return entry?.dayPassed
+    ? `${stateLabel} · ${remaining} de comida restante por unidad`
+    : `${stateLabel} · ${remaining} de comida por unidad`;
 }
 
 function getWagonRemainingCargoUnits(wagonId: string) {
@@ -591,8 +661,8 @@ async function handleAddCustomCargo() {
     customModalError.value = "La cantidad debe ser un número mayor o igual a 1";
     return;
   }
-  if (Number.isNaN(parsedCargoUnits) || parsedCargoUnits < 1) {
-    customModalError.value = "Las unidades de carga deben ser un número mayor o igual a 1";
+  if (Number.isNaN(parsedCargoUnits) || parsedCargoUnits < 0) {
+    customModalError.value = "Las unidades de carga deben ser un número mayor o igual a 0";
     return;
   }
   if (!selectedWagon) {
@@ -776,6 +846,10 @@ function sourceLabel(sourceType: string) {
   return sourceType === "CATALOG" ? "Catálogo" : "Personalizada";
 }
 
+function cargoBaseNote(entry: CaravanCargo | null) {
+  return entry?.notes ?? entry?.origin ?? entry?.specificCommodity ?? entry?.deity ?? "—";
+}
+
 function formatCargoLoad(quantity: number, cargoUnits: number) {
   const total = totalCargoUnits(quantity, cargoUnits);
   return cargoUnits === 1 ? `${total} u.c.` : `${total} u.c. (${quantity} × ${cargoUnits})`;
@@ -919,34 +993,132 @@ onMounted(refresh);
           </label>
         </div>
 
-        <div class="table-wrap">
-          <table class="cargo-table">
-            <thead>
-              <tr>
-                <th>Nombre</th>
-                <th>Origen</th>
-                <th>Categoría</th>
-                <th>Cantidad</th>
-                <th>Carga total</th>
-                <th>Carro</th>
-                <th>Notas</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="entry in visibleCargo" :key="entry.key" @click="openCargoDetails(entry.representative)">
-                <td>
-                  <strong>{{ entry.representative.displayName }}</strong>
-                  <div class="muted">{{ entry.representative.catalogName ?? entry.representative.displayName }}</div>
-                </td>
-                <td>{{ sourceLabel(entry.representative.sourceType) }}</td>
-                <td>{{ entry.representative.category }}</td>
-                <td>{{ entry.quantity }}</td>
-                <td>{{ formatGroupedCargoLoad(entry.totalCargoLoad) }}</td>
-                <td>{{ entry.representative.wagonName ?? "Sin carro" }}</td>
-                <td class="muted">{{ entry.representative.notes ?? entry.representative.origin ?? entry.representative.specificCommodity ?? entry.representative.deity ?? "—" }}</td>
-              </tr>
-            </tbody>
-          </table>
+        <div v-if="visibleCargo.length > 0" class="cargo-groups">
+          <section v-if="completedSupplies.length > 0" class="cargo-group">
+            <div class="section-header cargo-group-header">
+              <div>
+                <h3>Suministros completos</h3>
+                <p class="muted">Unidades sin abrir, listas para usar.</p>
+              </div>
+              <div class="muted">{{ completedSupplies.length }} entradas</div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="cargo-table">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Origen</th>
+                    <th>Categoría</th>
+                    <th>Cantidad</th>
+                    <th>Carga total</th>
+                    <th>Carro</th>
+                    <th>Notas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="entry in completedSupplies" :key="entry.key" @click="openCargoDetails(entry.representative)">
+                    <td>
+                      <strong>{{ entry.representative.displayName }}</strong>
+                      <div class="muted">{{ entry.representative.catalogName ?? entry.representative.displayName }}</div>
+                    </td>
+                    <td>{{ sourceLabel(entry.representative.sourceType) }}</td>
+                    <td>{{ entry.representative.category }}</td>
+                    <td>{{ entry.quantity }}</td>
+                    <td>{{ formatGroupedCargoLoad(entry.totalCargoLoad) }}</td>
+                    <td>{{ entry.representative.wagonName ?? "Sin carro" }}</td>
+                    <td class="cargo-notes-cell">
+                      <span v-if="cargoBaseNote(entry.representative) !== '—'">{{ cargoBaseNote(entry.representative) }}</span>
+                      <small class="muted">{{ supplyListNote(entry.representative) }}</small>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section v-if="openedSupplies.length > 0" class="cargo-group">
+            <div class="section-header cargo-group-header">
+              <div>
+                <h3>Suministros abiertos</h3>
+                <p class="muted">Unidades ya abiertas con comida restante visible.</p>
+              </div>
+              <div class="muted">{{ openedSupplies.length }} entradas</div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="cargo-table">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Origen</th>
+                    <th>Categoría</th>
+                    <th>Cantidad</th>
+                    <th>Carga total</th>
+                    <th>Carro</th>
+                    <th>Notas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="entry in openedSupplies" :key="entry.key" @click="openCargoDetails(entry.representative)">
+                    <td>
+                      <strong>{{ entry.representative.displayName }}</strong>
+                      <div class="muted">{{ entry.representative.catalogName ?? entry.representative.displayName }}</div>
+                    </td>
+                    <td>{{ sourceLabel(entry.representative.sourceType) }}</td>
+                    <td>{{ entry.representative.category }}</td>
+                    <td>{{ entry.quantity }}</td>
+                    <td>{{ formatGroupedCargoLoad(entry.totalCargoLoad) }}</td>
+                    <td>{{ entry.representative.wagonName ?? "Sin carro" }}</td>
+                    <td class="cargo-notes-cell">
+                      <span v-if="cargoBaseNote(entry.representative) !== '—'">{{ cargoBaseNote(entry.representative) }}</span>
+                      <small class="muted">{{ supplyListNote(entry.representative) }}</small>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section v-if="otherCargo.length > 0" class="cargo-group">
+            <div class="section-header cargo-group-header">
+              <div>
+                <h3>Resto de carga</h3>
+                <p class="muted">Mercancías que no son suministros.</p>
+              </div>
+              <div class="muted">{{ otherCargo.length }} entradas</div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="cargo-table">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Origen</th>
+                    <th>Categoría</th>
+                    <th>Cantidad</th>
+                    <th>Carga total</th>
+                    <th>Carro</th>
+                    <th>Notas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="entry in otherCargo" :key="entry.key" @click="openCargoDetails(entry.representative)">
+                    <td>
+                      <strong>{{ entry.representative.displayName }}</strong>
+                      <div class="muted">{{ entry.representative.catalogName ?? entry.representative.displayName }}</div>
+                    </td>
+                    <td>{{ sourceLabel(entry.representative.sourceType) }}</td>
+                    <td>{{ entry.representative.category }}</td>
+                    <td>{{ entry.quantity }}</td>
+                    <td>{{ formatGroupedCargoLoad(entry.totalCargoLoad) }}</td>
+                    <td>{{ entry.representative.wagonName ?? "Sin carro" }}</td>
+                    <td class="muted">{{ cargoBaseNote(entry.representative) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
         </div>
 
         <div v-if="visibleCargo.length === 0" class="empty-state-inline">
@@ -1131,7 +1303,7 @@ onMounted(refresh);
             </label>
             <label>
               <span>Unidades de carga</span>
-              <input v-model="customCargoUnits" type="number" min="1" />
+              <input v-model="customCargoUnits" type="number" min="0" />
             </label>
           </div>
 
@@ -1196,6 +1368,16 @@ onMounted(refresh);
                 <div><dt>Carro</dt><dd>{{ selectedCargo.wagonName ?? "Sin carro" }}</dd></div>
                 <div><dt>Precio</dt><dd>{{ selectedCargo.priceExpression ?? "—" }}</dd></div>
               </dl>
+            </section>
+
+            <section v-if="isSupplyCargo(selectedCargo)" class="info-block">
+              <h3>Suministros</h3>
+              <dl class="stats">
+                <div><dt>Estado</dt><dd>{{ selectedCargo.dayPassed ? "Abiertos" : "Completos" }}</dd></div>
+                <div><dt>Comida restante</dt><dd>{{ supplyRemainingFood(selectedCargo) }} por unidad</dd></div>
+                <div><dt>Unidades agrupadas</dt><dd>{{ selectedCargoGroup?.quantity ?? 1 }}</dd></div>
+              </dl>
+              <p class="muted">{{ supplyStatusLabel(selectedCargo) }}</p>
             </section>
           </div>
 
@@ -1391,6 +1573,20 @@ p {
   margin-top: 1rem;
 }
 
+.cargo-groups {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.cargo-group {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.cargo-group-header {
+  margin-top: 0.25rem;
+}
+
 .cargo-table {
   width: 100%;
   border-collapse: collapse;
@@ -1410,6 +1606,11 @@ p {
 
 .cargo-table tbody tr:hover {
   background: #f8fafc;
+}
+
+.cargo-notes-cell {
+  display: grid;
+  gap: 0.2rem;
 }
 
 .empty-state-inline {

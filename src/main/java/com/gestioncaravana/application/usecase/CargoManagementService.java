@@ -324,6 +324,8 @@ public class CargoManagementService
         cargo.specificCommodity(),
         cargo.deity(),
         cargo.notes(),
+        cargo.currentProvisions(),
+        cargo.dayPassed(),
         catalogItem == null ? null : catalogItem.priceExpression(),
         cargo.createdAt(),
         cargo.updatedAt());
@@ -460,8 +462,8 @@ public class CargoManagementService
     if (cargoUnits < 0) {
       throw new IllegalArgumentException("cargoUnits must be greater than or equal to 0");
     }
-    if (sourceType == CaravanCargoSourceType.CUSTOM && cargoUnits < 1) {
-      throw new IllegalArgumentException("cargoUnits must be greater than or equal to 1");
+    if (sourceType == CaravanCargoSourceType.CUSTOM && cargoUnits < 0) {
+      throw new IllegalArgumentException("cargoUnits must be greater than or equal to 0");
     }
     if (catalogItem != null && catalogItem.defaultCargoUnits() != null && catalogItem.defaultCargoUnits() == 0 && cargoUnits != 0) {
       throw new IllegalArgumentException("cargoUnits must be 0 for " + catalogItem.name());

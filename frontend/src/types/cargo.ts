@@ -32,6 +32,8 @@ export interface CaravanCargo {
   specificCommodity: string | null;
   deity: string | null;
   notes: string | null;
+  currentProvisions: number | null;
+  dayPassed: boolean;
   priceExpression: string | null;
   createdAt: string;
   updatedAt: string;

@@ -96,6 +96,32 @@ class CargoManagementServiceTest {
   }
 
   @org.junit.jupiter.api.Test
+  void exposesSupplyStateInCargoViews() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
+    var wagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-suministros", null, Instant.parse("2026-01-01T00:00:00Z")));
+    var cargo = cargoRepository.save(CaravanCargo.create(
+        UUID.randomUUID(),
+        caravan.id(),
+        CaravanCargoSourceType.CATALOG,
+        "suministros",
+        "Suministros",
+        "Carga",
+        1,
+        1,
+        wagon.id(),
+        null,
+        null,
+        null,
+        null,
+        Instant.parse("2026-01-01T00:00:00Z")).withCurrentProvisions(7, true, Instant.parse("2026-01-02T00:00:00Z")));
+
+    var viewed = service.getById(caravan.id(), cargo.id());
+
+    assertThat(viewed.currentProvisions()).isEqualTo(7);
+    assertThat(viewed.dayPassed()).isTrue();
+  }
+
+  @org.junit.jupiter.api.Test
   void allowsCustomCargoOnSpecificGoodsWagonByInheritingItsSpecificCommodity() {
     var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
     var wagon = wagonRepository.save(CaravanWagon.create(
@@ -245,11 +271,11 @@ class CargoManagementServiceTest {
   }
 
   @org.junit.jupiter.api.Test
-  void rejectsCustomCargoWithZeroCargoUnits() {
+  void allowsCustomCargoWithZeroCargoUnits() {
     var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
     var wagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-mercancias", null, Instant.parse("2026-01-01T00:00:00Z")));
 
-    assertThatThrownBy(() -> service.execute(
+    var created = service.execute(
         caravan.id(),
         new AddCaravanCargoUseCase.AddCaravanCargoCommand(
             CaravanCargoSourceType.CUSTOM,
@@ -262,9 +288,12 @@ class CargoManagementServiceTest {
             null,
             null,
             null,
-            null)))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("greater than or equal to 1");
+            null));
+
+    assertThat(created.cargoUnits()).isZero();
+    assertThat(cargoRepository.findAllByCaravanId(caravan.id()))
+        .singleElement()
+        .satisfies(entry -> assertThat(entry.cargoUnits()).isZero());
   }
 
   @org.junit.jupiter.api.Test

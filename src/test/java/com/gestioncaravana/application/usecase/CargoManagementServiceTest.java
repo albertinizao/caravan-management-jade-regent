@@ -19,6 +19,7 @@ import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
 import com.gestioncaravana.domain.CaravanWagonImprovement;
 import com.gestioncaravana.domain.TravelerRoleData;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -90,7 +91,7 @@ class CargoManagementServiceTest {
           assertThat(entry.cargoUnits()).isEqualTo(1);
           assertThat(entry.catalogCode()).isEqualTo(catalogCode);
           assertThat(entry.wagonId()).isEqualTo(wagon.id());
-          assertThat(entry.currentProvisions()).isEqualTo(10);
+          assertThat(entry.currentProvisions()).isEqualTo(BigDecimal.TEN);
           assertThat(entry.dayPassed()).isFalse();
         });
   }
@@ -113,11 +114,11 @@ class CargoManagementServiceTest {
         null,
         null,
         null,
-        Instant.parse("2026-01-01T00:00:00Z")).withCurrentProvisions(7, true, Instant.parse("2026-01-02T00:00:00Z")));
+        Instant.parse("2026-01-01T00:00:00Z")).withCurrentProvisions(BigDecimal.valueOf(7), true, Instant.parse("2026-01-02T00:00:00Z")));
 
     var viewed = service.getById(caravan.id(), cargo.id());
 
-    assertThat(viewed.currentProvisions()).isEqualTo(7);
+    assertThat(viewed.currentProvisions()).isEqualTo(BigDecimal.valueOf(7));
     assertThat(viewed.dayPassed()).isTrue();
   }
 

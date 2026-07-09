@@ -6,444 +6,841 @@
 
 ## 1. Summary
 
-The application must allow the user to **pass one day** for the active caravan and have the game resolve the caravan’s daily supply cycle automatically.
+The application must allow the active caravan to **advance exactly one day** and resolve food consumption, food generation, supply conversion, perishable decay, and cargo reassignment in one authoritative backend operation.
 
-This daily cycle must:
+This slice focuses on the **food economy** of the caravan:
 
-- subtract the caravan’s daily consumption,
-- generate the supplies that are produced that day,
-- apply the relevant rule-driven modifiers and limits,
-- persist the resulting caravan state,
-- and show the user a clear before/after breakdown of what happened.
+- caravan consumption,
+- pre-food role activity that affects the daily economy,
+- hunter-scout food generation,
+- food stored inside `supplies` and `perishable supplies`,
+- cook and portable-kitchen bonuses when converting supplies into food,
+- leftover food conversion into perishable supplies,
+- deterministic cargo redistribution back into wagons,
+- and a modal day-pass simulation from the Caravan view.
 
-The feature must account for the sources that affect supply economy in the current rule set, including at least:
+## 2. Verified Rule Sources
 
-- **Agricultors**,
-- **Batidores**,
-- **Sirvientes** when they amplify another traveler’s role,
-- **Cocineros**,
-- **Cocina Portátil**,
-- and supply-related **dotes** such as **Autonomía Extrema**, **Ayuno Intermitente**, and **Consumo Eficiente**.
+This specification is based on:
 
-This feature is the missing time-progression layer between the current caravan state and the daily resource economy.
+- `C:\Users\Alberto\workspace\GestionCaravana\docs\Reglas_de_Caravana.md`
+- the product rules provided by the user in this session
 
-## 2. Problem Statement
+Verified rule excerpts reflected here:
 
-Right now the application can show caravan statistics, travelers, wagons, feats, and cargo, but it does not provide a canonical “pass the day” action that resolves supply income and supply spending together.
+- Batidores do not count toward caravan consumption.
+- A batidor focused on hunting provides 2 provisions for that day.
+- An agricultor generates 1 supply unit every 2 days.
+- A boticario generates 5 po/day in alchemical products.
+- An artesano works on crafting activity and can be surfaced in the daily summary.
+- A cook turns one spent supply unit into 15 food instead of 10.
+- A portable kitchen lets one cook double that improvement for one use, producing 20 food instead of 15 for that consumed supply.
+- A sirviente increases the effectiveness of another role by 50%, and by an additional 50% if the servant also qualifies for that same role.
+- Perishable supplies are worth 10 food by default and lose 1 food every 2 days in the source rules. For implementation, this spec models that decay as **0.5 food per day** so fractional food can be preserved explicitly, which matches the user’s requested behavior and stays equivalent over 2 days.
 
-That creates several problems:
+## 3. Problem Statement
 
-- the user must mentally track the daily economy instead of letting the system do it,
-- supply generation from roles and wagons can be forgotten or applied inconsistently,
-- consumption can be shown as a stat but not resolved against the caravan’s stored reserves,
-- the effect of cook efficiency, farm production, scouting/hunting batidores, and relevant dotes is easy to misapply,
-- and repeated clicks or retries could accidentally double-advance the caravan if the operation is not modeled as a single authoritative day resolution.
+The current product can model travelers, wagons, cargo, and derived caravan data, but it does not yet define a canonical, step-by-step rule engine for resolving the caravan’s daily food cycle.
 
-In short: the app can show the numbers, but it cannot yet **close the day**.
+Without this spec:
 
-## 3. Goals
+- consumption can be displayed but not spent,
+- stored food may be split across wagons without a canonical resolution order,
+- perishable food decay can be applied inconsistently,
+- cook and kitchen bonuses can be miscounted,
+- and the frontend would be forced to improvise rules that belong in the backend.
 
-1. Allow the user to advance the active caravan by exactly one day through a single action.
-2. Resolve daily supply **consumption** and **generation** in the correct rule-driven order.
-3. Apply the current caravan state as the source of truth for all daily modifiers.
-4. Support daily choices that affect the result, such as batidor mode or optional feast/fasting decisions when the rules require a player choice.
-5. Persist the updated caravan supply state and the day-resolution record.
-6. Expose a clear breakdown of where supplies came from and where they were spent.
-7. Keep the backend as the canonical rules engine for daily supply resolution.
-8. Make the operation safe against duplicate submission.
+That is NOT acceptable. The day pass must be deterministic, auditable, and owned by the backend.
 
-## 4. Non-Goals
+## 4. Goals
 
-This specification does **not** define:
+1. Advance one caravan day in a single atomic operation.
+2. Calculate caravan food consumption correctly.
+3. Exclude active batidores from caravan consumption.
+4. Resolve agricultor, boticario, and artesano pre-food activity before the food calculation begins.
+5. Resolve hunter food generation before spending stored supplies.
+6. Resolve perishable food as fractional food.
+7. Spend regular supplies only when generated + perishable food is insufficient.
+8. Apply cook, servant, and portable-kitchen bonuses while converting supplies into food.
+9. Convert leftover food back into perishable supply cargo.
+10. Reassign resulting cargo back into wagons deterministically.
+11. Produce warnings when food is insufficient or cargo cannot be fully reassigned.
+12. Show the user a clear before/after summary and an ordered simulation of the full resolution.
 
-- full combat resolution,
-- encounter generation,
-- travel route navigation,
-- settlement visit logic,
-- long-rest healing,
-- weather simulation beyond any already-existing cargo decay rules that must be honored when the day advances,
-- or a full calendar/timekeeping system for the entire campaign beyond the caravan day counter needed for this feature.
+## 5. Non-Goals
 
-The feature only defines the **daily caravan supply cycle**, not the entire world-time simulation.
+This specification does not define:
 
-## 5. User Stories
+- full travel progression beyond one day pass,
+- agriculturist production,
+- servant amplification,
+- feast or fasting decisions,
+- discontent changes,
+- weather systems,
+- spoilage prevention from ice or refrigeration improvements,
+- or non-food cargo processing.
 
-### US-1: Pass the day
+Those can be added later, but this spec defines the canonical base food cycle first.
 
-As a user, I want to press a button to pass one day so that the caravan’s supplies are updated automatically.
+## 5. User Experience Requirements
 
-### US-2: See the daily supply result
+### 5.1 Entry point
 
-As a user, I want to see how many supplies were consumed and generated so that I can understand the caravan’s net daily balance.
+From the **Caravan** view, the UI must expose a button labeled:
 
-### US-3: Understand rule sources
+- `Pasar el día`
 
-As a user, I want to see which travelers, wagons, feats, and dotes affected the daily result so that I can trust the calculation.
+When the user clicks that button, the application must open a modal window for the daily-cycle preview.
 
-### US-4: Handle daily choices
+### 5.2 Modal content
 
-As a user, I want the app to ask for any daily choices that matter so that I can control optional trade-offs such as hunting versus scouting or fasting versus normal consumption.
+Before the user confirms the day pass, the modal must show the caravan state **before** the daily calculation:
 
-### US-5: Avoid accidental double-advance
+- total number of `supplies` units currently carried by the caravan
+- total number of `perishable supplies` units currently carried by the caravan
+- total food contained in all `perishable supplies` units, including decimals
 
-As a user, I want the day pass action to be safe against repeated clicks or retries so that I do not lose supplies by advancing twice by mistake.
+Then the modal must show:
 
-## 6. Functional Requirements
+- whether caravan consumption is covered or not
+- the resulting number of `supplies` units after the day pass
+- the resulting number of `perishable supplies` units after the day pass
+- the resulting total food stored in `perishable supplies` after the day pass
 
-### 6.1 Active caravan prerequisite
+The modal is a **simulation only**.
 
-- The day pass action must operate on the currently active caravan.
-- If no caravan is active, the action must be disabled and the UI must direct the user to select or create a caravan first.
-- All daily supply calculations must use the active caravan’s current travelers, wagons, cargo, feats, and discontent state.
+Rules:
 
-### 6.2 Day pass entry point
+- opening the modal must not persist any caravan changes
+- generating or refreshing the preview must not persist any caravan changes
+- closing or cancelling the modal must not persist any caravan changes
+- caravan state changes become definitive only after explicit user confirmation from the modal
 
-- The UI must expose a clear button or action labeled in user language as **Pass Day** or equivalent.
-- The action should be available from the main caravan workspace and from any view that already shows the active caravan summary.
-- Before final confirmation, the UI must present a preview of the day resolution, including at minimum:
-  - expected consumption,
-  - expected production,
-  - current supply reserve,
-  - expected net delta,
-  - and any warnings or blocking conditions.
-- If the resolution requires a daily choice, the preview must include that choice before confirmation.
-
-### 6.3 Daily resolution scope
-
-- One confirmed action must resolve exactly **one caravan day**.
-- The resolution must be atomic from the user’s perspective: either the entire day is applied, or none of it is.
-- If the request is repeated with the same command identity or while the caravan is already resolved for that day, the backend must not apply the same day twice.
-- The result must be persisted as a dedicated day-resolution record so the user can inspect what happened later.
-
-### 6.4 Supply state model
-
-- The caravan must maintain a canonical **supply reserve** for consumable provisions.
-- The reserve must be queryable independently from the cargo inventory view.
-- If the application stores supplies as cargo entries, the supply reserve and the cargo inventory must stay synchronized.
-- The UI must show:
-  - current reserve,
-  - daily consumption,
-  - daily generation,
-  - net delta,
-  - and shortage status when the reserve is insufficient.
-- The system must distinguish between:
-  - **stored provisions** available to be spent,
-  - **cargo representation** of supplies,
-  - and **future or pending production** that has been earned but not yet committed.
-
-### 6.5 Daily consumption
-
-- The engine must calculate the caravan’s daily consumption from the current caravan state.
-- The calculation must include:
-  - traveler consumption,
-  - wagon consumption,
-  - wagon-improvement modifiers that change consumption,
-  - feat modifiers that change consumption,
-  - and any daily choice that intentionally changes consumption, such as fasting or celebration.
-- If the user enables **Ayuno Intermitente** without the feat being active, the backend must reject the resolution.
-- Batidores assigned to the batidor role must not count toward caravan consumption while that role is active.
-- Consumption modifiers that impose a floor must respect their rule-defined minimums.
-- If the final consumption exceeds the available supply reserve, the caravan must enter a shortage state for that day and the UI must show the deficit clearly.
+### 5.3 Ordered simulation log
 
-### 6.6 Daily generation
+The modal must include an ordered simulation of how the backend resolved the process.
 
-- The engine must calculate daily supply generation from the current caravan state.
-- At minimum, it must support:
-  - **Agricultors**: 1 unit of supplies every 2 days,
-  - **Batidores**: 2 units of provisions when they hunt,
-  - and any other supply-generating source already defined by the rulebook or added later.
-- If the caravan has **Trabajo En Equipo**, the engine must resolve shared jobs using the productivity contract defined in `openspec/specs/caravan-feat-automation/spec.md`, including the 25% per additional traveler bonus and any persisted fractional carry-over.
-- The engine must respect role availability rules, including wagon restrictions such as **Carro Huerto** for agriculturists.
-- When cargo supplies are consumed, the backend must remove them from inventory and consume **suministros perecederos** before **suministros**.
-- If a traveler’s role or target assignment is invalid on the day of resolution, that source must not generate supplies and the UI must report why.
+The simulation must show, in order:
 
-### 6.7 Cook efficiency and kitchen support
+1. pre-food role activity summary
+2. each batidor contribution
+3. each consumed supply conversion
+4. the leftover food result, if any
 
-- The engine must support the cook efficiency rule as a bonus on top of the base daily generation and on top of the spendable supply stock that is being consumed that day.
-- Each cook may convert one full block of 10 supplies into 5 additional supplies, whether those supplies come from generation or from stored cargo/reserve being spent.
-- The number of effective cook bonuses in a day is limited by the number of full 10-supply blocks available in each affected pool.
-- If the caravan has a **Cocina Portátil**, the cook bonus is doubled.
-- Cook output must be treated as a shared job bucket when multiple cooks are assigned, so **Trabajo En Equipo** can increase the effective cook bonus using the shared-job productivity contract.
-- The resolution breakdown must show how many full blocks were converted, how many cooks were effective, and whether the kitchen bonus was applied.
+### 5.4 Batidor simulation entry
 
-### 6.8 Role synergies and support roles
+For each batidor shown in the simulation, the modal must display:
 
-- The engine must evaluate support roles that modify another traveler’s role, including **Sirviente**.
-- If a sirviente is assigned to a valid master, and that master’s role is relevant to supply production or consumption, the synergy must be applied during the day resolution.
-- If the master assignment is missing, invalid, or incompatible with the selected role, the sirviente contribution must be ignored and the UI must show the reason.
-- The system must not require the frontend to reimplement the role-synergy rules.
+- traveler name
+- that the traveler acted as `batidor`
+- food generated by that batidor
 
-### 6.9 Feats and dotes
+If the product later distinguishes hunt vs scout explicitly in the UI, the entry should also show the chosen mode.
 
-- The day resolution must evaluate only active feats.
-- The engine must apply supply-related dotes, including at least:
-  - **Autonomía Extrema**,
-  - **Ayuno Intermitente**,
-  - **Consumo Eficiente**,
-  - and any future feat that changes supply production or consumption.
-- If a feat becomes inactive, it must stop contributing to the daily resolution immediately.
-- If a feat requires a daily choice, the UI must surface that choice before confirmation.
-- The resolution breakdown must indicate when a feat was available but not applied because its conditions were not met.
+### 5.5 Supply conversion simulation entry
 
-### 6.10 Time-based cargo effects
+For each `supplies` unit converted during the process, the modal must show:
 
-- Advancing the day must also advance any existing duration-based cargo effects that are already defined by the cargo system, including perishable supplies and cargo preservation rules.
-- The feature must not silently ignore time-based cargo decay when the caravan day advances.
-- **Suministros perecederos** must lose effectiveness every 2 days according to the rulebook, and the resulting cargo inventory must reflect the decay.
-- If a cargo effect is affected by a wagon improvement, the result must reflect that improvement.
+- that one supply unit was converted
+- whether a cook was applied
+- whether a servant affected that cook
+- whether the servant qualified as cook, if present
+- whether a portable kitchen was applied
+- the final amount of food obtained from that unit
 
-### 6.11 Discontent interaction
+### 5.6 Leftover food simulation entry
 
-- The day pass action must preserve the caravan’s current discontent unless a rule explicitly changes it.
-- If a daily choice increases discontent, that change must be included in the same atomic day resolution.
-- The UI must highlight when discontent-related rules were involved in the day, especially when the user used a trade-off such as fasting.
+If food remains after covering caravan consumption, the modal must show:
 
-### 6.12 Data integrity
+- the final leftover food amount
+- and, if converted, how that leftover food was turned into `perishable supplies`
 
-- The system must never apply the same day twice.
-- The system must never allow a negative supply reserve without also recording the shortage state.
-- The system must never treat a disabled or inactive role as if it were active.
-- The system must keep the daily resolution record immutable once saved.
-- The backend must remain the source of truth for every calculated value shown in the preview and result screens.
+## 6. Core Domain Definitions
 
-## 7. Domain Model
+### 6.1 Consumption
 
-### 7.1 Aggregate root
+`Caravan consumption` is the food cost to feed the caravan for one day.
 
-`CaravanCampaign`
+Base rule:
 
-The caravan campaign remains the aggregate root for day advancement. It owns the current day state, supply reserve, discontent, travelers, wagons, cargo, and rule-bearing features.
+- consumption = total traveler consumption + total wagon consumption
 
-### 7.2 Supply state
+Adjustment:
 
-`CaravanSupplyState`
+- every traveler assigned as `batidor` has **consumption 0** while assigned as batidor
 
-Represents the caravan’s consumable resource state.
+This spec assumes the existing statistics engine already knows each wagon’s consumption contribution. The daily cycle must reuse the same canonical consumption source, not recalculate wagon rules differently.
 
-Suggested attributes:
+### 6.2 Food-bearing cargo
 
-- `provisionReserve`
-- `cargoEquivalentReserve`
-- `dailyConsumption`
-- `dailyGeneration`
-- `netDelta`
-- `shortage`
-- `lastResolvedDay`
-- `updatedAt`
+Two cargo types participate in this cycle:
 
-### 7.3 Day resolution record
+- `supplies`
+- `perishable supplies`
 
-`CaravanDayResolution`
+Base value:
 
-Represents one completed day pass.
+- 1 unit of `supplies` = 10 food
+- 1 unit of `perishable supplies` = 10 food by default
 
-Suggested attributes:
+Removal rule:
 
-- `id`
+- whenever a `supplies` or `perishable supplies` unit reaches `food <= 0`, that cargo unit is deleted
+
+### 6.3 Perishable decay model
+
+Perishable supplies must track their current `foodAmount` as a decimal value.
+
+Implementation rule for this slice:
+
+- each day pass reduces every perishable-supply unit by `0.5 food`
+- after the reduction, any unit with `foodAmount <= 0` is deleted
+
+This is the explicit implementation chosen for the product because the source rule of “lose 1 food every 2 days” becomes auditable, fractional, and compatible with the requested temporary-inventory workflow.
+
+### 6.4 Servant amplification
+
+Servants (`sirvientes`) modify the effectiveness of other roles.
+
+Verified base rule from the manual:
+
+- if a traveler performs a role that grants a bonus, an assigned servant increases that role’s effectiveness by `+50%`
+- if that servant also qualifies for the same role, effectiveness gains an additional `+50%`
+
+For this feature, servant amplification must be applied with **role-specific operational formulas** defined in this specification.
+
+## 7. Day Pass Algorithm
+
+## 7.0 Preview/confirm execution model
+
+This feature must be implemented as two distinct backend flows:
+
+1. `preview`
+2. `confirm`
+
+### Preview
+
+The preview flow must:
+
+- read the latest persisted caravan state
+- build an in-memory simulation snapshot
+- execute the day-pass algorithm against that in-memory snapshot
+- return the before/after summary and ordered simulation log required by the modal
+- persist **nothing** as definitive caravan state
+
+### Confirm
+
+The confirm flow must:
+
+- read the latest persisted caravan state again
+- validate that the base state is still compatible with the preview being confirmed
+- re-run the algorithm from persisted state
+- persist the resulting definitive caravan state
+- persist the final day-pass result record
+
+The confirm flow must be transactional.
+
+### Required anti-staleness rule
+
+Because the modal preview is not definitive, the backend must protect against confirming stale simulations.
+
+At confirm time, the backend must reject the operation if the caravan changed after the preview was generated.
+
+Accepted implementation strategies include:
+
+- a preview fingerprint/state hash
+- a version field / optimistic locking strategy
+- a deterministic state signature based on the relevant updated timestamps and counters
+
+If the state changed, the backend must return a conflict response and require a new preview.
+
+## 7.1 Preconditions
+
+- there must be an active caravan
+- the backend must load the full active state for:
+  - travelers and their roles,
+  - wagons and remaining cargo capacity,
+  - cargo units assigned to wagons,
+  - and applicable day-pass resources such as cooks and portable kitchens
+
+If there is no active caravan, the operation must fail with a user-facing validation error.
+
+## 7.1A Pre-food role activity
+
+Before beginning the food calculation itself, the backend must resolve these role activities in order:
+
+1. agricultors
+2. boticarios
+3. artesanos
+
+### Agricultors
+
+Each agricultor advances personal work progress by `0.5`.
+
+If that agricultor has an assigned servant:
+
+- `+0.5` more progress if the servant also qualifies as agricultor
+- `+0.25` more progress if the servant does not qualify as agricultor
+
+While the agricultor has `workProgress >= 1`:
+
+1. subtract `1` from that agricultor’s work progress
+2. create `1` unit of `supplies`
+3. place that supply unit into the temporary inventory
+4. repeat while `workProgress >= 1`
+
+The daily summary must show how many `supplies` units were generated by agricultors.
+
+### Boticarios
+
+Each boticario generates `5 po` in alchemical products before the food calculation begins.
+
+If that boticario has an assigned servant:
+
+- `+5 po` if the servant also qualifies as boticario
+- `+2.5 po` if the servant does not qualify as boticario
+
+The backend must sum all generated alchemical-product value and include the total in the daily summary.
+
+### Artesanos
+
+Before the food calculation begins, the backend must list every traveler acting as `artesano`.
+
+For each artesano, the summary/simulation must indicate:
+
+- traveler name
+- that the traveler is acting as `artesano`
+- whether the artesano has an assigned servant
+- if a servant exists, whether that servant also qualifies as `artesano`
+
+This slice does not yet convert artesano work into a persisted crafting result. It only records the pre-food activity in the preview/result summary.
+
+## 7.2 Step 1 — Calculate caravan consumption
+
+The backend must calculate the caravan’s food consumption for the day.
+
+Rules:
+
+- count all travelers except those currently assigned as batidores
+- add all wagon consumption
+- the result may be integer or decimal only if future rules introduce fractions; for this slice it is expected to be an integer
+
+The result must be included in the response breakdown as `requiredConsumption`.
+
+## 7.3 Step 2 — Start generated food bucket
+
+The backend must initialize:
+
+- `generatedFood = 0`
+
+This is the working food pool used during resolution.
+
+## 7.4 Step 3 — Add hunter food
+
+For each batidor assigned to hunting on that day:
+
+- add 2 food to `generatedFood`
+
+If that batidor has an assigned servant:
+
+- add `+2 food` more if the servant also qualifies as batidor
+- add `+1 food` more if the servant does not qualify as batidor
+
+Batidores assigned to scouting:
+
+- add 0 food
+- still keep consumption 0 because they remain batidores
+
+The result breakdown must show hunter contributions by traveler.
+
+## 7.5 Step 4 — Add food from all perishable supplies
+
+The backend must find **all** cargo units of type `perishable supplies` across **all** wagons and sum their entire current `foodAmount`, including decimals.
+
+Rules:
+
+- add the summed value to `generatedFood`
+- remove those perishable units from wagon cargo before continuing
+- place those units into the temporary inventory for later rebuild
+
+At this point, perishable food is treated as already available food for today’s resolution.
+
+## 7.6 Step 5 — If needed, extract all regular supplies into temporary inventory
+
+If `generatedFood >= requiredConsumption`, skip to Step 7.
+
+If `generatedFood < requiredConsumption`:
+
+- remove **all** `supplies` cargo units from **all** wagons
+- place them into a `temporary inventory`
+
+The temporary inventory is an in-memory working collection used only during the day-pass transaction.
+
+## 7.7 Step 6 — Consume supplies until food is enough or supplies run out
+
+While both conditions are true:
+
+- `generatedFood < requiredConsumption`
+- temporary inventory still contains at least 1 unit of `supplies`
+
+repeat:
+
+1. consume exactly 1 unit of `supplies`
+2. remove that supply unit from temporary inventory
+3. convert it into food using the cook/kitchen rules from Section 8
+4. add the produced food to `generatedFood`
+
+Stop when:
+
+- `generatedFood >= requiredConsumption`, or
+- there are no `supplies` units left in temporary inventory
+
+## 7.8 Step 7 — Pay caravan consumption
+
+After the conversion loop finishes:
+
+- `remainingFood = generatedFood - requiredConsumption`
+
+Outcomes:
+
+- if `remainingFood < 0`, the backend must mark the day as **insufficient food**
+- if `remainingFood == 0`, the day resolves successfully with no leftover food
+- if `remainingFood > 0`, the day resolves successfully and leftover food must be converted into perishable supplies
+
+If food is insufficient:
+
+- the response must include a warning/alert indicating the caravan could not cover its consumption
+- no synthetic negative cargo may be created
+
+## 7.9 Step 8 — Convert leftover food into perishable supplies
+
+If `remainingFood > 0`, convert it into `perishable supplies` inside the temporary inventory.
+
+Rules:
+
+1. while `remainingFood >= 10`
+   - create 1 `perishable supplies` unit with `foodAmount = 10`
+   - add it to temporary inventory
+   - subtract 10 from `remainingFood`
+2. when `0 < remainingFood < 10`
+   - create 1 `perishable supplies` unit with `foodAmount = remainingFood`
+   - add it to temporary inventory
+   - set `remainingFood = 0`
+
+If `remainingFood == 0`, no extra perishable unit is created.
+
+## 7.10 Step 9 — Rebuild cargo from temporary inventory
+
+When rebuilding wagon cargo, process temporary inventory in this strict order:
+
+1. all `supplies`
+2. all `perishable supplies`
+
+### Reassigning regular supplies
+
+Assign supply units one by one to wagons using the wagon-selection rules in Section 9.
+
+### Reassigning perishable supplies
+
+Assign perishable units one by one, but before assigning each unit:
+
+- subtract `0.5 food` from that unit
+
+After the subtraction:
+
+- if the unit reaches `foodAmount <= 0`, delete it and do not assign it
+- otherwise assign it using the wagon-selection rules in Section 9
+
+This second `0.5` reduction is part of the requested operational flow and represents the per-day degradation that occurs during the day pass before the perishable unit is stored again.
+
+## 7.11 Step 10 — Finish the transaction
+
+The operation must persist:
+
+- updated cargo distribution,
+- updated perishable `foodAmount` values,
+- any removed empty cargo units,
+- and the day-pass result record
+
+The operation must be atomic: either the whole day pass is applied, or nothing is.
+
+## 8. Supply Consumption Bonuses
+
+## 8.1 Cooks
+
+When consuming 1 `supplies` unit during Step 6:
+
+- base result = 10 food
+- a cook contributes a **bonus of +5 food** over that base result
+
+For this feature, servant and portable-kitchen effects apply to the **cook bonus**, not to the whole 10 food base.
+
+Limits:
+
+- each cook may apply this benefit **once per day**
+- only one cook may affect the same consumed supply unit
+
+## 8.2 Portable kitchens
+
+If a cook upgrades a supply conversion and at least 1 unused `portable kitchen` is available, the kitchen adds `+100%` to the cook bonus multiplier.
+
+This is intentionally applied on top of the cook bonus model so that kitchen + servant combinations do not become explosively large.
+
+Limits:
+
+- each portable kitchen may be used **once per day**
+- only one portable kitchen can affect a given consumed supply unit
+- a portable kitchen does nothing without a cook
+
+## 8.3 Cook servant amplification
+
+If a cook has an assigned servant:
+
+- add `+50%` to the cook bonus multiplier
+- if the servant also qualifies as cook, add another `+50%`
+
+All applicable bonus percentages must be summed **before** multiplying the cook bonus.
+
+The operational formula is:
+
+- `foodProduced = 10 + (5 * cookBonusMultiplier)`
+
+Where:
+
+- no extras => `cookBonusMultiplier = 1`
+- servant only => `1.5`
+- kitchen only => `2`
+- servant + kitchen => `2.5`
+- servant-qualified-as-cook => `2`
+- servant-qualified-as-cook + kitchen => `3`
+
+## 8.4 Cook activation priority
+
+When choosing which cooks to consume first, the backend must activate cooks in this strict priority order:
+
+1. cooks with servant who also qualifies as cook
+2. cooks with servant who does not qualify as cook
+3. cooks without servant
+
+Within the same priority group, use a deterministic stable order.
+
+## 8.5 Allocation strategy
+
+During Step 6, the backend must maximize food output automatically.
+
+For each consumed supply unit, the engine must pick the highest-priority still-unused cook, if any, and then compute food using the additive cook-bonus model.
+
+If a cook is used:
+
+1. determine whether that cook has a servant
+2. determine whether the servant qualifies as cook
+3. if at least 1 unused portable kitchen exists, assign one kitchen use
+4. calculate the cook bonus multiplier
+5. produce the resulting food
+6. mark the cook as used
+7. if a kitchen was used, mark that kitchen as used
+
+If no cook is available, produce `10 food`.
+
+This greedy strategy is correct because cook bonuses are single-use per day and higher-multiplier cooks must be consumed first.
+
+## 8.6 Verified cook examples
+
+The engine must satisfy these per-unit conversions:
+
+| Has servant | Servant qualifies as cook | Has portable kitchen | Percentage applied to cook bonus | Food produced per supply unit |
+|---|---|---|---:|---:|
+| No | No | No | +0% (`*1`) | 15 |
+| No | No | Yes | +100% (`*2`) | 20 |
+| Yes | No | No | +50% (`*1.5`) | 17.5 |
+| Yes | No | Yes | +150% (`*2.5`) | 22.5 |
+| Yes | Yes | No | +100% (`*2`) | 20 |
+| Yes | Yes | Yes | +200% (`*3`) | 25 |
+
+## 8.7 Aggregate examples
+
+The engine must satisfy these examples:
+
+| Supplies consumed | Cooks | Portable kitchens | Food produced |
+|---|---:|---:|---:|
+| 3 | 0 | 0 | 30 |
+| 3 | 1 | 0 | 35 |
+| 3 | 3 | 0 | 45 |
+| 3 | 0 | 1 | 30 |
+| 3 | 1 | 1 | 40 |
+| 3 | 1 | 2 | 40 |
+| 3 | 2 | 2 | 45 |
+| 3 | 3 | 2 | 50 |
+| 3 | 3 | 3 | 60 |
+| 3 | 4 | 4 | 60 |
+
+These aggregate examples assume the previously defined activation priority and no servant-specific overrides beyond the product rules above.
+
+## 9. Wagon Assignment Rules
+
+When assigning a `supplies` or `perishable supplies` unit back to cargo:
+
+1. find the **Supply Wagon** with the greatest available cargo capacity, as long as it has at least 1 free slot
+2. if no Supply Wagon has space, find any other wagon with the greatest available cargo capacity, as long as it has at least 1 free slot
+3. if no wagon has available capacity:
+   - stop the assignment process immediately
+   - report all remaining temporary-inventory items to the user
+   - discard the remaining temporary inventory
+
+Tie-breaking rule:
+
+- if multiple wagons have the same greatest available capacity, use a stable deterministic order such as wagon creation order or wagon id ascending
+
+The same tie-breaker must be used every time.
+
+## 10. Data Model Expectations
+
+## 10.0 Legacy model replacement rule
+
+The previous day-pass implementation is considered unreliable legacy and must not be reused as the semantic base for the new flow.
+
+Existing old artifacts may remain temporarily in the codebase, but they are to be treated as **replaceable legacy**, not as trusted design anchors.
+
+The new implementation may delete them, replace them, or recreate them with new semantics.
+
+At minimum, the following existing artifacts must be considered legacy and **must not be reused blindly**:
+
+- `C:\Users\Alberto\workspace\GestionCaravana\src\main\java\com\gestioncaravana\application\model\CaravanDayPreviewView.java`
+- `C:\Users\Alberto\workspace\GestionCaravana\src\main\java\com\gestioncaravana\application\model\CaravanDayResolutionView.java`
+- `C:\Users\Alberto\workspace\GestionCaravana\src\main\java\com\gestioncaravana\domain\CaravanDayResolution.java`
+- `C:\Users\Alberto\workspace\GestionCaravana\src\main\java\com\gestioncaravana\adapter\out\persistence\CaravanDayResolutionJpaEntity.java`
+- `C:\Users\Alberto\workspace\GestionCaravana\src\main\java\com\gestioncaravana\adapter\out\persistence\CaravanDayResolutionRepositoryAdapter.java`
+- `C:\Users\Alberto\workspace\GestionCaravana\src\main\java\com\gestioncaravana\application\port\out\CaravanDayResolutionRepositoryPort.java`
+
+These files can be removed and recreated with new code if that is the cleanest path.
+
+### Replacement guidance
+
+The new implementation should prefer a clean set of types with explicit semantics, for example:
+
+- `DayPassPreviewUseCase`
+- `ConfirmDayPassUseCase`
+- `DayPassSimulationEngine`
+- `DayPassSimulationSnapshot`
+- `DayPassSimulationResult`
+- `DayPassSimulationLogEntry`
+- `ConfirmedDayPassResult`
+
+Exact naming may change, but the key rule is that the new flow must be designed from the required behavior, not constrained by the legacy classes above.
+
+## 10.1 Perishable cargo
+
+`PerishableSupplyCargoUnit`
+
+Suggested fields:
+
+- `cargoUnitId`
+- `wagonId`
+- `foodAmount`
+- `createdOnDay`
+- `updatedOnDay`
+
+## 10.2 Day pass result
+
+`CaravanDayPassResult`
+
+Suggested fields:
+
 - `caravanId`
-- `resolvedDayIndex`
-- `resolvedAt`
-- `startingReserve`
-- `endingReserve`
-- `totalConsumption`
-- `totalGeneration`
-- `netDelta`
-- `shortage`
-- `choices`
-- `contributions`
+- `resolvedDay`
+- `requiredConsumption`
+- `generatedSuppliesFromAgricultors`
+- `generatedAlchemyValueFromBoticarios`
+- `hunterFoodGenerated`
+- `perishableFoodCollected`
+- `foodProducedFromSupplies`
+- `totalGeneratedFood`
+- `remainingFoodAfterConsumption`
+- `insufficientFood`
+- `consumedSupplyUnits`
+- `cookUses`
+- `portableKitchenUses`
+- `reassignedSupplies`
+- `reassignedPerishableSupplies`
+- `discardedTemporaryInventoryItems`
 - `warnings`
 
-### 7.4 Contribution entry
+## 10.3 Temporary inventory item
 
-`CaravanDailyContribution`
+`TemporaryCargoItem`
 
-Represents one rule source that contributed to the day result.
+Suggested fields:
 
-Suggested attributes:
+- `sourceType` (`supplies` or `perishable supplies`)
+- `foodAmount` optional for perishable
+- `sourceWagonId` optional
+- `sequence`
 
-- `effectCode`
-- `sourceType`
-- `sourceId`
-- `sourceName`
-- `operation`
-- `quantity`
-- `reason`
-- `applied`
-- `ignoredReason` optional
+The temporary inventory is transactional and must not persist beyond the day-pass operation.
 
-### 7.5 Daily choice model
+## 11. API Expectations
 
-`CaravanDailyChoice`
+Suggested backend use cases:
 
-Represents a user decision that affects the resolution.
+- build the modal preview for the Caravan view
+- preview daily food resolution
+- advance one day and resolve the food cycle
+- inspect the last food-cycle result
 
-Suggested attributes:
+Suggested endpoints:
 
-- `choiceType`
-- `targetId` optional
-- `mode`
-- `value` optional
-- `reason` optional
+- `POST /api/caravans/{caravanId}/daily-cycle/food/preview`
+- `POST /api/caravans/{caravanId}/daily-cycle/food/confirm`
+- `GET /api/caravans/{caravanId}/daily-cycle/food/last-result`
 
-Examples:
+Exact endpoint naming may change, but the backend must remain the canonical rules engine.
 
-- batidor chooses between hunting and scouting,
-- a fasting feat is enabled or disabled,
-- a feast is confirmed or skipped,
-- a cook assignment is selected when the rules require an explicit allocation.
+The preview response must include enough information for the modal to render:
 
-### 7.6 Resolution preview
+- pre-calculation cargo counts
+- pre-calculation total perishable food
+- projected consumption coverage result
+- post-calculation cargo counts
+- post-calculation total perishable food
+- agricultor-generated supply count
+- boticario-generated alchemical value total
+- artesano activity list
+- ordered simulation entries
+- preview fingerprint / state token or equivalent anti-staleness value
 
-`CaravanDayPreview`
+The confirm request must include the preview fingerprint/state token, or another equivalent concurrency mechanism required by the chosen backend design.
 
-Represents the expected result before the user confirms the day pass.
+## 12. Acceptance Criteria
 
-Suggested attributes:
+### AC-0 Modal preview
 
-- `caravanId`
-- `currentReserve`
-- `expectedConsumption`
-- `expectedGeneration`
-- `expectedNetDelta`
-- `expectedReserveAfterResolution`
-- `warnings`
-- `requiredChoices`
-- `contributions`
+- From the Caravan view, the user can click `Pasar el día` and open a modal preview.
+- The modal shows the caravan’s `supplies` and `perishable supplies` counts before the calculation.
+- The modal shows the total food stored in perishable supplies before the calculation.
+- Opening the modal or refreshing the preview does not persist definitive caravan changes.
 
-## 8. UX / Flow
+### AC-1 Consumption
 
-### 8.1 Passing the day
+- The backend calculates caravan consumption for the active caravan.
+- Travelers assigned as batidores contribute 0 traveler consumption while assigned as batidores.
 
-1. The user opens the active caravan workspace.
-2. The UI shows the current supply reserve and the daily balance preview.
-3. The user clicks **Pass Day**.
-4. If any daily choices are required, the UI asks for them in a modal or step.
-5. The UI shows a final confirmation with the expected result.
-6. The user confirms.
-7. The backend resolves the day and persists the result.
-8. The UI refreshes the caravan dashboard, statistics, and supply state.
+### AC-1B Pre-food activities
 
-### 8.2 Reviewing the day result
+- Agricultors advance work before the food calculation starts.
+- Agricultor-created supply units are added to temporary inventory before food resolution proceeds.
+- Boticarios generate daily alchemical value before the food calculation starts.
+- Artesanos are listed in the daily summary with servant qualification status if applicable.
 
-1. The user opens the resolution result.
-2. The UI shows:
-   - starting reserve,
-   - consumption,
-   - generation,
-   - net change,
-   - ending reserve,
-   - shortage if any,
-   - and the rule sources involved.
-3. The UI highlights major rule sources such as agriculturists, batidores, cooks, and relevant feats.
+### AC-2 Perishable collection
 
-### 8.3 Handling shortage
+- All perishable-supply cargo food is summed before regular supplies are converted.
+- Decimal food values are preserved.
 
-1. The user sees that the reserve is insufficient.
-2. The UI marks the caravan as in shortage for that day.
-3. The UI shows the deficit and the sources that caused it.
-4. The UI must not hide the shortage behind a generic error state.
+### AC-3 Supply conversion
 
-### 8.4 Daily choice flow
+- Regular supplies are only consumed if generated food plus perishable food is insufficient.
+- Each consumed supply unit yields the correct food amount according to cook, servant, and kitchen availability.
+- Cooks are activated in priority order: cook-qualified servant first, then servant-assisted cook, then cook without servant.
 
-1. The user opens the day pass preview.
-2. The UI lists any optional or required choices.
-3. The user selects the desired mode for each choice.
-4. The preview updates to show the new expected result.
-5. The user confirms the day.
+### AC-4 Insufficient food
 
-## 9. API Expectations
+- If food is still below caravan consumption after all available supplies are consumed, the result contains an alert/warning.
 
-The implementation should be structured so the backend can support at least the following use cases:
+### AC-5 Leftover conversion
 
-- fetch the current supply state for a caravan,
-- preview the result of advancing one day,
-- advance the caravan by one day,
-- fetch the resolution record for a previously resolved day,
-- and list recent day resolutions if the UI needs a history view.
+- Positive leftover food is converted into perishable-supply cargo units of 10 food each, plus a final remainder unit if needed.
 
-Suggested HTTP endpoints, if needed:
+### AC-6 Perishable decay
 
-- `GET /api/caravans/{caravanId}/day-cycle/preview`
-- `POST /api/caravans/{caravanId}/day-cycle/advance`
-- `GET /api/caravans/{caravanId}/day-cycle/{resolutionId}`
-- `GET /api/caravans/{caravanId}/day-cycle`
+- Perishable supplies lose 0.5 food during the day-pass storage cycle.
+- Any perishable or regular supply unit with food <= 0 is removed.
 
-The exact endpoint naming can change, but the use cases must remain available.
+### AC-7 Cargo reassignment
 
-## 10. Acceptance Criteria
+- Cargo reassignment prefers Supply Wagons with the greatest free capacity.
+- If none exist, reassignment falls back to the non-supply wagon with the greatest free capacity.
+- If no wagon can accept more cargo, the remaining temporary inventory is reported and discarded.
 
-### Day advancement
+### AC-8 Determinism
 
-- The user can advance the active caravan by exactly one day.
-- The action is atomic and cannot be applied twice by accident.
-- The caravan state is persisted after the action completes.
+- Running the same state through the day-pass algorithm produces the same result every time.
+- Tie-breaking between wagons is deterministic.
 
-### Consumption and generation
+### AC-9 Simulation trace
 
-- The system subtracts daily consumption automatically.
-- The system adds daily production automatically.
-- Batidores, agriculturists, cooks, and relevant feats affect the result according to the rules.
-- Carro Huerto restrictions are respected.
+- The modal shows an ordered simulation of the resolution.
+- Each batidor entry shows name, batidor role, and generated food.
+- Each converted supply entry shows whether a cook and/or portable kitchen was used and the resulting food gained.
+- If leftover food exists, the modal shows the leftover amount.
+- The summary shows how many supply units were generated by agricultors.
+- The summary shows the total alchemical value generated by boticarios.
+- Artesanos appear in the daily summary with servant qualification details.
 
-### Cook and kitchen support
+### AC-10 Confirmation boundary
 
-- Cook efficiency is applied when supplies are spent.
-- Cocina Portátil changes the cook result when present.
-- The resolution breakdown shows what happened.
+- No definitive caravan changes are persisted until the user confirms from the modal.
+- Confirming the modal persists the final state in one transaction.
+- Confirming a stale preview is rejected and requires generating a new preview.
 
-### Shortage handling
+## 13. Edge Cases
 
-- If the caravan does not have enough supplies, the shortage is visible.
-- The result record preserves the deficit.
+1. The caravan has consumption 0.
+2. The caravan has only perishable supplies and no regular supplies.
+3. The caravan has only regular supplies and no perishable supplies.
+4. The caravan has no supplies at all.
+5. Leftover food is exactly a multiple of 10.
+6. Leftover food is between 0 and 10.
+7. A perishable unit reaches exactly 0 after the `0.5` reduction.
+8. More cooks exist than supplies consumed.
+9. More portable kitchens exist than cooks.
+10. More portable kitchens exist than consumed supplies.
+11. No Supply Wagon has free space, but another wagon does.
+12. No wagon has free space for rebuilt cargo.
+13. Two wagons tie for highest available capacity.
+14. A batidor hunts and therefore produces food while still counting as 0 consumption.
+15. An agricultor crosses more than one full work unit because of accumulated progress and servant amplification.
+16. A cook with cook-qualified servant and portable kitchen converts one supply into 25 food.
+17. A boticario with non-qualified servant generates 7.5 po in the summary.
 
-### Traceability
+## 14. Open Questions
 
-- The UI shows the source of each major consumption and generation contribution.
-- The backend returns the canonical values and the breakdown.
+These points need product confirmation before implementation:
 
-### Time-based effects
+1. Should perishable decay happen exactly once per day or twice in the operational flow?  
+   This spec currently follows the user-requested workflow, which effectively applies decay when perishable food is rebuilt into cargo after the day pass.
+2. Should hunter/scout mode be chosen explicitly by the user during day pass, or inferred from the traveler’s current assignment?
+3. Should future rules such as `Autonomía Extrema`, `Ayuno Intermitente`, `Consumo Eficiente`, `Hielo`, and refrigeration improvements be added in this same use case now, or in a follow-up spec increment?
+4. When food is insufficient, should the system only show an alert, or also persist a structured shortage state for later downstream effects?
+5. Should the legacy `CaravanDayResolution` persistence be deleted entirely in this slice, or replaced in-place with a new data contract under the same name?
+6. Should artesano activity remain summary-only in this slice, or should a later increment persist crafting progress explicitly?
 
-- Advancing the day also advances time-based cargo effects such as perishable supplies.
+## 15. Implementation Notes
 
-## 11. Edge Cases
+- Keep the algorithm in the backend application layer as a dedicated use case.
+- Do NOT spread this logic across frontend components.
+- Reuse the current cargo and wagon aggregates as the source of truth.
+- Persist fractional food explicitly for perishable supply units.
+- Treat preview as an in-memory simulation, not as a provisional persisted mutation.
+- Do NOT implement preview by cloning or copying database tables.
+- Prefer replacing the old day-pass types completely over bending the new semantics to fit legacy contracts.
+- Persist agricultor work progress across days as explicit state; do not infer it transiently from the last preview.
+- Model servant amplification with role-specific formulas, not with a single generic post-processing multiplier.
+- Add focused tests for:
+  - batidor consumption exclusion,
+  - agricultor work progression and supply creation,
+  - boticario value summary generation,
+  - artesano summary reporting,
+  - cook conversion,
+  - cook servant priority,
+  - portable kitchen conversion,
+  - leftover-to-perishable conversion,
+  - wagon reassignment priority,
+  - preview non-persistence,
+  - and stale-preview rejection on confirm.
 
-1. No caravan is active when the user presses **Pass Day**.
-2. The caravan has zero supplies at the start of the day.
-3. A batidor is available but the user chooses scouting instead of hunting.
-4. A traveler is marked as agriculturist but is not assigned to a valid wagon.
-5. A sirviente is assigned to a master whose role no longer qualifies.
-6. Multiple cooks are present, but the bonus is limited by the number of full 10-supply blocks available.
-7. The caravan has **Autonomía Extrema** and **Consumo Eficiente** at the same time.
-8. The caravan uses **Ayuno Intermitente** on a day with low reserves.
-9. The user submits the day advance twice because of a network retry.
-10. Perishable supplies and their preservation rules change during the same day advance.
-11. A feat or role becomes inactive between preview and confirmation.
-12. The caravan’s supply reserve is exactly enough for the day and must not be marked as shortage.
+## 16. Related Files
 
-## 12. Risks and Open Questions
-
-1. Should the supply reserve be stored as pure provisions, as cargo units, or as both a reserve plus cargo synchronization?
-2. Should batidor hunting and other daily choices be defaulted automatically, or must the user always confirm them explicitly?
-3. What is the canonical rounding strategy for fractional production modifiers such as 50% bonuses?
-4. Should the day advance preview be read-only, or should it support editing the choices before confirmation?
-5. Should the feature also resolve non-supply time-based effects such as morale duration bonuses, temporary dotes, and rest timers in the same transaction?
-
-## 13. Implementation Notes
-
-- Keep the day resolution logic in the application layer so the backend remains canonical.
-- Model the operation as a dedicated use case rather than embedding it inside statistics or cargo CRUD.
-- Emit a structured resolution record so the UI can explain the result.
-- Reuse the existing caravan, traveler, wagon, feat, cargo, and statistics read models.
-- Add or update architecture boundary tests if the new day-cycle use case introduces new ports or packages.
-- Prefer preview + confirm over a blind one-click mutation because this feature has meaningful trade-offs and optional daily choices.
-
-## 14. Related Source Material
-
-- `docs/Reglas_de_Caravana.md` — daily consumption, agriculturists, batidores, cooks, dotes, wagon and cargo rules
-- `openspec/specs/caravan-instance/spec.md` — active caravan context
-- `openspec/specs/caravan-travelers/spec.md` — traveler roles and assignments
-- `openspec/specs/caravan-wagons/spec.md` — wagon ownership and configuration
-- `openspec/specs/caravan-wagon-improvements/spec.md` — cook-supporting and other wagon modifiers
-- `openspec/specs/caravan-feats/spec.md` — active and inactive feats
-- `openspec/specs/caravan-cargo/spec.md` — supply cargo and perishable goods
-- `openspec/specs/caravan-statistics/spec.md` — derived consumption and statistics breakdown
+- `C:\Users\Alberto\workspace\GestionCaravana\docs\Reglas_de_Caravana.md`
+- `C:\Users\Alberto\workspace\GestionCaravana\openspec\specs\caravan-cargo\spec.md`
+- `C:\Users\Alberto\workspace\GestionCaravana\openspec\specs\caravan-travelers\spec.md`
+- `C:\Users\Alberto\workspace\GestionCaravana\openspec\specs\caravan-wagons\spec.md`

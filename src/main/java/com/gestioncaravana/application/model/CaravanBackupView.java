@@ -133,7 +133,7 @@ public record CaravanBackupView(
       String category,
       int quantity,
       int cargoUnits,
-      Integer currentProvisions,
+      BigDecimal currentProvisions,
       Boolean dayPassed,
       UUID wagonId,
       String origin,

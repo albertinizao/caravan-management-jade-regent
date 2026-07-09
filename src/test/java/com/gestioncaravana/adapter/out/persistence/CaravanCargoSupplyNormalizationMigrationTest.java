@@ -3,6 +3,7 @@ package com.gestioncaravana.adapter.out.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.gestioncaravana.domain.CaravanCargoSourceType;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -37,7 +38,7 @@ class CaravanCargoSupplyNormalizationMigrationTest {
 
   @Configuration(proxyBeanMethods = false)
   @EnableTransactionManagement
-  @EnableJpaRepositories(basePackageClasses = SpringDataCaravanCargoRepository.class)
+  @EnableJpaRepositories(basePackages = "com.gestioncaravana.adapter.out.persistence")
   @Import(CaravanCargoSupplyNormalizationMigration.class)
   static class TestConfiguration {
 
@@ -90,7 +91,7 @@ class CaravanCargoSupplyNormalizationMigrationTest {
     entity.setCategory("Artículos de mercancía");
     entity.setQuantity(3);
     entity.setCargoUnits(1);
-    entity.setCurrentProvisions(23);
+    entity.setCurrentProvisions(BigDecimal.valueOf(23));
     entity.setDayPassed(true);
     entity.setWagonId(wagonId);
     entity.setCreatedAt(createdAt);
@@ -106,10 +107,15 @@ class CaravanCargoSupplyNormalizationMigrationTest {
     assertThat(normalized).allSatisfy(row -> {
       assertThat(row.getQuantity()).isEqualTo(1);
       assertThat(row.getCargoUnits()).isEqualTo(1);
-      assertThat(row.getCurrentProvisions()).isGreaterThan(0);
+      assertThat(row.getCurrentProvisions()).isGreaterThan(BigDecimal.ZERO);
       assertThat(row.getDayPassed()).isTrue();
     });
-    assertThat(normalized).extracting(CaravanCargoJpaEntity::getCurrentProvisions).containsExactlyInAnyOrder(8, 8, 7);
+    assertThat(normalized)
+        .extracting(CaravanCargoJpaEntity::getCurrentProvisions)
+        .containsExactlyInAnyOrder(
+            BigDecimal.valueOf(8),
+            BigDecimal.valueOf(8),
+            BigDecimal.valueOf(7));
     assertThat(normalized).extracting(CaravanCargoJpaEntity::getId).contains(entity.getId());
   }
 }

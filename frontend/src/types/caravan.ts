@@ -70,71 +70,39 @@ export interface CaravanStatistics {
   updatedAt: string;
 }
 
-export interface CaravanDailyChoice {
-  travelerId: string | null;
-  mode: string;
-}
-
-export interface CaravanDailyContribution {
-  effectCode: string;
-  sourceType: string;
-  sourceId: string;
-  sourceName: string;
-  sourceRoleName: string | null;
-  operation: string;
-  quantity: number;
-  quantityUnit: string | null;
-  reason: string;
-  applied: boolean;
-  ignoredReason: string | null;
-}
-
-export interface CaravanSupplyConsumption {
-  remainingFood: number;
+export interface CaravanDayCycleLogEntry {
+  section: string;
+  title: string;
+  details: string[];
+  foodDelta: number;
 }
 
 export interface CaravanDayCyclePreview {
   caravanId: string;
+  previewFingerprint: string;
+  confirmed: boolean;
+  resolutionId: string | null;
+  confirmedAt: string | null;
   dayIndex: number;
-  currentReserve: number;
-  initialProvisionsInConsumption: CaravanSupplyConsumption[];
-  provisionsInConsumption: CaravanSupplyConsumption[];
-  expectedConsumption: number;
-  expectedGeneration: number;
-  expectedNetDelta: number;
-  expectedReserveAfterResolution: number;
-  expectedShortage: number;
-  generatedProvisions: number;
+  currentSupplyUnits: number;
+  currentPerishableFood: number;
+  currentPerishableUnits: number;
+  generatedSuppliesFromAgricultors: number;
+  generatedAlchemyValueFromBoticarios: number;
+  requiredConsumption: number;
+  consumptionCovered: boolean;
   generatedFood: number;
-  consumedProvisions: number;
-  surplusProvisions: number;
+  leftoverFood: number;
+  finalSupplyUnits: number;
+  finalPerishableUnits: number;
+  finalPerishableFood: number;
+  suppliesConsumed: number;
+  simulation: CaravanDayCycleLogEntry[];
   warnings: string[];
-  requiredChoices: CaravanDailyChoice[];
-  contributions: CaravanDailyContribution[];
-  cargoMovementSummary: string;
 }
 
-export interface CaravanDayCycleResult {
-  caravanId: string;
-  idempotencyKey: string;
-  dayIndex: number;
-  currentReserve: number;
-  initialProvisionsInConsumption: CaravanSupplyConsumption[];
-  provisionsInConsumption: CaravanSupplyConsumption[];
-  expectedConsumption: number;
-  expectedGeneration: number;
-  expectedNetDelta: number;
-  expectedReserveAfterResolution: number;
-  expectedShortage: number;
-  generatedProvisions: number;
-  generatedFood: number;
-  consumedProvisions: number;
-  surplusProvisions: number;
-  resolvedAt: string;
-  choices: CaravanDailyChoice[];
-  contributions: CaravanDailyContribution[];
-  warnings: string[];
-  cargoMovementSummary: string;
+export interface CaravanSupplyConsumption {
+  remainingFood: number;
 }
 
 export interface CaravanBackupTravelerContract {

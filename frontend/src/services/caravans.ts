@@ -3,7 +3,6 @@ import type {
   CaravanBackup,
   Caravan,
   CaravanDayCyclePreview,
-  CaravanDayCycleResult,
   CaravanStatistics,
 } from "@/types/caravan";
 
@@ -18,17 +17,6 @@ export interface CreateCaravanPayload {
 
 export interface SelectActiveCaravanPayload {
   caravanId: string;
-}
-
-export interface CaravanDayCycleChoicePayload {
-  travelerId: string;
-  mode: "HUNT" | "EXPLORE" | string;
-}
-
-export interface CaravanDayCyclePayload {
-  idempotencyKey: string;
-  fastingEnabled: boolean;
-  choices: CaravanDayCycleChoicePayload[];
 }
 
 export interface UpdateCaravanDeltaPayload {
@@ -108,22 +96,21 @@ export function updateCaravanDiscontent(id: string, payload: UpdateCaravanDeltaP
   });
 }
 
-export function previewCaravanDayCycle(id: string, payload: Omit<CaravanDayCyclePayload, "idempotencyKey">) {
-  return fetchJson<CaravanDayCyclePreview>(`/caravans/${id}/day-cycle/preview`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export function advanceCaravanDayCycle(id: string, payload: CaravanDayCyclePayload) {
-  return fetchJson<CaravanDayCycleResult>(`/caravans/${id}/day-cycle/advance`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
 export function deleteCaravan(id: string) {
   return fetchJson<void>(`/caravans/${id}`, {
     method: "DELETE",
+  });
+}
+
+export function previewCaravanDayCycle(caravanId: string) {
+  return fetchJson<CaravanDayCyclePreview>(`/caravans/${caravanId}/day-cycle/preview`, {
+    method: "POST",
+  });
+}
+
+export function confirmCaravanDayCycle(caravanId: string, previewFingerprint: string) {
+  return fetchJson<CaravanDayCyclePreview>(`/caravans/${caravanId}/day-cycle/confirm`, {
+    method: "POST",
+    body: JSON.stringify({ previewFingerprint }),
   });
 }

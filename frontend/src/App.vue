@@ -3,7 +3,7 @@
     <header class="topbar">
       <div class="brand">
         <strong>GestionCaravana</strong>
-        <p>Caravana activa, carga y dotes</p>
+        <p>Caravana activa, carga, dotes y calendario</p>
       </div>
 
       <button
@@ -19,6 +19,7 @@
 
       <nav id="primary-navigation" class="nav" :class="{ 'nav--open': isMenuOpen }">
         <RouterLink to="/" @click="isMenuOpen = false">Caravanas</RouterLink>
+        <RouterLink to="/calendar" @click="isMenuOpen = false">Calendario</RouterLink>
         <RouterLink to="/travelers" @click="isMenuOpen = false">Viajeros</RouterLink>
         <RouterLink to="/wagons" @click="isMenuOpen = false">Carros</RouterLink>
         <RouterLink to="/cargo" @click="isMenuOpen = false">Carga</RouterLink>

@@ -1,0 +1,1338 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
+
+import { useToast } from "@/composables/useToast";
+import {
+  confirmCaravanDayCycle,
+  confirmCaravanMultiDayCycle,
+  getActiveCaravan,
+  previewCaravanDayCycle,
+  previewCaravanMultiDayCycle,
+} from "@/services/caravans";
+import { getCalendarDay, getCalendarMonth, setCalendarCurrentDate } from "@/services/calendar";
+import type { Caravan } from "@/types/caravan";
+import type { CaravanDayCyclePreview, CaravanMultiDayCyclePreview } from "@/types/caravan";
+import type { CalendarDay, CalendarMonth, GolarionDate } from "@/types/calendar";
+
+const activeCaravan = ref<Caravan | null>(null);
+const monthView = ref<CalendarMonth | null>(null);
+const selectedDay = ref<CalendarDay | null>(null);
+const loading = ref(true);
+const calendarLoading = ref(false);
+const pendingAction = ref<string | null>(null);
+const error = ref<string | null>(null);
+const manualYear = ref(4712);
+const manualMonth = ref(1);
+const manualDay = ref(1);
+const bulkAdvanceDays = ref(7);
+const dayCycleModalOpen = ref(false);
+const dayCycleLoading = ref(false);
+const dayCycleSubmitting = ref(false);
+const dayCyclePreview = ref<CaravanDayCyclePreview | null>(null);
+const multiDayModalOpen = ref(false);
+const multiDayLoading = ref(false);
+const multiDaySubmitting = ref(false);
+const multiDayRequestedDays = ref(2);
+const multiDayPreview = ref<CaravanMultiDayCyclePreview | null>(null);
+const { showToast } = useToast();
+
+const supportedYears = Array.from({ length: 11 }, (_, index) => 4712 + index);
+const supportedMonths = [
+  { value: 1, label: "Abadio" },
+  { value: 2, label: "Calistril" },
+  { value: 3, label: "Farasto" },
+  { value: 4, label: "Gozran" },
+  { value: 5, label: "Desnio" },
+  { value: 6, label: "Sarenith" },
+  { value: 7, label: "Erasto" },
+  { value: 8, label: "Arodio" },
+  { value: 9, label: "Rova" },
+  { value: 10, label: "Lamashan" },
+  { value: 11, label: "Neth" },
+  { value: 12, label: "Kuthona" },
+];
+
+const manualDayOptions = computed(() => {
+  const month = manualMonth.value;
+  const leapYear = manualYear.value % 8 === 0;
+  const monthLengths: Record<number, number> = {
+    1: 31,
+    2: leapYear ? 29 : 28,
+    3: 31,
+    4: 30,
+    5: 31,
+    6: 30,
+    7: 31,
+    8: 31,
+    9: 30,
+    10: 31,
+    11: 30,
+    12: 31,
+  };
+  const maxDay = monthLengths[month] ?? 31;
+  if (manualDay.value > maxDay) {
+    manualDay.value = maxDay;
+  }
+  return Array.from({ length: maxDay }, (_, index) => index + 1);
+});
+
+const currentDateLabel = computed(() =>
+  monthView.value
+    ? `${monthView.value.currentDate.day} de ${monthView.value.currentDate.monthName} de ${monthView.value.currentDate.year} AR · ${monthView.value.currentDate.dayOfWeek}`
+    : "—",
+);
+
+const selectedDateLabel = computed(() =>
+  selectedDay.value
+    ? `${selectedDay.value.date.day} de ${selectedDay.value.date.monthName} de ${selectedDay.value.date.year} AR`
+    : "Selecciona un día",
+);
+
+const visibleMonthLabel = computed(() =>
+  monthView.value
+    ? `${monthView.value.displayMonthName} ${monthView.value.displayYear} AR`
+    : "Calendario",
+);
+
+function isPending(action: string) {
+  return pendingAction.value === action;
+}
+
+function formatDecimal(value: number) {
+  return Number.isInteger(value) ? `${value}` : value.toFixed(1).replace(/\.0$/, "");
+}
+
+async function loadCalendarMonth(year: number, month: number, selected?: GolarionDate) {
+  if (!activeCaravan.value) {
+    return;
+  }
+  calendarLoading.value = true;
+  error.value = null;
+  try {
+    const monthResult = await getCalendarMonth(activeCaravan.value.id, year, month);
+    monthView.value = monthResult;
+
+    const targetDate = selected ?? monthResult.currentDate;
+    manualYear.value = monthResult.currentDate.year;
+    manualMonth.value = monthResult.currentDate.month;
+    manualDay.value = monthResult.currentDate.day;
+    selectedDay.value = await getCalendarDay(activeCaravan.value.id, targetDate.year, targetDate.month, targetDate.day);
+  } catch (caughtError) {
+    error.value = caughtError instanceof Error ? caughtError.message : "No se pudo cargar el calendario.";
+  } finally {
+    calendarLoading.value = false;
+  }
+}
+
+async function loadActiveCaravan() {
+  loading.value = true;
+  error.value = null;
+  try {
+    const response = await getActiveCaravan();
+    activeCaravan.value = response.caravan;
+    if (activeCaravan.value) {
+      const bootstrapMonth = await getCalendarMonth(activeCaravan.value.id, 4712, 1);
+      await loadCalendarMonth(
+        bootstrapMonth.currentDate.year,
+        bootstrapMonth.currentDate.month,
+        bootstrapMonth.currentDate,
+      );
+    } else {
+      monthView.value = null;
+      selectedDay.value = null;
+    }
+  } catch (caughtError) {
+    error.value = caughtError instanceof Error ? caughtError.message : "No se pudo cargar el calendario.";
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function selectDay(day: CalendarDay) {
+  if (!activeCaravan.value) {
+    return;
+  }
+  pendingAction.value = "select-day";
+  try {
+    selectedDay.value = await getCalendarDay(activeCaravan.value.id, day.date.year, day.date.month, day.date.day);
+  } catch (caughtError) {
+    showToast(caughtError instanceof Error ? caughtError.message : "No se pudo cargar el detalle del día.", "error");
+  } finally {
+    pendingAction.value = null;
+  }
+}
+
+async function jumpToCampaignToday() {
+  if (!monthView.value) {
+    return;
+  }
+  await loadCalendarMonth(
+    monthView.value.currentDate.year,
+    monthView.value.currentDate.month,
+    monthView.value.currentDate,
+  );
+}
+
+async function changeVisibleMonth(delta: number) {
+  if (!monthView.value) {
+    return;
+  }
+  let year = monthView.value.displayYear;
+  let month = monthView.value.displayMonth + delta;
+
+  if (month < 1) {
+    month = 12;
+    year -= 1;
+  } else if (month > 12) {
+    month = 1;
+    year += 1;
+  }
+
+  if (year < 4712 || year > 4722) {
+    return;
+  }
+
+  await loadCalendarMonth(year, month, { year, month, day: 1, monthName: "", dayOfWeek: "", dayOfWeekAbbreviation: "" });
+}
+
+async function refreshAfterDayCycle() {
+  await loadActiveCaravan();
+}
+
+async function openDayCycleModal() {
+  if (!activeCaravan.value) {
+    return;
+  }
+
+  dayCycleModalOpen.value = true;
+  dayCycleLoading.value = true;
+  dayCyclePreview.value = null;
+  error.value = null;
+
+  try {
+    dayCyclePreview.value = await previewCaravanDayCycle(activeCaravan.value.id);
+  } catch (caughtError) {
+    error.value = caughtError instanceof Error ? caughtError.message : "No se pudo generar la previsualización del día";
+    dayCycleModalOpen.value = false;
+  } finally {
+    dayCycleLoading.value = false;
+  }
+}
+
+function closeDayCycleModal() {
+  if (dayCycleSubmitting.value) {
+    return;
+  }
+
+  dayCycleModalOpen.value = false;
+  dayCyclePreview.value = null;
+}
+
+async function confirmDayCycle() {
+  if (!activeCaravan.value || !dayCyclePreview.value) {
+    return;
+  }
+
+  dayCycleSubmitting.value = true;
+  pendingAction.value = "advance-1";
+  error.value = null;
+
+  try {
+    await confirmCaravanDayCycle(activeCaravan.value.id, dayCyclePreview.value.previewFingerprint);
+    await refreshAfterDayCycle();
+    closeDayCycleModal();
+    showToast(`Día pasado en ${activeCaravan.value.name}.`, "success");
+  } catch (caughtError) {
+    error.value = caughtError instanceof Error ? caughtError.message : "No se pudo confirmar el paso del día";
+  } finally {
+    dayCycleSubmitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+function openMultiDayModal() {
+  if (!activeCaravan.value) {
+    return;
+  }
+
+  multiDayRequestedDays.value = bulkAdvanceDays.value;
+  multiDayPreview.value = null;
+  multiDayModalOpen.value = true;
+  error.value = null;
+}
+
+function closeMultiDayModal() {
+  if (multiDaySubmitting.value) {
+    return;
+  }
+
+  multiDayModalOpen.value = false;
+  multiDayPreview.value = null;
+}
+
+async function previewMultipleDays() {
+  if (!activeCaravan.value) {
+    return;
+  }
+
+  const days = Number(multiDayRequestedDays.value);
+  if (!Number.isInteger(days) || days < 1 || days > 30) {
+    error.value = "Debes indicar un número entero de días entre 1 y 30.";
+    return;
+  }
+
+  multiDayLoading.value = true;
+  error.value = null;
+
+  try {
+    multiDayPreview.value = await previewCaravanMultiDayCycle(activeCaravan.value.id, days);
+  } catch (caughtError) {
+    error.value = caughtError instanceof Error ? caughtError.message : "No se pudo generar la simulación de varios días";
+  } finally {
+    multiDayLoading.value = false;
+  }
+}
+
+async function confirmMultipleDays() {
+  if (!activeCaravan.value || !multiDayPreview.value) {
+    return;
+  }
+
+  multiDaySubmitting.value = true;
+  pendingAction.value = "advance-bulk";
+  error.value = null;
+
+  try {
+    const days = multiDayPreview.value.requestedDays;
+    await confirmCaravanMultiDayCycle(
+      activeCaravan.value.id,
+      days,
+      multiDayPreview.value.basePreviewFingerprint,
+    );
+    await refreshAfterDayCycle();
+    closeMultiDayModal();
+    showToast(`${days} días pasados en ${activeCaravan.value.name}.`, "success");
+  } catch (caughtError) {
+    error.value = caughtError instanceof Error ? caughtError.message : "No se pudo confirmar el paso de varios días";
+  } finally {
+    multiDaySubmitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+async function applyManualDate() {
+  if (!activeCaravan.value) {
+    return;
+  }
+  pendingAction.value = "manual-date";
+  try {
+    const updated = await setCalendarCurrentDate(activeCaravan.value.id, manualYear.value, manualMonth.value, manualDay.value);
+    selectedDay.value = updated;
+    await loadCalendarMonth(updated.date.year, updated.date.month, updated.date);
+    showToast("La fecha actual de campaña se ha actualizado.", "success");
+  } catch (caughtError) {
+    showToast(caughtError instanceof Error ? caughtError.message : "No se pudo actualizar la fecha.", "error");
+  } finally {
+    pendingAction.value = null;
+  }
+}
+
+onMounted(loadActiveCaravan);
+</script>
+
+<template>
+  <main class="page">
+    <section class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Cronología de campaña</p>
+          <h1>Calendario</h1>
+          <p class="subtitle">
+            Navega por Golarion, consulta los eventos del documento canónico y controla el día actual de la caravana.
+          </p>
+        </div>
+      </header>
+
+      <p v-if="error" class="error">{{ error }}</p>
+
+      <section v-if="loading" class="card">
+        <p class="muted">Cargando calendario…</p>
+      </section>
+
+      <section v-else-if="!activeCaravan" class="card empty-state">
+        <h2>No hay caravana activa</h2>
+        <p class="muted">
+          Selecciona una caravana desde la vista principal. El calendario está ligado a la caravana activa y usa su progreso real.
+        </p>
+      </section>
+
+      <template v-else>
+        <section class="card current-day-card">
+          <div>
+            <p class="eyebrow">Caravana activa</p>
+            <h2>{{ activeCaravan.name }}</h2>
+            <p class="subtitle">{{ currentDateLabel }}</p>
+          </div>
+
+          <div class="current-day-actions">
+            <button class="secondary-button" type="button" @click="jumpToCampaignToday" :disabled="calendarLoading">
+              Hoy de campaña
+            </button>
+            <button class="primary-button" type="button" @click="openDayCycleModal" :disabled="dayCycleLoading || dayCycleSubmitting">
+              {{ dayCycleLoading || dayCycleSubmitting ? "Abriendo…" : "+1 día" }}
+            </button>
+            <button class="secondary-button" type="button" @click="openMultiDayModal" :disabled="multiDayLoading || multiDaySubmitting">
+              {{ multiDayLoading || multiDaySubmitting ? "Abriendo…" : "+N días" }}
+            </button>
+          </div>
+        </section>
+
+        <section class="calendar-layout">
+          <article class="card calendar-card">
+            <div class="calendar-toolbar">
+              <button class="ghost-button" type="button" @click="changeVisibleMonth(-1)" :disabled="calendarLoading || monthView?.displayYear === 4712 && monthView.displayMonth === 1">
+                ←
+              </button>
+              <div>
+                <p class="eyebrow">Vista mensual</p>
+                <h2>{{ visibleMonthLabel }}</h2>
+              </div>
+              <button class="ghost-button" type="button" @click="changeVisibleMonth(1)" :disabled="calendarLoading || monthView?.displayYear === 4722 && monthView.displayMonth === 12">
+                →
+              </button>
+            </div>
+
+            <div v-if="calendarLoading" class="calendar-loading">
+              <p class="muted">Cargando mes…</p>
+            </div>
+
+            <div v-else-if="monthView" class="calendar-grid">
+              <div v-for="weekday in monthView.weekDayHeaders" :key="weekday" class="weekday">{{ weekday }}</div>
+
+              <button
+                v-for="day in monthView.days"
+                :key="`${day.date.year}-${day.date.month}-${day.date.day}`"
+                type="button"
+                class="day-cell"
+                :class="{
+                  'day-cell--muted': !day.isInCurrentMonth,
+                  'day-cell--current': day.isCurrentDay,
+                  'day-cell--selected': selectedDay?.date.year === day.date.year && selectedDay?.date.month === day.date.month && selectedDay?.date.day === day.date.day,
+                }"
+                @click="selectDay(day)"
+              >
+                <div class="day-cell__header">
+                  <span>{{ day.date.day }}</span>
+                  <small>{{ day.date.dayOfWeekAbbreviation }}</small>
+                </div>
+                <ul class="day-cell__events">
+                  <li v-for="event in day.canonicalEvents.slice(0, 3)" :key="event.name">
+                    {{ event.name }}
+                  </li>
+                  <li v-if="day.canonicalEvents.length > 3" class="day-cell__more">+{{ day.canonicalEvents.length - 3 }} más</li>
+                </ul>
+              </button>
+            </div>
+          </article>
+
+          <div class="sidebar-column">
+            <article class="card controls-card">
+              <div class="section-header">
+                <div>
+                  <p class="eyebrow">Control temporal</p>
+                  <h2>Actualizar fecha actual</h2>
+                </div>
+              </div>
+
+              <div class="control-grid">
+                <label>
+                  <span>Año</span>
+                  <select v-model.number="manualYear">
+                    <option v-for="year in supportedYears" :key="year" :value="year">{{ year }} AR</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Mes</span>
+                  <select v-model.number="manualMonth">
+                    <option v-for="month in supportedMonths" :key="month.value" :value="month.value">{{ month.label }}</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Día</span>
+                  <select v-model.number="manualDay">
+                    <option v-for="day in manualDayOptions" :key="day" :value="day">{{ day }}</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="control-actions">
+                <button class="primary-button" type="button" @click="applyManualDate" :disabled="isPending('manual-date')">
+                  {{ isPending("manual-date") ? "Guardando…" : "Fijar fecha actual" }}
+                </button>
+              </div>
+
+              <div class="bulk-advance">
+                <label>
+                  <span>Avance rápido</span>
+                  <input v-model.number="bulkAdvanceDays" type="number" min="1" max="365" />
+                </label>
+                <button class="secondary-button" type="button" @click="openMultiDayModal" :disabled="multiDayLoading || multiDaySubmitting || bulkAdvanceDays < 1">
+                  {{ multiDayLoading || multiDaySubmitting ? "Abriendo…" : `+${bulkAdvanceDays} días` }}
+                </button>
+              </div>
+            </article>
+
+            <article class="card detail-card">
+              <div class="section-header">
+                <div>
+                  <p class="eyebrow">Detalle diario</p>
+                  <h2>{{ selectedDateLabel }}</h2>
+                </div>
+              </div>
+
+              <template v-if="selectedDay">
+                <section class="detail-section">
+                  <h3>Eventos canónicos</h3>
+                  <ul v-if="selectedDay.canonicalEvents.length > 0" class="event-list">
+                    <li v-for="event in selectedDay.canonicalEvents" :key="`${event.category}-${event.name}-${event.scope}`" class="event-item">
+                      <div class="event-item__title">
+                        <strong>{{ event.name }}</strong>
+                        <span v-if="event.category === 'BIRTHDAY'" class="pill">Cumpleaños</span>
+                        <span v-else-if="event.category === 'ASTRONOMICAL'" class="pill">Astronómico</span>
+                      </div>
+                      <p v-if="event.scope" class="muted">{{ event.scope }}</p>
+                      <p v-if="event.description">{{ event.description }}</p>
+                    </li>
+                  </ul>
+                  <p v-else class="muted">No hay eventos canónicos para este día.</p>
+                </section>
+
+                <section class="detail-section placeholder-block">
+                  <h3>Clima</h3>
+                  <p class="muted">
+                    No disponible todavía. Este hueco queda reservado para precipitación, viento y temperatura por tramos del día.
+                  </p>
+                  <ul class="placeholder-list">
+                    <li>Medianoche → amanecer</li>
+                    <li>Amanecer → mediodía</li>
+                    <li>Mediodía → atardecer</li>
+                    <li>Atardecer → medianoche</li>
+                  </ul>
+                </section>
+
+                <section class="detail-section placeholder-block">
+                  <h3>Eventos personalizados</h3>
+                  <p class="muted">Sin eventos personalizados. La estructura ya queda reservada para incorporarlos después.</p>
+                </section>
+              </template>
+
+              <p v-else class="muted">Selecciona un día del calendario para ver el detalle.</p>
+            </article>
+          </div>
+        </section>
+      </template>
+
+      <div v-if="dayCycleModalOpen" class="modal-backdrop" @click.self="closeDayCycleModal">
+        <div class="modal modal-cycle">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">Ciclo diario</p>
+              <h2>Pasar el día</h2>
+            </div>
+            <button class="ghost-button" type="button" :disabled="dayCycleSubmitting" @click="closeDayCycleModal">
+              Cerrar
+            </button>
+          </div>
+
+          <div v-if="dayCycleLoading" class="muted">Generando simulación…</div>
+
+          <template v-else-if="dayCyclePreview">
+            <section class="day-cycle-summary" :class="{ danger: !dayCyclePreview.consumptionCovered }">
+              <div class="day-cycle-summary__copy">
+                <p class="eyebrow">Resultado de la jornada</p>
+                <h3>{{ dayCyclePreview.consumptionCovered ? "Consumo cubierto" : "Consumo no cubierto" }}</h3>
+                <p class="day-cycle-summary__text">
+                  La caravana necesita {{ formatDecimal(dayCyclePreview.requiredConsumption) }} de comida y ha
+                  generado {{ formatDecimal(dayCyclePreview.generatedFood) }}.
+                </p>
+                <p class="day-cycle-summary__text day-cycle-summary__text--subtle">
+                  Total generado = comida de batidores + comida ya contenida en perecederos + comida de cocineros.
+                </p>
+              </div>
+
+              <div class="day-cycle-summary__chips">
+                <span class="day-cycle-chip">{{ dayCyclePreview.consumptionCovered ? "OK" : "ALERTA" }}</span>
+                <span class="day-cycle-chip">Sobrante {{ formatDecimal(dayCyclePreview.leftoverFood) }}</span>
+                <span class="day-cycle-chip">Suministros usados {{ dayCyclePreview.suppliesConsumed }}</span>
+              </div>
+            </section>
+
+            <section class="day-cycle-layout">
+              <article class="day-cycle-panel">
+                <header class="day-cycle-panel__header">
+                  <div>
+                    <p class="eyebrow">Antes del cálculo</p>
+                    <h4>Inventario inicial</h4>
+                  </div>
+                </header>
+                <dl class="day-cycle-metrics">
+                  <div>
+                    <dt>Suministros</dt>
+                    <dd>{{ dayCyclePreview.currentSupplyUnits }}</dd>
+                  </div>
+                  <div>
+                    <dt>Perecederos</dt>
+                    <dd>{{ dayCyclePreview.currentPerishableUnits }}</dd>
+                  </div>
+                  <div>
+                    <dt>Comida perecedera</dt>
+                    <dd>{{ formatDecimal(dayCyclePreview.currentPerishableFood) }}</dd>
+                  </div>
+                </dl>
+              </article>
+
+              <article class="day-cycle-panel">
+                <header class="day-cycle-panel__header">
+                  <div>
+                    <p class="eyebrow">Después del cálculo</p>
+                    <h4>Inventario final</h4>
+                  </div>
+                </header>
+                <dl class="day-cycle-metrics">
+                  <div>
+                    <dt>Suministros</dt>
+                    <dd>{{ dayCyclePreview.finalSupplyUnits }}</dd>
+                  </div>
+                  <div>
+                    <dt>Perecederos</dt>
+                    <dd>{{ dayCyclePreview.finalPerishableUnits }}</dd>
+                  </div>
+                  <div>
+                    <dt>Comida perecedera</dt>
+                    <dd>{{ formatDecimal(dayCyclePreview.finalPerishableFood) }}</dd>
+                  </div>
+                </dl>
+              </article>
+
+              <article class="day-cycle-panel">
+                <header class="day-cycle-panel__header">
+                  <div>
+                    <p class="eyebrow">Producción previa</p>
+                    <h4>Recursos generados</h4>
+                  </div>
+                </header>
+                <dl class="day-cycle-metrics">
+                  <div>
+                    <dt>Agricultores</dt>
+                    <dd>{{ dayCyclePreview.generatedSuppliesFromAgricultors }}</dd>
+                  </div>
+                  <div>
+                    <dt>Boticarios</dt>
+                    <dd>{{ formatDecimal(dayCyclePreview.generatedAlchemyValueFromBoticarios) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Comida total</dt>
+                    <dd>{{ formatDecimal(dayCyclePreview.generatedFood) }}</dd>
+                  </div>
+                </dl>
+              </article>
+            </section>
+
+            <section v-if="dayCyclePreview.warnings.length" class="warning-banner danger">
+              <strong>Avisos</strong>
+              <ul class="simple-list">
+                <li v-for="warning in dayCyclePreview.warnings" :key="warning">{{ warning }}</li>
+              </ul>
+            </section>
+
+            <div class="modal-actions">
+              <button class="secondary-button" type="button" :disabled="dayCycleSubmitting" @click="closeDayCycleModal">
+                Cancelar
+              </button>
+              <button class="primary-button" type="button" :disabled="dayCycleSubmitting" @click="confirmDayCycle">
+                <span class="button-with-spinner">
+                  <span v-if="dayCycleSubmitting" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ dayCycleSubmitting ? "Confirmando…" : "Confirmar paso del día" }}</span>
+                </span>
+              </button>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div v-if="multiDayModalOpen" class="modal-backdrop" @click.self="closeMultiDayModal">
+        <div class="modal modal-cycle">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">Ciclo diario</p>
+              <h2>Pasar varios días</h2>
+            </div>
+            <button class="ghost-button" type="button" :disabled="multiDaySubmitting" @click="closeMultiDayModal">
+              Cerrar
+            </button>
+          </div>
+
+          <template v-if="!multiDayPreview">
+            <section class="multi-day-form">
+              <label class="field">
+                <span>Días a simular</span>
+                <input v-model.number="multiDayRequestedDays" type="number" min="1" max="30" step="1" />
+              </label>
+              <p class="muted">La simulación encadena cada jornada sobre el resultado de la anterior.</p>
+            </section>
+
+            <div class="modal-actions">
+              <button class="secondary-button" type="button" :disabled="multiDayLoading || multiDaySubmitting" @click="closeMultiDayModal">
+                Cancelar
+              </button>
+              <button class="primary-button" type="button" :disabled="multiDayLoading || multiDaySubmitting" @click="previewMultipleDays">
+                <span class="button-with-spinner">
+                  <span v-if="multiDayLoading" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ multiDayLoading ? "Simulando…" : "Simular varios días" }}</span>
+                </span>
+              </button>
+            </div>
+          </template>
+
+          <template v-else>
+            <section class="day-cycle-summary" :class="{ danger: multiDayPreview.daysWithUncoveredConsumption > 0 }">
+              <div class="day-cycle-summary__copy">
+                <p class="eyebrow">Resultado acumulado</p>
+                <h3>
+                  {{ multiDayPreview.daysWithUncoveredConsumption === 0 ? "Simulación completa" : "Hay días con consumo no cubierto" }}
+                </h3>
+                <p class="day-cycle-summary__text">
+                  Del día {{ multiDayPreview.startDayIndex }} al {{ multiDayPreview.endDayIndex }},
+                  la caravana necesita {{ formatDecimal(multiDayPreview.totalRequiredConsumption) }} de comida
+                  y genera {{ formatDecimal(multiDayPreview.totalGeneratedFood) }}.
+                </p>
+              </div>
+
+              <div class="day-cycle-summary__chips">
+                <span class="day-cycle-chip">Días {{ multiDayPreview.requestedDays }}</span>
+                <span class="day-cycle-chip">Suministros usados {{ multiDayPreview.totalSuppliesConsumed }}</span>
+                <span class="day-cycle-chip">Alertas {{ multiDayPreview.daysWithUncoveredConsumption }}</span>
+              </div>
+            </section>
+
+            <section class="day-cycle-layout">
+              <article class="day-cycle-panel">
+                <header class="day-cycle-panel__header">
+                  <div>
+                    <p class="eyebrow">Producción total</p>
+                    <h4>Recursos acumulados</h4>
+                  </div>
+                </header>
+                <dl class="day-cycle-metrics">
+                  <div>
+                    <dt>Agricultores</dt>
+                    <dd>{{ multiDayPreview.totalGeneratedSuppliesFromAgricultors }}</dd>
+                  </div>
+                  <div>
+                    <dt>Boticarios</dt>
+                    <dd>{{ formatDecimal(multiDayPreview.totalGeneratedAlchemyValueFromBoticarios) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Comida total</dt>
+                    <dd>{{ formatDecimal(multiDayPreview.totalGeneratedFood) }}</dd>
+                  </div>
+                </dl>
+              </article>
+
+              <article class="day-cycle-panel">
+                <header class="day-cycle-panel__header">
+                  <div>
+                    <p class="eyebrow">Estado final</p>
+                    <h4>Inventario</h4>
+                  </div>
+                </header>
+                <dl class="day-cycle-metrics">
+                  <div>
+                    <dt>Suministros</dt>
+                    <dd>{{ multiDayPreview.finalSupplyUnits }}</dd>
+                  </div>
+                  <div>
+                    <dt>Perecederos</dt>
+                    <dd>{{ multiDayPreview.finalPerishableUnits }}</dd>
+                  </div>
+                  <div>
+                    <dt>Comida perecedera</dt>
+                    <dd>{{ formatDecimal(multiDayPreview.finalPerishableFood) }}</dd>
+                  </div>
+                </dl>
+              </article>
+            </section>
+
+            <section v-if="multiDayPreview.warnings.length" class="warning-banner danger">
+              <strong>Avisos</strong>
+              <ul class="simple-list">
+                <li v-for="warning in multiDayPreview.warnings" :key="warning">{{ warning }}</li>
+              </ul>
+            </section>
+
+            <div class="modal-actions">
+              <button class="secondary-button" type="button" :disabled="multiDaySubmitting" @click="closeMultiDayModal">
+                Cancelar
+              </button>
+              <button class="primary-button" type="button" :disabled="multiDaySubmitting" @click="confirmMultipleDays">
+                <span class="button-with-spinner">
+                  <span v-if="multiDaySubmitting" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ multiDaySubmitting ? "Confirmando…" : "Aceptar pasar esos días" }}</span>
+                </span>
+              </button>
+            </div>
+          </template>
+        </div>
+      </div>
+    </section>
+  </main>
+</template>
+
+<style scoped>
+.page {
+  min-height: 100vh;
+  padding: 2rem;
+}
+
+.shell {
+  width: min(1380px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 1.25rem;
+}
+
+.hero,
+.section-header,
+.calendar-toolbar,
+.current-day-card,
+.current-day-actions,
+.control-actions,
+.bulk-advance {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.eyebrow {
+  margin: 0 0 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+.subtitle,
+.muted {
+  color: #64748b;
+}
+
+.card {
+  padding: 1.25rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 1rem;
+  background: white;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+.error {
+  padding: 0.85rem 1rem;
+  border-radius: 0.85rem;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.empty-state {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.primary-button,
+.secondary-button,
+.ghost-button,
+.day-cell {
+  border-radius: 0.85rem;
+  font: inherit;
+}
+
+.primary-button,
+.secondary-button,
+.ghost-button {
+  padding: 0.75rem 0.95rem;
+  border: 1px solid #cbd5e1;
+  cursor: pointer;
+}
+
+.primary-button {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: white;
+}
+
+.secondary-button,
+.ghost-button {
+  background: white;
+}
+
+.button-with-spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.button-spinner {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: spin 0.7s linear infinite;
+}
+
+.current-day-card {
+  background:
+    linear-gradient(180deg, rgba(239, 246, 255, 0.94), rgba(255, 255, 255, 0.98)),
+    radial-gradient(circle at top right, rgba(29, 78, 216, 0.18), transparent 35%);
+  border-color: rgba(37, 99, 235, 0.2);
+}
+
+.calendar-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.sidebar-column {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.controls-card,
+.detail-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.control-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+select,
+input {
+  width: 100%;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.75rem;
+  font: inherit;
+}
+
+.bulk-advance {
+  align-items: end;
+}
+
+.bulk-advance label {
+  flex: 1;
+}
+
+.calendar-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.calendar-loading {
+  min-height: 22rem;
+  display: grid;
+  place-items: center;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.weekday {
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-bottom: 0.25rem;
+}
+
+.day-cell {
+  min-height: 8.5rem;
+  padding: 0.75rem;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  text-align: left;
+  display: grid;
+  gap: 0.6rem;
+  align-content: start;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.day-cell:hover,
+.day-cell:focus-visible {
+  border-color: #93c5fd;
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.12);
+  transform: translateY(-1px);
+}
+
+.day-cell--muted {
+  background: #f8fafc;
+  color: #94a3b8;
+}
+
+.day-cell--current {
+  border-color: #2563eb;
+  background:
+    linear-gradient(180deg, rgba(239, 246, 255, 0.95), rgba(255, 255, 255, 1)),
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.14), transparent 35%);
+}
+
+.day-cell--selected {
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.16);
+}
+
+.day-cell__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: baseline;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.day-cell__events {
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.25rem;
+  color: #334155;
+  font-size: 0.86rem;
+}
+
+.day-cell__more {
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.detail-section {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.event-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.event-item {
+  padding: 0.9rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.9rem;
+  display: grid;
+  gap: 0.35rem;
+  background: #f8fafc;
+}
+
+.event-item__title {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.pill {
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.placeholder-block {
+  padding-top: 0.25rem;
+  border-top: 1px dashed #cbd5e1;
+}
+
+.placeholder-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #475569;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  z-index: 30;
+}
+
+.modal {
+  width: min(1000px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  background: white;
+  border-radius: 1.2rem;
+  padding: 1.25rem;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.25);
+  display: grid;
+  gap: 1rem;
+}
+
+.modal-cycle {
+  width: min(980px, 100%);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.day-cycle-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 1rem 1.1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  background:
+    linear-gradient(180deg, rgba(239, 246, 255, 0.95), rgba(255, 255, 255, 0.92)),
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.14), transparent 35%);
+}
+
+.day-cycle-summary.danger {
+  border-color: rgba(220, 38, 38, 0.22);
+  background:
+    linear-gradient(180deg, rgba(254, 242, 242, 0.98), rgba(255, 255, 255, 0.94)),
+    radial-gradient(circle at top right, rgba(220, 38, 38, 0.12), transparent 35%);
+}
+
+.day-cycle-summary__copy {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.day-cycle-summary h3,
+.day-cycle-panel__header h4 {
+  margin: 0;
+  color: #0f172a;
+}
+
+.day-cycle-summary h3 {
+  font-size: 1.35rem;
+  line-height: 1.1;
+}
+
+.day-cycle-summary__text {
+  margin: 0;
+  color: #334155;
+  max-width: 56rem;
+}
+
+.day-cycle-summary__text--subtle {
+  color: #64748b;
+  font-size: 0.92rem;
+}
+
+.day-cycle-summary__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.day-cycle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.day-cycle-layout {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.day-cycle-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: #fff;
+  position: relative;
+  overflow: hidden;
+}
+
+.day-cycle-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0.35rem;
+  background: #cbd5e1;
+}
+
+.day-cycle-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.day-cycle-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.day-cycle-metrics div {
+  padding: 0.75rem;
+  border-radius: 0.85rem;
+  background: #f8fafc;
+}
+
+.day-cycle-metrics dt {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+
+.day-cycle-metrics dd {
+  margin: 0.25rem 0 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.multi-day-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.field {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.field input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.9rem;
+  padding: 0.8rem 0.9rem;
+  font: inherit;
+}
+
+.warning-banner {
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 12px;
+}
+
+.warning-banner.danger {
+  border-color: rgba(220, 38, 38, 0.45);
+  background: rgba(254, 226, 226, 0.9);
+}
+
+.simple-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1200px) {
+  .calendar-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .page {
+    padding: 1rem;
+  }
+
+  .hero,
+  .section-header,
+  .calendar-toolbar,
+  .current-day-card,
+  .current-day-actions,
+  .bulk-advance {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .control-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .calendar-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .weekday {
+    display: none;
+  }
+
+  .day-cycle-layout,
+  .day-cycle-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .day-cycle-summary,
+  .modal-header,
+  .day-cycle-summary__chips {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+</style>

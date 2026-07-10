@@ -109,6 +109,7 @@ const automaticDerivedStats = computed(() => ({
 const visibleContributions = computed(() =>
   caravanStatistics.value?.contributions.filter((item) => !hiddenContributionStats.has(item.statCode)) ?? [],
 );
+const dayCycleTimelineTab = ref<string>("agricultors");
 
 interface DayCycleTimelineCard {
   key: string;
@@ -156,7 +157,7 @@ const dayCycleTimelineSections = computed<DayCycleTimelineSection[]>(() => {
       isSummary: entry.section.endsWith("summary"),
     } satisfies DayCycleTimelineCard;
 
-    const bucketKey = sectionBucketKey(entry.section);
+    const bucketKey = sectionBucketKey(entry.section, entry.title, entry.details);
     const current = sections.get(bucketKey) ?? [];
     current.push(card);
     sections.set(bucketKey, current);
@@ -170,6 +171,25 @@ const dayCycleTimelineSections = computed<DayCycleTimelineSection[]>(() => {
       : cards,
   }));
 });
+
+const dayCycleTimelineTabs = computed(() =>
+  dayCycleTimelineSections.value.map((section) => ({
+    key: section.key,
+    label: dayCycleTimelineTabLabel(section.key),
+  })),
+);
+
+const activeDayCycleTimelineTab = computed(() => {
+  const tabs = dayCycleTimelineTabs.value;
+  if (tabs.length === 0) {
+    return "";
+  }
+  return tabs.some((tab) => tab.key === dayCycleTimelineTab.value) ? dayCycleTimelineTab.value : tabs[0].key;
+});
+
+const visibleDayCycleTimelineSections = computed(() =>
+  dayCycleTimelineSections.value.filter((section) => section.key === activeDayCycleTimelineTab.value),
+);
 
 function percentageOf(value: number, max: number) {
   if (max <= 0) {
@@ -294,6 +314,8 @@ function dayCycleGroupTitle(key: string) {
   switch (key) {
     case "agricultors":
       return "Agricultores";
+    case "preparacion":
+      return "Preparación";
     case "batidores":
       return "Batidores";
     case "cocineros":
@@ -311,10 +333,33 @@ function dayCycleGroupTitle(key: string) {
   }
 }
 
+function dayCycleTimelineTabLabel(key: string) {
+  switch (key) {
+    case "agricultors":
+      return "Agricultores";
+    case "preparacion":
+      return "Preparación";
+    case "batidores":
+      return "Batidores";
+    case "cocineros":
+      return "Cocineros";
+    case "consumo":
+      return "Comida total";
+    case "sobrante":
+      return "Sobrante";
+    case "reasignacion":
+      return "Reasignación";
+    default:
+      return "Simulación";
+  }
+}
+
 function dayCycleGroupHint(key: string) {
   switch (key) {
     case "agricultors":
       return "Primero se resuelve la producción individual y después el resumen general.";
+    case "preparacion":
+      return "Aquí se agrupan boticarios y artesanos.";
     case "batidores":
       return "Se muestra la comida generada por cada batidor.";
     case "cocineros":
@@ -332,11 +377,23 @@ function dayCycleGroupHint(key: string) {
   }
 }
 
-function sectionBucketKey(section: string) {
+function sectionBucketKey(section: string, title: string, details: string[]) {
+  const lowerTitle = title.toLowerCase();
+  const lowerDetails = details.join(" ").toLowerCase();
+
   switch (section) {
     case "pre-food":
     case "pre-food-summary":
-      return "agricultors";
+      if (lowerTitle.includes("agricultor") || lowerDetails.includes("actúa como agricultor")) {
+        return "agricultors";
+      }
+      if (lowerTitle.includes("boticario") || lowerDetails.includes("actúa como boticario")) {
+        return "preparacion";
+      }
+      if (lowerTitle.includes("artesano") || lowerDetails.includes("actúa como artesano")) {
+        return "preparacion";
+      }
+      return "preparacion";
     case "batidor":
     case "batidor-summary":
       return "batidores";
@@ -437,6 +494,7 @@ async function openDayCycleModal() {
     return;
   }
 
+  dayCycleTimelineTab.value = "agricultors";
   dayCycleModalOpen.value = true;
   dayCycleLoading.value = true;
   dayCyclePreview.value = null;
@@ -1343,9 +1401,25 @@ onMounted(refresh);
                 <p class="muted">Agrupamos cada bloque para que el flujo se lea de un vistazo.</p>
               </header>
 
+              <div class="day-cycle-tabs" role="tablist" aria-label="Fases de la simulación">
+                <button
+                  v-for="tab in dayCycleTimelineTabs"
+                  :key="tab.key"
+                  type="button"
+                  class="day-cycle-tab"
+                  :class="{ active: activeDayCycleTimelineTab === tab.key }"
+                  :aria-selected="activeDayCycleTimelineTab === tab.key"
+                  :tabindex="activeDayCycleTimelineTab === tab.key ? 0 : -1"
+                  role="tab"
+                  @click="dayCycleTimelineTab = tab.key"
+                >
+                  {{ tab.label }}
+                </button>
+              </div>
+
               <div class="day-cycle-timeline__groups">
                 <section
-                  v-for="group in dayCycleTimelineSections"
+                  v-for="group in visibleDayCycleTimelineSections"
                   :key="group.key"
                   class="day-cycle-group"
                   :class="`day-cycle-group--${group.key}`"
@@ -2046,6 +2120,46 @@ dd {
   justify-content: space-between;
   gap: 1rem;
   align-items: flex-end;
+}
+
+.day-cycle-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.25rem;
+  border-radius: 1rem;
+  background: rgba(241, 245, 249, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.day-cycle-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #475569;
+  border-radius: 999px;
+  padding: 0.55rem 0.9rem;
+  font-weight: 700;
+  font-size: 0.92rem;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.day-cycle-tab:hover {
+  background: rgba(255, 255, 255, 0.85);
+  color: #0f172a;
+}
+
+.day-cycle-tab.active {
+  background: #0f172a;
+  color: #fff;
+  border-color: #0f172a;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+}
+
+.day-cycle-tab:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
 }
 
 .day-cycle-timeline__list {

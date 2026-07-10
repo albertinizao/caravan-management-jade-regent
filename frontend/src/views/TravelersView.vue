@@ -68,6 +68,10 @@ const gpFormatter = new Intl.NumberFormat("es-ES", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 2,
 });
+const spaceFormatter = new Intl.NumberFormat("es-ES", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 1,
+});
 
 function isPending(action: string) {
   return pendingAction.value === action;
@@ -118,6 +122,16 @@ const visibleTravelers = computed(() => {
 });
 
 const travelersWithoutWagon = computed(() => travelers.value.filter((traveler) => !traveler.wagonId));
+const totalTravelerOccupiedSpace = computed(() =>
+  travelers.value.reduce((total, traveler) => total + traveler.occupiedSpace, 0),
+);
+const totalTravelerCapacity = computed(() =>
+  wagons.value.reduce((total, wagon) => total + wagon.travelerCapacity, 0),
+);
+const travelersActingAsPassengers = computed(() =>
+  travelers.value.filter((traveler) => traveler.activeRoleCode === passengerRoleCode && traveler.activeRoleCodes.includes(passengerRoleCode))
+    .length,
+);
 
 const createRoleOptions = computed(() =>
   roleCatalog.value.filter((role) => createAvailableRoleCodes.value.includes(role.code)),
@@ -230,6 +244,18 @@ const createDrivingWagonHelperText = computed(() =>
 const roleFilterOptions = computed(() => roleCatalog.value);
 
 const passengerRoleCode = "pasajero";
+
+function percentageOf(value: number, max: number) {
+  if (max <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, (value / max) * 100));
+}
+
+function formatSpace(value: number) {
+  return spaceFormatter.format(value);
+}
 
 watch(createAvailableRoleCodes, () => {
   if (!createAvailableRoleCodes.value.includes(passengerRoleCode)) {
@@ -801,15 +827,19 @@ function travelerAssignmentLabel(traveler: CaravanTraveler): string {
   return traveler.wagonName ?? "Sin carro";
 }
 
-function rolePreview(roleCodes: string[], maxVisible = 2) {
-  return [...new Set(roleCodes)].slice(0, maxVisible).map((code) => ({
+function roleTableItems(traveler: CaravanTraveler) {
+  const roleCodes = [...new Set([...traveler.availableRoleCodes, ...traveler.activeRoleCodes])];
+  return roleCodes.map((code) => ({
     code,
     name: roleName(code),
+    active: traveler.activeRoleCodes.includes(code),
   }));
 }
 
-function roleOverflowCount(roleCodes: string[], maxVisible = 2) {
-  return Math.max(0, new Set(roleCodes).size - maxVisible);
+function roleTableSummary(traveler: CaravanTraveler) {
+  const possible = traveler.availableRoleCodes.length ? roleSummary(traveler.availableRoleCodes) : "Sin roles";
+  const active = traveler.activeRoleCodes.length ? `Activos: ${roleSummary(traveler.activeRoleCodes)}` : "Sin roles activos";
+  return `${possible}. ${active}.`;
 }
 
 function roleCountLabel(activeCount: number, maxCount: number) {
@@ -867,6 +897,38 @@ onMounted(refresh);
       </section>
 
       <template v-else>
+        <section class="card summary">
+          <div>
+            <h2>{{ activeCaravan.name }}</h2>
+            <p class="muted">Resumen rápido de la ocupación y el reparto actual de viajeros.</p>
+          </div>
+
+          <div class="summary-overview">
+            <div class="summary-stats">
+              <div><span>Espacio</span><strong>{{ formatSpace(totalTravelerOccupiedSpace) }} / {{ formatSpace(totalTravelerCapacity) }}</strong></div>
+              <div><span>Viajeros</span><strong>{{ travelers.length }}</strong></div>
+              <div><span>Pasajeros</span><strong>{{ travelersActingAsPassengers }}</strong></div>
+            </div>
+
+            <div class="summary-meter-block summary-meter-block--compact">
+              <div
+                class="meter-strip"
+                :aria-label="`Espacio ocupado por viajeros ${formatSpace(totalTravelerOccupiedSpace)} de ${formatSpace(totalTravelerCapacity)}`"
+                :title="`Espacio ocupado por viajeros ${formatSpace(totalTravelerOccupiedSpace)} de ${formatSpace(totalTravelerCapacity)}`"
+              >
+                <span
+                  class="meter-segment meter-segment--travelers"
+                  :style="{ width: `${percentageOf(totalTravelerOccupiedSpace, totalTravelerCapacity)}%` }"
+                ></span>
+              </div>
+              <div class="meter-values meter-values--compact">
+                <span><strong>{{ formatSpace(totalTravelerOccupiedSpace) }}</strong> actual</span>
+                <span><strong>{{ formatSpace(totalTravelerCapacity) }}</strong> máximo</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="card">
           <div class="section-header">
             <div>
@@ -926,12 +988,16 @@ onMounted(refresh);
 
           <div v-else class="table-wrap">
             <table class="travelers-table">
+              <colgroup>
+                <col class="travelers-col-traveler" />
+                <col class="travelers-col-wagon" />
+                <col class="travelers-col-roles" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>Viajero</th>
-                  <th>Rol activo</th>
                   <th>Carro de viaje</th>
-                  <th>Roles posibles</th>
+                  <th>Roles</th>
                 </tr>
               </thead>
               <tbody>
@@ -948,33 +1014,24 @@ onMounted(refresh);
                     <strong>{{ traveler.fullName }}</strong>
                     <p class="muted">{{ traveler.description ?? "Sin descripción" }}</p>
                   </td>
-                  <td>{{ roleSummary(traveler.activeRoleCodes) }}</td>
                   <td>
                     <span class="assignment-badge" :class="{ 'assignment-badge--warning': !traveler.wagonId }">
                       {{ travelerAssignmentLabel(traveler) }}
                     </span>
                   </td>
                   <td>
-                    <div
-                      class="role-preview"
-                      :title="traveler.availableRoleCodes.length ? roleSummary(traveler.availableRoleCodes) : 'Sin roles posibles'"
-                    >
-                      <template v-if="rolePreview(traveler.availableRoleCodes).length > 0">
+                    <div class="role-preview" :title="roleTableSummary(traveler)">
+                      <template v-if="roleTableItems(traveler).length > 0">
                         <span
-                          v-for="role in rolePreview(traveler.availableRoleCodes)"
+                          v-for="role in roleTableItems(traveler)"
                           :key="role.code"
                           class="role-pill"
+                          :class="{ 'role-pill--active': role.active }"
                         >
                           {{ role.name }}
                         </span>
-                        <span
-                          v-if="roleOverflowCount(traveler.availableRoleCodes) > 0"
-                          class="role-pill role-pill--more"
-                        >
-                          +{{ roleOverflowCount(traveler.availableRoleCodes) }}
-                        </span>
                       </template>
-                      <span v-else class="muted">Sin roles posibles</span>
+                      <span v-else class="muted">Sin roles</span>
                     </div>
                   </td>
                 </tr>
@@ -1447,6 +1504,84 @@ p {
   gap: 1rem;
 }
 
+.summary {
+  display: grid;
+  gap: 1rem;
+}
+
+.summary-overview {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.summary-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.summary-stats div {
+  padding: 0.85rem;
+  border-radius: 0.85rem;
+  background: #f8fafc;
+  min-width: 120px;
+}
+
+.summary-stats span {
+  display: block;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.summary-stats strong {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 1.1rem;
+}
+
+.summary-meter-block {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.summary-meter-block--compact {
+  margin-bottom: 0;
+}
+
+.meter-strip {
+  display: flex;
+  overflow: hidden;
+  min-height: 0.9rem;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.meter-segment {
+  display: block;
+  height: 100%;
+}
+
+.meter-segment--travelers {
+  background: linear-gradient(90deg, #bfdbfe 0%, #2563eb 100%);
+}
+
+.meter-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.meter-values strong {
+  color: #111827;
+}
+
+.meter-values--compact {
+  font-size: 0.76rem;
+}
+
 .filters {
   display: grid;
   grid-template-columns: 1.4fr 0.9fr 0.9fr 0.9fr;
@@ -1515,6 +1650,19 @@ p {
 .travelers-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.travelers-col-traveler {
+  width: 45%;
+}
+
+.travelers-col-wagon {
+  width: 15%;
+}
+
+.travelers-col-roles {
+  width: 40%;
 }
 
 .travelers-table th,
@@ -1564,21 +1712,26 @@ p {
   gap: 0.4rem;
 }
 
+.travelers-table th:nth-child(2),
+.travelers-table td:nth-child(2) {
+  white-space: nowrap;
+}
+
 .role-pill {
   display: inline-flex;
   align-items: center;
   padding: 0.3rem 0.6rem;
   border-radius: 999px;
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: #f3f4f6;
+  color: #4b5563;
   font-size: 0.85rem;
   font-weight: 700;
   line-height: 1.2;
 }
 
-.role-pill--more {
-  background: #eef2ff;
-  color: #4338ca;
+.role-pill--active {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .empty-state,
@@ -1941,6 +2094,7 @@ dd {
 }
 
 @media (max-width: 1000px) {
+  .summary-stats,
   .filters,
   .detail-grid,
   .editor-grid,

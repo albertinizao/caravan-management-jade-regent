@@ -29,6 +29,7 @@ interface GroupedCargoRow {
 
 const SUPPLY_CATALOG_CODES = new Set(["suministros", "suministros-perecederos"]);
 const STANDARD_SUPPLY_VALUE = 10;
+const MERCHANDISE_CATEGORY = "Artículos de mercancía";
 
 const activeCaravan = ref<Caravan | null>(null);
 const cargo = ref<CaravanCargo[]>([]);
@@ -169,6 +170,22 @@ const openedSupplies = computed(() =>
 );
 const otherCargo = computed(() =>
   visibleCargo.value.filter((entry) => !isSupplyCargo(entry.representative)),
+);
+const totalTransportedCargoUnits = computed(() =>
+  cargoSummary.value.reduce((total, summary) => total + summary.usedCargoUnits, 0),
+);
+const totalCargoCapacity = computed(() =>
+  cargoSummary.value.reduce((total, summary) => total + summary.cargoCapacity, 0),
+);
+const transportedSupplyUnits = computed(() =>
+  cargo.value
+    .filter((entry) => isSupplyCargo(entry))
+    .reduce((total, entry) => total + entry.quantity, 0),
+);
+const transportedMerchandiseUnits = computed(() =>
+  cargo.value
+    .filter((entry) => isMerchandiseCargo(entry))
+    .reduce((total, entry) => total + entry.quantity, 0),
 );
 
 const categories = computed(() =>
@@ -362,6 +379,10 @@ function isOpenedSupplyCargo(entry: CaravanCargo | null) {
   return !!entry && isSupplyCargo(entry) && entry.dayPassed;
 }
 
+function isMerchandiseCargo(entry: CaravanCargo | null) {
+  return !!entry && !isSupplyCargo(entry) && entry.category === MERCHANDISE_CATEGORY;
+}
+
 function supplyRemainingFood(entry: CaravanCargo | null) {
   return entry?.currentProvisions ?? STANDARD_SUPPLY_VALUE;
 }
@@ -408,6 +429,14 @@ function supplyListNote(entry: CaravanCargo | null) {
 
 function getWagonRemainingCargoUnits(wagonId: string) {
   return cargoSummary.value.find((summary) => summary.wagonId === wagonId)?.remainingCargoUnits ?? 0;
+}
+
+function cargoUsagePercentage() {
+  if (totalCargoCapacity.value === 0) {
+    return 0;
+  }
+
+  return Math.min(100, (totalTransportedCargoUnits.value / totalCargoCapacity.value) * 100);
 }
 
 function isWagonCompatibleWithCatalogItem(
@@ -929,6 +958,35 @@ onMounted(refresh);
       </header>
 
       <div v-if="error" class="error">{{ error }}</div>
+
+      <section v-if="activeCaravan" class="card cargo-summary">
+        <div>
+          <h2>{{ activeCaravan.name }}</h2>
+          <p class="muted">Resumen rápido del cargamento transportado por la caravana.</p>
+        </div>
+
+        <div class="summary-overview">
+          <div class="summary-stats">
+            <div><span>Carga</span><strong>{{ totalTransportedCargoUnits }} / {{ totalCargoCapacity }}</strong></div>
+            <div><span>Suministros</span><strong>{{ transportedSupplyUnits }}</strong></div>
+            <div><span>Mercancías + locales</span><strong>{{ transportedMerchandiseUnits }}</strong></div>
+          </div>
+
+          <div class="summary-meter-block summary-meter-block--compact">
+            <div
+              class="meter-strip"
+              :aria-label="`Carga transportada ${totalTransportedCargoUnits} de ${totalCargoCapacity}`"
+              :title="`Carga transportada ${totalTransportedCargoUnits} de ${totalCargoCapacity}`"
+            >
+              <span class="meter-segment meter-segment--cargo" :style="{ width: `${cargoUsagePercentage()}%` }"></span>
+            </div>
+            <div class="meter-values meter-values--compact">
+              <span><strong>{{ totalTransportedCargoUnits }}</strong> actual</span>
+              <span><strong>{{ totalCargoCapacity }}</strong> máximo</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section class="card">
         <div class="section-header">
@@ -1457,6 +1515,13 @@ onMounted(refresh);
   flex-wrap: wrap;
 }
 
+.cargo-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 .eyebrow {
   margin: 0 0 0.25rem;
   font-size: 0.875rem;
@@ -1498,6 +1563,37 @@ p {
   gap: 1rem;
 }
 
+.summary-overview {
+  display: grid;
+  gap: 0.85rem;
+  flex: 1;
+}
+
+.summary-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.summary-stats div {
+  padding: 0.85rem;
+  border-radius: 0.85rem;
+  background: #f8fafc;
+  min-width: 120px;
+}
+
+.summary-stats span {
+  display: block;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.summary-stats strong {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 1.1rem;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1526,6 +1622,49 @@ p {
 .summary-bar-fill {
   height: 100%;
   background: linear-gradient(90deg, #1d4ed8, #60a5fa);
+}
+
+.summary-meter-block {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.summary-meter-block--compact {
+  margin-bottom: 0;
+}
+
+.meter-strip {
+  display: flex;
+  overflow: hidden;
+  min-height: 0.9rem;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.meter-segment {
+  display: block;
+  height: 100%;
+}
+
+.meter-segment--cargo {
+  background: linear-gradient(90deg, #fde68a 0%, #f59e0b 100%);
+}
+
+.meter-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.meter-values strong {
+  color: #111827;
+}
+
+.meter-values--compact {
+  font-size: 0.76rem;
 }
 
 .filters {
@@ -1793,6 +1932,7 @@ dd {
 }
 
 @media (max-width: 1100px) {
+  .summary-stats,
   .summary-grid,
   .filters,
   .catalog-layout,
@@ -1802,6 +1942,7 @@ dd {
     grid-template-columns: 1fr;
   }
 
+  .cargo-summary,
   .hero,
   .modal-header,
   .section-header {

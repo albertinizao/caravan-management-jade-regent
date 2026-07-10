@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 
 import { useToast } from "@/composables/useToast";
-import { getActiveCaravan, listCaravans } from "@/services/caravans";
+import { getActiveCaravan, getCaravanStatistics, listCaravans } from "@/services/caravans";
 import {
   addCargoFromCatalog,
   addCustomCargo,
@@ -26,7 +26,7 @@ import {
   updateCaravanWagon,
 } from "@/services/wagons";
 import { listCaravanTravelers, updateCaravanTraveler, updateCaravanTravelerWagon } from "@/services/travelers";
-import type { Caravan } from "@/types/caravan";
+import type { Caravan, CaravanStatistics } from "@/types/caravan";
 import type { CaravanBeast } from "@/types/beast";
 import type { CaravanCargo, CaravanCargoSummary, CargoCatalogItem } from "@/types/cargo";
 import type { CaravanTraveler } from "@/types/traveler";
@@ -39,6 +39,7 @@ import type {
 
 const caravans = ref<Caravan[]>([]);
 const activeCaravan = ref<Caravan | null>(null);
+const caravanStatistics = ref<CaravanStatistics | null>(null);
 const catalog = ref<WagonCatalogItem[]>([]);
 const wagons = ref<CaravanWagon[]>([]);
 const travelers = ref<CaravanTraveler[]>([]);
@@ -224,23 +225,24 @@ const selectedImprovementItem = computed(() => {
   return improvementCatalog.value.find((item) => item.code === selectedImprovementCode.value) ?? null;
 });
 
-const totalCapacity = computed(() => (activeCaravan.value ? 10 + activeCaravan.value.level : 0));
+const maxWagons = computed(() => caravanStatistics.value?.otherStats.maxWagons ?? (activeCaravan.value ? 10 + activeCaravan.value.level : 0));
+const activeCaravanDiscontentThreshold = computed(() => activeCaravan.value?.mainStats.morale ?? 0);
 const caravanWagonLimitState = computed(() => {
   if (!activeCaravan.value) {
     return null;
   }
 
-  const maxWagons = totalCapacity.value;
+  const maxWagonsCount = maxWagons.value;
   const currentWagons = wagons.value.length;
 
-  if (currentWagons > maxWagons) {
+  if (currentWagons > maxWagonsCount) {
     return {
       kind: "danger" as const,
-      message: `La caravana supera su límite de carros en ${currentWagons - maxWagons}. Aplica -1 a cualquier tirada por cada carro adicional.`,
+      message: `La caravana supera su límite de carros en ${currentWagons - maxWagonsCount}. Aplica -1 a cualquier tirada por cada carro adicional.`,
     };
   }
 
-  if (currentWagons === maxWagons) {
+  if (currentWagons === maxWagonsCount) {
     return {
       kind: "warning" as const,
       message: "La caravana ha alcanzado su límite de carros. El siguiente carro lo superará y aplicará -1 a cualquier tirada por cada carro adicional.",
@@ -977,13 +979,14 @@ async function refresh() {
     activeCaravan.value = activeResponse.caravan;
 
     if (activeResponse.caravan) {
-      const [catalogResponse, wagonsResponse, travelerResponse, beastResponse, cargoCatalogResponse, cargoSummaryResponse] = await Promise.all([
+      const [catalogResponse, wagonsResponse, travelerResponse, beastResponse, cargoCatalogResponse, cargoSummaryResponse, caravanStatisticsResponse] = await Promise.all([
         listWagonCatalog(activeResponse.caravan.id),
         listCaravanWagons(activeResponse.caravan.id),
         listCaravanTravelers(activeResponse.caravan.id),
         listCaravanBeasts(activeResponse.caravan.id),
         listCargoCatalog(activeResponse.caravan.id),
         listCaravanCargoSummary(activeResponse.caravan.id),
+        getCaravanStatistics(activeResponse.caravan.id),
       ]);
 
       catalog.value = catalogResponse;
@@ -992,6 +995,7 @@ async function refresh() {
       beasts.value = beastResponse;
       wagonCargoCatalog.value = cargoCatalogResponse;
       cargoSummary.value = cargoSummaryResponse;
+      caravanStatistics.value = caravanStatisticsResponse;
 
       if (
         catalogResponse.length > 0
@@ -1011,6 +1015,7 @@ async function refresh() {
         }
       }
     } else {
+      caravanStatistics.value = null;
       catalog.value = [];
       wagons.value = [];
       travelers.value = [];
@@ -1971,7 +1976,7 @@ function maxAllowedFor(item: WagonCatalogItem) {
     return 0;
   }
 
-  const caravanCapacity = totalCapacity.value;
+  const caravanCapacity = maxWagons.value;
 
   if (item.limitKind === "UNLIMITED") {
     return Number.POSITIVE_INFINITY;
@@ -2175,10 +2180,28 @@ onMounted(refresh);
             <p class="muted" v-if="activeCaravan.description">{{ activeCaravan.description }}</p>
           </div>
           <div class="summary-actions">
-            <div class="summary-stats">
-              <div><span>Carros</span><strong>{{ wagons.length }} / {{ totalCapacity }}</strong></div>
-              <div><span>Nivel</span><strong>{{ activeCaravan.level }}</strong></div>
-              <div><span>Descontento</span><strong>{{ activeCaravan.discontent }}</strong></div>
+            <div class="summary-overview">
+              <div class="summary-stats">
+                <div><span>Carros</span><strong>{{ wagons.length }} / {{ maxWagons }}</strong></div>
+                <div><span>Nivel</span><strong>{{ activeCaravan.level }}</strong></div>
+                <div><span>Descontento</span><strong>{{ activeCaravan.discontent }}</strong></div>
+              </div>
+              <div class="summary-meter-block summary-meter-block--compact">
+                <div
+                  class="meter-strip"
+                  :aria-label="`Descontento ${activeCaravan.discontent} de ${activeCaravanDiscontentThreshold}`"
+                  :title="`Descontento ${activeCaravan.discontent} de ${activeCaravanDiscontentThreshold}`"
+                >
+                  <span
+                    class="meter-segment meter-segment--discontent"
+                    :style="{ width: `${percentageOf(activeCaravan.discontent, activeCaravanDiscontentThreshold)}%` }"
+                  ></span>
+                </div>
+                <div class="meter-values meter-values--compact">
+                  <span><strong>{{ activeCaravan.discontent }}</strong> actual</span>
+                  <span><strong>{{ activeCaravanDiscontentThreshold }}</strong> máximo</span>
+                </div>
+              </div>
             </div>
             <button class="primary-button" type="button" :disabled="loading || submitting" @click="openAddModal">
               Añadir
@@ -3723,6 +3746,12 @@ p {
   gap: 0.75rem;
 }
 
+.summary-overview {
+  display: grid;
+  gap: 0.85rem;
+  flex: 1;
+}
+
 .summary-stats div {
   padding: 0.85rem;
   border-radius: 0.85rem;
@@ -4692,6 +4721,10 @@ dd {
   margin-bottom: 0.85rem;
 }
 
+.summary-meter-block--compact {
+  margin-bottom: 0;
+}
+
 .meter-strip {
   display: flex;
   overflow: hidden;
@@ -4707,6 +4740,27 @@ dd {
 .meter-segment {
   display: block;
   height: 100%;
+}
+
+.meter-segment--discontent {
+  background: linear-gradient(90deg, #f59e0b 0%, #ef4444 100%);
+}
+
+.meter-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.meter-values strong {
+  color: #111827;
+}
+
+.meter-values--compact {
+  font-size: 0.76rem;
 }
 
 .meter-legend {

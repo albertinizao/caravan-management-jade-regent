@@ -153,8 +153,16 @@ function selectedTravelerWagonCapacity(wagonId: string, excludedTravelerId?: str
   const travelerSpace = travelers.value
     .filter((traveler) => traveler.wagonId === wagonId && traveler.id !== excludedTravelerId)
     .reduce((total, traveler) => total + traveler.occupiedSpace, 0);
-  const beastCount = beasts.value.filter((beast) => beast.assignmentType === "TRAVELER" && beast.assignedWagonId === wagonId).length;
-  return Math.max(0, wagon.travelerCapacity - travelerSpace - beastCount);
+  const travelerBeastSpace = beasts.value
+    .filter((beast) => beast.assignmentType === "TRAVELER" && beast.assignedWagonId === wagonId)
+    .reduce((total, beast) => total + beast.occupiedSpace, 0);
+  return Math.max(0, wagon.travelerCapacity - travelerSpace - travelerBeastSpace);
+}
+
+function parseOccupiedSpaceInput(value: string, fallback: number) {
+  const normalized = String(value).trim().replace(",", ".");
+  const parsed = normalized ? Number(normalized) : fallback;
+  return Number.isNaN(parsed) ? fallback : parsed;
 }
 
 function wagonHasAnotherCarretero(wagonId: string, excludedTravelerId?: string | null) {
@@ -165,9 +173,9 @@ function wagonHasAnotherCarretero(wagonId: string, excludedTravelerId?: string |
   );
 }
 
-function validSleepingWagonOptionsForTraveler(excludedTravelerId?: string | null) {
+function validSleepingWagonOptionsForTraveler(requiredSpace: number, excludedTravelerId?: string | null) {
   return wagons.value.filter((wagon) => {
-    return selectedTravelerWagonCapacity(wagon.id, excludedTravelerId) > 0
+    return selectedTravelerWagonCapacity(wagon.id, excludedTravelerId) >= requiredSpace
       || wagon.id === (excludedTravelerId ? travelers.value.find((traveler) => traveler.id === excludedTravelerId)?.wagonId : null);
   });
 }
@@ -177,7 +185,10 @@ function validDrivingWagonOptionsForTraveler(excludedTravelerId?: string | null)
 }
 
 const selectedWagonOptions = computed(() =>
-  validSleepingWagonOptionsForTraveler(selectedTraveler.value?.id),
+  validSleepingWagonOptionsForTraveler(
+    parseOccupiedSpaceInput(selectedOccupiedSpace.value, selectedTraveler.value?.occupiedSpace ?? 1),
+    selectedTraveler.value?.id,
+  ),
 );
 
 const selectedDrivingWagonOptions = computed(() =>
@@ -187,7 +198,7 @@ const selectedDrivingWagonOptions = computed(() =>
 );
 
 const createWagonOptions = computed(() =>
-  validSleepingWagonOptionsForTraveler(),
+  validSleepingWagonOptionsForTraveler(parseOccupiedSpaceInput(createOccupiedSpace.value, 1)),
 );
 
 const createDrivingWagonOptions = computed(() =>
@@ -790,8 +801,15 @@ function travelerAssignmentLabel(traveler: CaravanTraveler): string {
   return traveler.wagonName ?? "Sin carro";
 }
 
-function travelerDrivingAssignmentLabel(traveler: CaravanTraveler): string {
-  return traveler.drivingWagonName ?? "Sin carro de conducción";
+function rolePreview(roleCodes: string[], maxVisible = 2) {
+  return [...new Set(roleCodes)].slice(0, maxVisible).map((code) => ({
+    code,
+    name: roleName(code),
+  }));
+}
+
+function roleOverflowCount(roleCodes: string[], maxVisible = 2) {
+  return Math.max(0, new Set(roleCodes).size - maxVisible);
 }
 
 function roleCountLabel(activeCount: number, maxCount: number) {
@@ -913,7 +931,7 @@ onMounted(refresh);
                   <th>Viajero</th>
                   <th>Rol activo</th>
                   <th>Carro de viaje</th>
-                  <th>Carro que conduce</th>
+                  <th>Roles posibles</th>
                 </tr>
               </thead>
               <tbody>
@@ -937,9 +955,27 @@ onMounted(refresh);
                     </span>
                   </td>
                   <td>
-                    <span class="assignment-badge" :class="{ 'assignment-badge--warning': !traveler.drivingWagonId }">
-                      {{ travelerDrivingAssignmentLabel(traveler) }}
-                    </span>
+                    <div
+                      class="role-preview"
+                      :title="traveler.availableRoleCodes.length ? roleSummary(traveler.availableRoleCodes) : 'Sin roles posibles'"
+                    >
+                      <template v-if="rolePreview(traveler.availableRoleCodes).length > 0">
+                        <span
+                          v-for="role in rolePreview(traveler.availableRoleCodes)"
+                          :key="role.code"
+                          class="role-pill"
+                        >
+                          {{ role.name }}
+                        </span>
+                        <span
+                          v-if="roleOverflowCount(traveler.availableRoleCodes) > 0"
+                          class="role-pill role-pill--more"
+                        >
+                          +{{ roleOverflowCount(traveler.availableRoleCodes) }}
+                        </span>
+                      </template>
+                      <span v-else class="muted">Sin roles posibles</span>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -1447,9 +1483,9 @@ p {
 }
 
 .filters span,
-.create-form span,
-.editor-row span,
-.two-columns span {
+.create-form label > span,
+.editor-row label > span,
+.two-columns label > span {
   font-size: 0.85rem;
   color: #6b7280;
 }
@@ -1521,6 +1557,30 @@ p {
   color: #b91c1c;
 }
 
+.role-preview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.role-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.role-pill--more {
+  background: #eef2ff;
+  color: #4338ca;
+}
+
 .empty-state,
 .empty-state-inline {
   display: grid;
@@ -1532,6 +1592,7 @@ p {
 .primary-button,
 .ghost-button,
 .secondary-button,
+.danger-button,
 .primary-link {
   display: inline-flex;
   align-items: center;
@@ -1542,16 +1603,20 @@ p {
 
 .primary-button,
 .secondary-button,
-.ghost-button {
+.ghost-button,
+.danger-button {
   padding: 0.8rem 1rem;
   border: 1px solid #cbd5e1;
   cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .primary-button {
   background: #1d4ed8;
   border-color: #1d4ed8;
   color: white;
+  font-weight: 600;
+  box-shadow: 0 10px 24px rgba(29, 78, 216, 0.22);
 }
 
 .ghost-button {
@@ -1561,6 +1626,68 @@ p {
 .secondary-button {
   background: #f8fafc;
   border-color: #d1d5db;
+}
+
+.danger-button {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: #1e40af;
+  border-color: #1e40af;
+}
+
+.ghost-button:hover:not(:disabled),
+.secondary-button:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: #fecaca;
+  border-color: #f87171;
+}
+
+.primary-button:focus-visible,
+.ghost-button:focus-visible,
+.secondary-button:focus-visible,
+.danger-button:focus-visible,
+.primary-link:focus-visible {
+  outline: 3px solid rgba(59, 130, 246, 0.35);
+  outline-offset: 2px;
+}
+
+.primary-button:disabled,
+.ghost-button:disabled,
+.secondary-button:disabled,
+.danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+  box-shadow: none;
+}
+
+.button-with-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: inherit;
+}
+
+.button-with-spinner > span:last-child {
+  color: inherit;
+}
+
+.button-spinner {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: spin 0.7s linear infinite;
 }
 
 .primary-link {
@@ -1860,6 +1987,12 @@ dd {
   .modal-actions {
     width: 100%;
     flex-direction: column;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

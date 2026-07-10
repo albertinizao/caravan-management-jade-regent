@@ -38,6 +38,7 @@ const defense = ref(1);
 const mobility = ref(1);
 const morale = ref(1);
 const createModalOpen = ref(false);
+const backupModalOpen = ref(false);
 const dayCycleModalOpen = ref(false);
 const dayCycleLoading = ref(false);
 const dayCycleSubmitting = ref(false);
@@ -549,6 +550,14 @@ function openBackupImportDialog() {
   backupFileInput.value?.click();
 }
 
+function openBackupModal() {
+  backupModalOpen.value = true;
+}
+
+function closeBackupModal() {
+  backupModalOpen.value = false;
+}
+
 function buildBackupFilename(caravanName: string) {
   const safeName = caravanName
     .trim()
@@ -760,6 +769,7 @@ async function handleExportBackup() {
   try {
     const backup = await exportCaravanBackup(caravan.id);
     downloadBackupFile(buildBackupFilename(caravan.name), backup);
+    closeBackupModal();
     showToast(`Backup exportado: ${caravan.name}.`);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "No se pudo exportar el backup";
@@ -793,6 +803,7 @@ async function handleImportBackup(event: Event) {
     const backup = JSON.parse(rawBackup) as Parameters<typeof importCaravanBackup>[0];
     const restored = await importCaravanBackup(backup);
     await refresh();
+    closeBackupModal();
     showToast(`Backup importado: ${restored.name}.`);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "No se pudo importar el backup";
@@ -872,28 +883,6 @@ onMounted(refresh);
           </p>
         </div>
         <div class="hero-actions">
-          <button
-            class="secondary-button"
-            type="button"
-            :disabled="loading || submitting || !selectedCaravan || isPending('export-backup') || isPending('import-backup')"
-            @click="handleExportBackup"
-          >
-            <span class="button-with-spinner">
-              <span v-if="isPending('export-backup')" class="button-spinner" aria-hidden="true"></span>
-              <span>{{ isPending('export-backup') ? "Exportando…" : "Exportar backup" }}</span>
-            </span>
-          </button>
-          <button
-            class="secondary-button"
-            type="button"
-            :disabled="loading || submitting || isPending('export-backup') || isPending('import-backup')"
-            @click="openBackupImportDialog"
-          >
-            Importar backup
-          </button>
-          <button class="secondary-button" type="button" :disabled="loading || submitting" @click="openCreateModal">
-            Crear caravana
-          </button>
           <button
             class="secondary-button"
             type="button"
@@ -1247,7 +1236,20 @@ onMounted(refresh);
       </section>
 
       <article class="card">
-        <h2>Instancias de caravana</h2>
+        <div class="section-header">
+          <div>
+            <h2>Instancias de caravana</h2>
+            <p class="muted">Gestiona las campañas disponibles, crea nuevas instancias y administra sus backups.</p>
+          </div>
+          <div class="section-actions">
+            <button class="secondary-button" type="button" :disabled="loading || submitting" @click="openBackupModal">
+              Backup
+            </button>
+            <button class="primary-button" type="button" :disabled="loading || submitting" @click="openCreateModal">
+              Crear caravana
+            </button>
+          </div>
+        </div>
 
         <div v-if="!loading && caravans.length === 0" class="muted">
           No hay caravanas creadas todavía.
@@ -1483,6 +1485,54 @@ onMounted(refresh);
         </div>
       </div>
 
+      <div v-if="backupModalOpen" class="modal-backdrop" @click.self="closeBackupModal">
+        <div class="modal modal-backup">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">Backups</p>
+              <h2>Gestionar backups</h2>
+            </div>
+            <button class="ghost-button" type="button" :disabled="isPending('export-backup') || isPending('import-backup')" @click="closeBackupModal">
+              Cerrar
+            </button>
+          </div>
+
+          <p class="muted">
+            Importa una caravana desde un archivo JSON o exporta la caravana actualmente seleccionada.
+          </p>
+
+          <div v-if="!selectedCaravan" class="warning-banner">
+            <strong>No hay caravana seleccionada para exportar.</strong>
+            <p>Puedes importar un backup igualmente, pero para exportar necesitas seleccionar una instancia primero.</p>
+          </div>
+
+          <div class="backup-actions">
+            <button
+              class="secondary-button"
+              type="button"
+              :disabled="loading || submitting || isPending('export-backup') || isPending('import-backup')"
+              @click="openBackupImportDialog"
+            >
+              <span class="button-with-spinner">
+                <span v-if="isPending('import-backup')" class="button-spinner" aria-hidden="true"></span>
+                <span>{{ isPending('import-backup') ? "Importando…" : "Importar backup" }}</span>
+              </span>
+            </button>
+            <button
+              class="primary-button"
+              type="button"
+              :disabled="loading || submitting || !selectedCaravan || isPending('export-backup') || isPending('import-backup')"
+              @click="handleExportBackup"
+            >
+              <span class="button-with-spinner">
+                <span v-if="isPending('export-backup')" class="button-spinner" aria-hidden="true"></span>
+                <span>{{ isPending('export-backup') ? "Exportando…" : "Exportar backup" }}</span>
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div v-if="createModalOpen" class="modal-backdrop" @click.self="closeCreateModal">
         <div class="modal modal-create">
             <div class="modal-header">
@@ -1614,6 +1664,21 @@ p {
 }
 
 .hero-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.section-actions {
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
@@ -1862,6 +1927,42 @@ dd {
 .nav-meter-segment {
   display: block;
   height: 100%;
+}
+
+.summary-meter-block {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.35rem 0 0.5rem;
+}
+
+.meter-strip {
+  display: flex;
+  overflow: hidden;
+  min-height: 0.9rem;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.meter-segment {
+  display: block;
+  height: 100%;
+}
+
+.meter-segment--discontent {
+  background: linear-gradient(90deg, #f59e0b 0%, #ef4444 100%);
+}
+
+.meter-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: #475569;
+}
+
+.meter-values strong {
+  color: #111827;
 }
 
 .nav-meter--wagons .nav-meter-segment--wagons {
@@ -2333,6 +2434,10 @@ dd {
   width: min(900px, 100%);
 }
 
+.modal-backup {
+  width: min(620px, 100%);
+}
+
 .modal-cycle {
   width: min(980px, 100%);
 }
@@ -2342,6 +2447,13 @@ dd {
   justify-content: space-between;
   gap: 1rem;
   align-items: center;
+}
+
+.backup-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .warning-banner {
@@ -2367,7 +2479,9 @@ dd {
     grid-template-columns: 1fr;
   }
 
-  .hero {
+  .hero,
+  .section-header,
+  .modal-header {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -2386,6 +2500,11 @@ dd {
 
   .day-cycle-group__cards {
     grid-template-columns: 1fr;
+  }
+
+  .section-actions,
+  .backup-actions {
+    width: 100%;
   }
 }
 </style>

@@ -141,6 +141,9 @@ const dayCycleTimelineSections = computed<DayCycleTimelineSection[]>(() => {
     if (entry.section === "food" && entry.title === "Se consume una unidad de suministros") {
       return;
     }
+    if (entry.section === "inventory") {
+      return;
+    }
 
     const card = {
       key: `${entry.section}-${index}-${entry.title}`,
@@ -212,6 +215,8 @@ function dayCycleSectionLabel(section: string) {
       return "Resumen";
     case "cook":
       return "Conversión de suministros";
+    case "cook-summary":
+      return "Resumen";
     case "food":
       return "Comida total";
     case "inventory":
@@ -336,6 +341,7 @@ function sectionBucketKey(section: string) {
     case "batidor-summary":
       return "batidores";
     case "cook":
+    case "cook-summary":
       return "cocineros";
     case "food":
       return "consumo";
@@ -371,6 +377,9 @@ function dayCycleResultLabel(section: string, title: string, details: string[], 
   }
   if (section === "cook") {
     return `Comida +${formatDecimal(foodDelta)}`;
+  }
+  if (section === "cook-summary") {
+    return `Trabajo en equipo`;
   }
   if (section === "food") {
     return `Comida +${formatDecimal(foodDelta)}`;

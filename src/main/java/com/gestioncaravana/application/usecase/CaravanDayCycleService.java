@@ -10,12 +10,14 @@ import com.gestioncaravana.application.port.in.GetCaravanStatisticsUseCase;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanDayCycleResultRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanFeatRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
 import com.gestioncaravana.domain.CaravanCargo;
 import com.gestioncaravana.domain.CaravanCargoSourceType;
 import com.gestioncaravana.domain.CaravanDayCycleResult;
+import com.gestioncaravana.domain.CaravanFeat;
 import com.gestioncaravana.domain.CaravanSupplyState;
 import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
@@ -55,7 +57,9 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
   private static final String BOTICARIO_CODE = "boticario";
   private static final String ARTESANO_CODE = "artesano";
   private static final String SERVANT_CODE = "sirviente";
+  private static final String TEAMWORK_FEAT_CODE = "trabajo-en-equipo";
   private static final BigDecimal ONE = BigDecimal.ONE;
+  private static final BigDecimal QUARTER = BigDecimal.valueOf(0.25d);
   private static final BigDecimal FIVE = BigDecimal.valueOf(5);
   private static final BigDecimal TEN = BigDecimal.TEN;
   private static final BigDecimal HALF = BigDecimal.valueOf(0.5d);
@@ -64,6 +68,7 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
   private final CaravanTravelerRepositoryPort travelerRepository;
   private final CaravanWagonRepositoryPort wagonRepository;
   private final CaravanCargoRepositoryPort cargoRepository;
+  private final CaravanFeatRepositoryPort featRepository;
   private final CaravanSupplyStateRepositoryPort supplyStateRepository;
   private final ListCaravanCargoSummaryUseCase cargoSummaryUseCase;
   private final GetCaravanStatisticsUseCase statisticsUseCase;
@@ -75,6 +80,7 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
       CaravanTravelerRepositoryPort travelerRepository,
       CaravanWagonRepositoryPort wagonRepository,
       CaravanCargoRepositoryPort cargoRepository,
+      CaravanFeatRepositoryPort featRepository,
       CaravanSupplyStateRepositoryPort supplyStateRepository,
       ListCaravanCargoSummaryUseCase cargoSummaryUseCase,
       GetCaravanStatisticsUseCase statisticsUseCase,
@@ -84,6 +90,7 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
     this.travelerRepository = travelerRepository;
     this.wagonRepository = wagonRepository;
     this.cargoRepository = cargoRepository;
+    this.featRepository = featRepository;
     this.supplyStateRepository = supplyStateRepository;
     this.cargoSummaryUseCase = cargoSummaryUseCase;
     this.statisticsUseCase = statisticsUseCase;
@@ -151,12 +158,18 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
     var initialPerishableFood = sumPerishableFood(cargo);
 
     var progressState = loadAgricultorProgress(state.supplyState().sharedJobProductivityState());
+    var teamworkEnabled = hasActiveTeamworkFeat(state.feats());
+    var agricultorTeamwork = resolveTeamworkAssignment(travelers, AGRICULTOR_CODE, teamworkEnabled);
+    var boticarioTeamwork = resolveTeamworkAssignment(travelers, BOTICARIO_CODE, teamworkEnabled);
+    var batidorTeamwork = resolveTeamworkAssignment(travelers, BATIDOR_CODE, teamworkEnabled);
+    var cookTeamwork = resolveTeamworkAssignment(travelers, COOK_CODE, teamworkEnabled);
 
-    var generatedSuppliesFromAgricultors = resolveAgricultors(state.caravan().id(), travelers, progressState, tempInventory, logs);
-    var generatedAlchemyValueFromBoticarios = resolveBoticarios(travelers, logs);
+    var generatedSuppliesFromAgricultors = resolveAgricultors(
+        state.caravan().id(), travelers, progressState, tempInventory, logs, agricultorTeamwork);
+    var generatedAlchemyValueFromBoticarios = resolveBoticarios(travelers, logs, boticarioTeamwork);
     resolveArtesanos(travelers, logs);
 
-    var generatedFood = resolveBatidores(travelers, logs);
+    var generatedFood = resolveBatidores(travelers, logs, batidorTeamwork);
     generatedFood = generatedFood.add(initialPerishableFood);
     logs.add(new CaravanDayCycleLogEntryView(
         "food",
@@ -171,7 +184,8 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
       moveRegularSuppliesToInventory(currentCargo, tempInventory, logs);
     }
 
-    var cooks = resolveCooks(travelers);
+    var cooks = resolveCooks(travelers, cookTeamwork);
+    appendCookTeamworkSummary(logs, cookTeamwork);
     var portableKitchenUses = countCargoUnits(cargo, "cocina-portatil");
     var cookUsageCounter = 0;
 
@@ -187,7 +201,7 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
         portableKitchenUses--;
       }
 
-      var cookedFood = resolveCookOutput(cook, portableKitchenUsed, logs);
+      var cookedFood = resolveCookOutput(cook, portableKitchenUsed, logs, cookTeamwork);
       generatedFood = generatedFood.add(cookedFood);
       cookUsageCounter++;
 
@@ -272,11 +286,12 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
     var travelers = travelerRepository.findAllByCaravanId(caravanId);
     var wagons = wagonRepository.findAllByCaravanId(caravanId);
     var cargo = cargoRepository.findAllByCaravanId(caravanId);
+    var feats = featRepository.findAllByCaravanId(caravanId);
     var supplyState = supplyStateRepository.findByCaravanId(caravanId)
         .orElseGet(() -> CaravanSupplyState.initial(caravanId, caravan.updatedAt()));
     var statistics = statisticsUseCase.getById(caravanId);
     var cargoSummaries = cargoSummaryUseCase.list(caravanId);
-    return new DayCycleState(caravan, supplyState, travelers, wagons, cargo, cargoSummaries, statistics);
+    return new DayCycleState(caravan, supplyState, travelers, wagons, cargo, feats, cargoSummaries, statistics);
   }
 
   private int resolveAgricultors(
@@ -284,7 +299,8 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
       List<CaravanTraveler> travelers,
       Map<UUID, BigDecimal> progressState,
       List<TempCargoItem> tempInventory,
-      List<CaravanDayCycleLogEntryView> logs) {
+      List<CaravanDayCycleLogEntryView> logs,
+      TeamworkAssignment teamwork) {
     var agricultors = travelers.stream()
         .filter(traveler -> traveler.hasActiveRole(AGRICULTOR_CODE))
         .sorted(travelerOrder())
@@ -298,10 +314,13 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
       if (servant != null) {
         var bonus = canExerciseRole(servant, AGRICULTOR_CODE) ? BigDecimal.valueOf(0.5d) : BigDecimal.valueOf(0.25d);
         increment = increment.add(bonus);
-        details.add("Sirviente: " + servant.fullName());
         details.add(canExerciseRole(servant, AGRICULTOR_CODE)
-            ? "El sirviente también puede ser agricultor: +0.5"
-            : "El sirviente no puede ser agricultor: +0.25");
+            ? "Sirviente: " + servant.fullName() + " (agricultor): +" + formatBigDecimalString(bonus)
+            : "Sirviente: " + servant.fullName() + " (no puede ser agricultor): +" + formatBigDecimalString(bonus));
+      }
+      if (teamwork.appliesTo(agricultor.id())) {
+        increment = increment.multiply(teamwork.multiplier());
+        appendTeamworkDetails(details, teamwork);
       }
 
       var progress = progressState.getOrDefault(agricultor.id(), BigDecimal.ZERO).add(increment);
@@ -313,21 +332,27 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
       }
       progressState.put(agricultor.id(), progress);
       generated += produced;
-      details.add("Progreso acumulado: " + formatBigDecimal(progress));
+      details.add("Progreso acumulado: " + formatBigDecimalString(progress));
       details.add("Suministros generados: " + produced);
       logs.add(new CaravanDayCycleLogEntryView("pre-food", agricultor.fullName(), details, BigDecimal.valueOf(produced)));
     }
     if (!agricultors.isEmpty()) {
+      var summaryDetails = new ArrayList<String>();
+      summaryDetails.add("Suministros generados por agricultores: " + generated);
+      appendTeamworkSummary(summaryDetails, "agricultores", teamwork);
       logs.add(new CaravanDayCycleLogEntryView(
           "pre-food-summary",
           "Resumen de agricultores",
-          List.of("Suministros generados por agricultores: " + generated),
+          summaryDetails,
           BigDecimal.valueOf(generated)));
     }
     return generated;
   }
 
-  private BigDecimal resolveBoticarios(List<CaravanTraveler> travelers, List<CaravanDayCycleLogEntryView> logs) {
+  private BigDecimal resolveBoticarios(
+      List<CaravanTraveler> travelers,
+      List<CaravanDayCycleLogEntryView> logs,
+      TeamworkAssignment teamwork) {
     var boticarios = travelers.stream()
         .filter(traveler -> traveler.hasActiveRole(BOTICARIO_CODE))
         .sorted(travelerOrder())
@@ -341,20 +366,26 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
       if (servant != null) {
         var bonus = canExerciseRole(servant, BOTICARIO_CODE) ? BigDecimal.valueOf(5) : BigDecimal.valueOf(2.5d);
         value = value.add(bonus);
-        details.add("Sirviente: " + servant.fullName());
         details.add(canExerciseRole(servant, BOTICARIO_CODE)
-            ? "El sirviente también puede ser boticario: +5 po"
-            : "El sirviente no puede ser boticario: +2.5 po");
+            ? "Sirviente: " + servant.fullName() + " (boticario): +" + formatBigDecimalString(bonus) + " po"
+            : "Sirviente: " + servant.fullName() + " (no puede ser boticario): +" + formatBigDecimalString(bonus) + " po");
+      }
+      if (teamwork.appliesTo(boticario.id())) {
+        value = value.multiply(teamwork.multiplier());
+        appendTeamworkDetails(details, teamwork);
       }
       total = total.add(value);
-      details.add("Valor generado: " + formatBigDecimal(value) + " po");
+      details.add("Valor generado: " + formatBigDecimalString(value) + " po");
       logs.add(new CaravanDayCycleLogEntryView("pre-food", boticario.fullName(), details, value));
     }
     if (!boticarios.isEmpty()) {
+      var summaryDetails = new ArrayList<String>();
+      summaryDetails.add("Valor alquímico total generado: " + formatBigDecimal(total) + " po");
+      appendTeamworkSummary(summaryDetails, "boticarios", teamwork);
       logs.add(new CaravanDayCycleLogEntryView(
           "pre-food-summary",
           "Resumen de boticarios",
-          List.of("Valor alquímico total generado: " + formatBigDecimal(total) + " po"),
+          summaryDetails,
           total));
     }
     return total;
@@ -379,7 +410,10 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
     logs.add(new CaravanDayCycleLogEntryView("pre-food-summary", "Resumen de artesanos", details, BigDecimal.ZERO));
   }
 
-  private BigDecimal resolveBatidores(List<CaravanTraveler> travelers, List<CaravanDayCycleLogEntryView> logs) {
+  private BigDecimal resolveBatidores(
+      List<CaravanTraveler> travelers,
+      List<CaravanDayCycleLogEntryView> logs,
+      TeamworkAssignment teamwork) {
     var batidores = travelers.stream()
         .filter(traveler -> traveler.hasActiveRole(BATIDOR_CODE))
         .sorted(travelerOrder())
@@ -394,20 +428,26 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
       if (servant != null) {
         var bonus = canExerciseRole(servant, BATIDOR_CODE) ? BigDecimal.valueOf(2) : BigDecimal.ONE;
         generated = generated.add(bonus);
-        details.add("Sirviente: " + servant.fullName());
         details.add(canExerciseRole(servant, BATIDOR_CODE)
-            ? "El sirviente también puede ser batidor: +2 comida"
-            : "El sirviente no puede ser batidor: +1 comida");
+            ? "Sirviente: " + servant.fullName() + " (batidor): +" + formatBigDecimalString(bonus) + " comida"
+            : "Sirviente: " + servant.fullName() + " (no puede ser batidor): +" + formatBigDecimalString(bonus) + " comida");
+      }
+      if (teamwork.appliesTo(batidor.id())) {
+        generated = generated.multiply(teamwork.multiplier());
+        appendTeamworkDetails(details, teamwork);
       }
       total = total.add(generated);
-      details.add("Comida generada: " + formatBigDecimal(generated));
+      details.add("Comida generada: " + formatBigDecimalString(generated));
       logs.add(new CaravanDayCycleLogEntryView("batidor", batidor.fullName(), details, generated));
     }
     if (!batidores.isEmpty()) {
+      var summaryDetails = new ArrayList<String>();
+      summaryDetails.add("Comida generada por batidores: " + formatBigDecimal(total));
+      appendTeamworkSummary(summaryDetails, "batidores", teamwork);
       logs.add(new CaravanDayCycleLogEntryView(
           "batidor-summary",
           "Resumen de batidores",
-          List.of("Comida generada por batidores: " + formatBigDecimal(total)),
+          summaryDetails,
           total));
     }
     return total;
@@ -613,13 +653,13 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
         && traveler.availableRoleCodes().contains(roleCode);
   }
 
-  private List<CookCandidate> resolveCooks(List<CaravanTraveler> travelers) {
+  private List<CookCandidate> resolveCooks(List<CaravanTraveler> travelers, TeamworkAssignment teamwork) {
     return travelers.stream()
         .filter(traveler -> traveler.hasActiveRole(COOK_CODE))
         .map(traveler -> {
           var servant = findServantFor(travelers, traveler.id());
           var priority = servant == null ? 3 : canExerciseRole(servant, COOK_CODE) ? 1 : 2;
-          return new CookCandidate(traveler, servant, priority);
+          return new CookCandidate(traveler, servant, priority, teamwork.appliesTo(traveler.id()));
         })
         .sorted(Comparator
             .comparingInt(CookCandidate::priority)
@@ -638,29 +678,37 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
     return null;
   }
 
-  private BigDecimal resolveCookOutput(CookCandidate cook, boolean portableKitchenUsed, List<CaravanDayCycleLogEntryView> logs) {
+  private BigDecimal resolveCookOutput(
+      CookCandidate cook,
+      boolean portableKitchenUsed,
+      List<CaravanDayCycleLogEntryView> logs,
+      TeamworkAssignment teamwork) {
     if (cook == null) {
       return TEN;
     }
     var multiplier = BigDecimal.ONE;
     var details = new ArrayList<String>();
-    details.add("Cocinero: " + cook.traveler().fullName());
-    if (cook.servant() != null) {
-      multiplier = multiplier.add(BigDecimal.valueOf(0.5d));
-      details.add("Sirviente: " + cook.servant().fullName());
-      if (canExerciseRole(cook.servant(), COOK_CODE)) {
+      details.add("Cocinero: " + cook.traveler().fullName());
+      if (cook.servant() != null) {
         multiplier = multiplier.add(BigDecimal.valueOf(0.5d));
-        details.add("El sirviente también puede ser cocinero: +50%");
-      } else {
-        details.add("El sirviente no puede ser cocinero: +50%");
+        details.add(canExerciseRole(cook.servant(), COOK_CODE)
+            ? "Sirviente: " + cook.servant().fullName() + " (cocinero): +0.5"
+            : "Sirviente: " + cook.servant().fullName() + " (no puede ser cocinero): +0.5");
+        if (canExerciseRole(cook.servant(), COOK_CODE)) {
+          multiplier = multiplier.add(BigDecimal.valueOf(0.5d));
+        } else {
+        }
       }
-    }
     if (portableKitchenUsed) {
       multiplier = multiplier.add(ONE);
       details.add("Cocina portátil aplicada: +100%");
     }
     var food = TEN.add(FIVE.multiply(multiplier));
-    details.add("Comida obtenida por esta unidad: " + formatBigDecimal(food));
+    if (cook.teamworkApplied()) {
+      food = food.multiply(teamwork.multiplier());
+      appendTeamworkDetails(details, teamwork);
+    }
+    details.add("Comida obtenida por esta unidad: " + formatBigDecimalString(food));
     logs.add(new CaravanDayCycleLogEntryView("cook", cook.traveler().fullName(), details, food));
     return food;
   }
@@ -674,6 +722,61 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
       }
     }
     return null;
+  }
+
+  private boolean hasActiveTeamworkFeat(List<CaravanFeat> feats) {
+    return feats.stream().anyMatch(feat -> feat.active() && TEAMWORK_FEAT_CODE.equals(feat.featTypeCode()));
+  }
+
+  private TeamworkAssignment resolveTeamworkAssignment(List<CaravanTraveler> travelers, String roleCode, boolean enabled) {
+    if (!enabled) {
+      return TeamworkAssignment.disabled(roleCode);
+    }
+    var selectedTravelerIds = travelers.stream()
+        .filter(traveler -> traveler.hasActiveRole(roleCode))
+        .map(traveler -> {
+          var servant = findServantFor(travelers, traveler.id());
+          var priority = servant == null ? 3 : canExerciseRole(servant, roleCode) ? 1 : 2;
+          return new TeamworkCandidate(traveler.id(), priority, traveler.fullName());
+        })
+        .sorted(Comparator
+            .comparingInt(TeamworkCandidate::priority)
+            .thenComparing(TeamworkCandidate::travelerFullName, String.CASE_INSENSITIVE_ORDER)
+            .thenComparing(TeamworkCandidate::travelerId))
+        .limit(3)
+        .map(TeamworkCandidate::travelerId)
+        .toList();
+    return TeamworkAssignment.of(roleCode, selectedTravelerIds);
+  }
+
+  private void appendTeamworkDetails(List<String> details, TeamworkAssignment teamwork) {
+    if (!teamwork.hasBonus()) {
+      return;
+    }
+    details.add("Trabajo en equipo aplicado.");
+  }
+
+  private void appendTeamworkSummary(List<String> details, String roleLabel, TeamworkAssignment teamwork) {
+    if (!teamwork.hasBonus()) {
+      return;
+    }
+    details.add("Trabajo en equipo en " + roleLabel + ": "
+        + teamwork.beneficiaryCount()
+        + " beneficiados, x"
+        + formatBigDecimalString(teamwork.multiplier()));
+  }
+
+  private void appendCookTeamworkSummary(List<CaravanDayCycleLogEntryView> logs, TeamworkAssignment teamwork) {
+    if (!teamwork.hasBonus()) {
+      return;
+    }
+    logs.add(new CaravanDayCycleLogEntryView(
+        "cook-summary",
+        "Trabajo en equipo en cocineros",
+        List.of(
+            "Beneficiarios: " + teamwork.beneficiaryCount(),
+            "Multiplicador aplicado: x" + formatBigDecimalString(teamwork.multiplier())),
+        BigDecimal.ZERO));
   }
 
   private Map<UUID, BigDecimal> loadAgricultorProgress(String sharedState) {
@@ -773,6 +876,9 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
     var builder = new StringBuilder();
     builder.append(state.caravan().id()).append('|').append(state.caravan().updatedAt()).append('|');
     builder.append(state.supplyState().updatedAt()).append('|').append(state.supplyState().daysPassed()).append('|');
+    state.feats().stream().sorted(Comparator.comparing(CaravanFeat::id)).forEach(feat ->
+        builder.append(feat.id()).append(':').append(feat.updatedAt()).append(':').append(feat.featTypeCode()).append(':')
+            .append(feat.active()).append('|'));
     state.travelers().stream().sorted(Comparator.comparing(CaravanTraveler::id)).forEach(traveler ->
         builder.append(traveler.id()).append(':').append(traveler.updatedAt()).append(':').append(traveler.activeRoleCode()).append('|'));
     state.wagons().stream().sorted(Comparator.comparing(CaravanWagon::id)).forEach(wagon ->
@@ -851,6 +957,7 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
       List<CaravanTraveler> travelers,
       List<CaravanWagon> wagons,
       List<CaravanCargo> cargo,
+      List<CaravanFeat> feats,
       List<CaravanCargoSummaryView> cargoSummaries,
       com.gestioncaravana.application.model.CaravanStatisticsView statistics) {}
 
@@ -861,6 +968,38 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
       String sharedJobProductivityState,
       List<CaravanDayCycleLogEntryView> logs,
       List<String> warnings) {}
+
+  private record TeamworkCandidate(UUID travelerId, int priority, String travelerFullName) {}
+
+  private record TeamworkAssignment(
+      String roleCode,
+      List<UUID> beneficiaryTravelerIds,
+      BigDecimal multiplier,
+      BigDecimal cookBonus) {
+
+    static TeamworkAssignment disabled(String roleCode) {
+      return new TeamworkAssignment(roleCode, List.of(), ONE, BigDecimal.ZERO);
+    }
+
+    static TeamworkAssignment of(String roleCode, List<UUID> beneficiaryTravelerIds) {
+      var count = beneficiaryTravelerIds.size();
+      var multiplier = ONE.add(QUARTER.multiply(BigDecimal.valueOf(Math.max(0, count - 1L))));
+      var cookBonus = QUARTER.multiply(BigDecimal.valueOf(Math.max(0, count - 1L)));
+      return new TeamworkAssignment(roleCode, List.copyOf(beneficiaryTravelerIds), multiplier, cookBonus);
+    }
+
+    boolean appliesTo(UUID travelerId) {
+      return hasBonus() && beneficiaryTravelerIds.contains(travelerId);
+    }
+
+    boolean hasBonus() {
+      return beneficiaryTravelerIds.size() >= 2;
+    }
+
+    int beneficiaryCount() {
+      return beneficiaryTravelerIds.size();
+    }
+  }
 
   private enum TempCargoType {
     REGULAR,
@@ -918,12 +1057,14 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
     private final CaravanTraveler traveler;
     private final CaravanTraveler servant;
     private final int priority;
+    private final boolean teamworkApplied;
     private boolean used;
 
-    private CookCandidate(CaravanTraveler traveler, CaravanTraveler servant, int priority) {
+    private CookCandidate(CaravanTraveler traveler, CaravanTraveler servant, int priority, boolean teamworkApplied) {
       this.traveler = traveler;
       this.servant = servant;
       this.priority = priority;
+      this.teamworkApplied = teamworkApplied;
     }
 
     private CaravanTraveler traveler() {
@@ -936,6 +1077,10 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
 
     private int priority() {
       return priority;
+    }
+
+    private boolean teamworkApplied() {
+      return teamworkApplied;
     }
 
     private boolean used() {

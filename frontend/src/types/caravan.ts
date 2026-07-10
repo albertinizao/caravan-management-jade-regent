@@ -101,6 +101,27 @@ export interface CaravanDayCyclePreview {
   warnings: string[];
 }
 
+export interface CaravanMultiDayCyclePreview {
+  caravanId: string;
+  basePreviewFingerprint: string;
+  confirmed: boolean;
+  requestedDays: number;
+  startDayIndex: number;
+  endDayIndex: number;
+  totalRequiredConsumption: number;
+  totalGeneratedFood: number;
+  totalGeneratedSuppliesFromAgricultors: number;
+  totalGeneratedAlchemyValueFromBoticarios: number;
+  totalSuppliesConsumed: number;
+  daysWithUncoveredConsumption: number;
+  finalSupplyUnits: number;
+  finalPerishableUnits: number;
+  finalPerishableFood: number;
+  confirmedAt: string | null;
+  warnings: string[];
+  dayPreviews: CaravanDayCyclePreview[];
+}
+
 export interface CaravanSupplyConsumption {
   remainingFood: number;
 }

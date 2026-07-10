@@ -2,9 +2,12 @@ package com.gestioncaravana.application.usecase;
 
 import com.gestioncaravana.application.model.CaravanDayCycleLogEntryView;
 import com.gestioncaravana.application.model.CaravanDayCyclePreviewView;
+import com.gestioncaravana.application.model.CaravanMultiDayCyclePreviewView;
 import com.gestioncaravana.application.model.CaravanCargoSummaryView;
+import com.gestioncaravana.application.port.in.ConfirmCaravanMultiDayCycleUseCase;
 import com.gestioncaravana.application.port.in.ConfirmCaravanDayCycleUseCase;
 import com.gestioncaravana.application.port.in.ListCaravanCargoSummaryUseCase;
+import com.gestioncaravana.application.port.in.PreviewCaravanMultiDayCycleUseCase;
 import com.gestioncaravana.application.port.in.PreviewCaravanDayCycleUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanStatisticsUseCase;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
@@ -40,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.LinkedHashSet;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,7 +51,11 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 @Transactional
-public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, ConfirmCaravanDayCycleUseCase {
+public class CaravanDayCycleService implements
+    PreviewCaravanDayCycleUseCase,
+    ConfirmCaravanDayCycleUseCase,
+    PreviewCaravanMultiDayCycleUseCase,
+    ConfirmCaravanMultiDayCycleUseCase {
 
   private static final String SUPPLIES_CODE = "suministros";
   private static final String PERISHABLE_SUPPLIES_CODE = "suministros-perecederos";
@@ -63,6 +71,7 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
   private static final BigDecimal FIVE = BigDecimal.valueOf(5);
   private static final BigDecimal TEN = BigDecimal.TEN;
   private static final BigDecimal HALF = BigDecimal.valueOf(0.5d);
+  private static final BigDecimal FIFTEEN = BigDecimal.valueOf(15);
 
   private final CaravanCampaignRepositoryPort caravanRepository;
   private final CaravanTravelerRepositoryPort travelerRepository;
@@ -106,6 +115,14 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
   }
 
   @Override
+  @Transactional(readOnly = true)
+  public CaravanMultiDayCyclePreviewView preview(UUID caravanId, PreviewCaravanMultiDayCycleCommand command) {
+    var days = requireDays(command == null ? null : command.days());
+    var state = loadState(caravanId);
+    return simulateMultiple(state, days, false).previewView();
+  }
+
+  @Override
   public CaravanDayCyclePreviewView confirm(UUID caravanId, ConfirmCaravanDayCycleCommand command) {
     if (command == null || command.previewFingerprint() == null || command.previewFingerprint().isBlank()) {
       throw new IllegalArgumentException("previewFingerprint is required");
@@ -122,15 +139,57 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
     return simulation.previewView().withConfirmation(simulation.result().id(), simulation.result().resolvedAt());
   }
 
+  @Override
+  public CaravanMultiDayCyclePreviewView confirm(UUID caravanId, ConfirmCaravanMultiDayCycleCommand command) {
+    if (command == null || command.basePreviewFingerprint() == null || command.basePreviewFingerprint().isBlank()) {
+      throw new IllegalArgumentException("basePreviewFingerprint is required");
+    }
+    var days = requireDays(command.days());
+    var state = loadState(caravanId);
+    var currentFingerprint = fingerprint(state);
+    if (!currentFingerprint.equals(command.basePreviewFingerprint())) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "The day preview is stale. Please refresh the simulation.");
+    }
+
+    var simulation = simulateMultiple(state, days, true);
+    persistMultiResolution(state, simulation);
+    return simulation.previewView();
+  }
+
   private void persistResolution(DayCycleState state, DayCycleSimulation simulation) {
-    var now = simulation.result().resolvedAt();
-    cargoRepository.deleteByCaravanId(state.caravan().id());
-    for (var cargo : simulation.updatedCargo()) {
+    persistCargoAndSupplyState(state.caravan().id(), simulation.nextSupplyState(), simulation.updatedCargo());
+    dayCycleResultRepository.save(simulation.result());
+  }
+
+  private void persistMultiResolution(DayCycleState initialState, MultiDayCycleSimulation simulation) {
+    persistCargoAndSupplyState(
+        initialState.caravan().id(),
+        simulation.finalState().supplyState(),
+        simulation.finalState().cargo());
+    for (var daySimulation : simulation.daySimulations()) {
+      dayCycleResultRepository.save(daySimulation.result());
+    }
+  }
+
+  private void persistCargoAndSupplyState(
+      UUID caravanId,
+      CaravanSupplyState supplyState,
+      List<CaravanCargo> cargoEntries) {
+    cargoRepository.deleteByCaravanId(caravanId);
+    for (var cargo : cargoEntries) {
       cargoRepository.save(cargo);
     }
-    supplyStateRepository.save(
-        state.supplyState().withSharedJobProductivityState(simulation.sharedJobProductivityState(), now));
-    dayCycleResultRepository.save(simulation.result());
+    supplyStateRepository.save(supplyState);
+  }
+
+  private int requireDays(Integer days) {
+    if (days == null) {
+      throw new IllegalArgumentException("days is required");
+    }
+    if (days < 1 || days > 30) {
+      throw new IllegalArgumentException("days must be between 1 and 30");
+    }
+    return days;
   }
 
   private DayCycleSimulation simulate(DayCycleState state, boolean confirmed, String confirmationFingerprint) {
@@ -277,7 +336,67 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
         logs,
         warnings);
 
-    return new DayCycleSimulation(result, previewView, rebuiltCargo, serializeProgress(progressState), logs, warnings);
+    var nextSupplyState = state.supplyState().advanceDay(now, serializeProgress(progressState));
+    return new DayCycleSimulation(result, previewView, rebuiltCargo, nextSupplyState, logs, warnings);
+  }
+
+  private MultiDayCycleSimulation simulateMultiple(DayCycleState initialState, int days, boolean confirmed) {
+    var basePreviewFingerprint = fingerprint(initialState);
+    var daySimulations = new ArrayList<DayCycleSimulation>(days);
+    var currentState = initialState;
+    for (var index = 0; index < days; index++) {
+      var simulation = simulate(currentState, confirmed, basePreviewFingerprint);
+      daySimulations.add(simulation);
+      currentState = advanceState(currentState, simulation);
+    }
+    return new MultiDayCycleSimulation(
+        buildMultiDayPreview(initialState, basePreviewFingerprint, confirmed, daySimulations),
+        daySimulations,
+        currentState);
+  }
+
+  private DayCycleState advanceState(DayCycleState currentState, DayCycleSimulation simulation) {
+    return new DayCycleState(
+        currentState.caravan(),
+        simulation.nextSupplyState(),
+        currentState.travelers(),
+        currentState.wagons(),
+        simulation.updatedCargo(),
+        currentState.feats(),
+        recalculateCargoSummaries(currentState.cargoSummaries(), simulation.updatedCargo()),
+        currentState.statistics());
+  }
+
+  private CaravanMultiDayCyclePreviewView buildMultiDayPreview(
+      DayCycleState initialState,
+      String basePreviewFingerprint,
+      boolean confirmed,
+      List<DayCycleSimulation> daySimulations) {
+    var dayPreviews = daySimulations.stream().map(DayCycleSimulation::previewView).toList();
+    var firstPreview = dayPreviews.getFirst();
+    var lastPreview = dayPreviews.getLast();
+    var warnings = dayPreviews.stream()
+        .flatMap(preview -> preview.warnings().stream())
+        .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    return new CaravanMultiDayCyclePreviewView(
+        initialState.caravan().id(),
+        basePreviewFingerprint,
+        confirmed,
+        daySimulations.size(),
+        firstPreview.dayIndex(),
+        lastPreview.dayIndex(),
+        dayPreviews.stream().map(CaravanDayCyclePreviewView::requiredConsumption).reduce(BigDecimal.ZERO, BigDecimal::add),
+        dayPreviews.stream().map(CaravanDayCyclePreviewView::generatedFood).reduce(BigDecimal.ZERO, BigDecimal::add),
+        dayPreviews.stream().mapToInt(CaravanDayCyclePreviewView::generatedSuppliesFromAgricultors).sum(),
+        dayPreviews.stream().map(CaravanDayCyclePreviewView::generatedAlchemyValueFromBoticarios).reduce(BigDecimal.ZERO, BigDecimal::add),
+        dayPreviews.stream().mapToInt(CaravanDayCyclePreviewView::suppliesConsumed).sum(),
+        (int) dayPreviews.stream().filter(preview -> !preview.consumptionCovered()).count(),
+        lastPreview.finalSupplyUnits(),
+        lastPreview.finalPerishableUnits(),
+        lastPreview.finalPerishableFood(),
+        confirmed ? daySimulations.getLast().result().resolvedAt() : null,
+        List.copyOf(warnings),
+        dayPreviews);
   }
 
   private DayCycleState loadState(UUID caravanId) {
@@ -292,6 +411,30 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
     var statistics = statisticsUseCase.getById(caravanId);
     var cargoSummaries = cargoSummaryUseCase.list(caravanId);
     return new DayCycleState(caravan, supplyState, travelers, wagons, cargo, feats, cargoSummaries, statistics);
+  }
+
+  private List<CaravanCargoSummaryView> recalculateCargoSummaries(
+      List<CaravanCargoSummaryView> currentSummaries,
+      List<CaravanCargo> updatedCargo) {
+    return currentSummaries.stream()
+        .map(summary -> {
+          var usedCargoUnits = updatedCargo.stream()
+              .filter(cargo -> summary.wagonId().equals(cargo.wagonId()))
+              .mapToInt(cargo -> cargo.quantity() * cargo.cargoUnits())
+              .sum();
+          var remainingCargoUnits = Math.max(0, summary.cargoCapacity() - usedCargoUnits);
+          var cargoEntryCount = (int) updatedCargo.stream()
+              .filter(cargo -> summary.wagonId().equals(cargo.wagonId()))
+              .count();
+          return new CaravanCargoSummaryView(
+              summary.wagonId(),
+              summary.wagonName(),
+              summary.cargoCapacity(),
+              usedCargoUnits,
+              remainingCargoUnits,
+              cargoEntryCount);
+        })
+        .toList();
   }
 
   private int resolveAgricultors(
@@ -688,26 +831,27 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
     }
     var multiplier = BigDecimal.ONE;
     var details = new ArrayList<String>();
-      details.add("Cocinero: " + cook.traveler().fullName());
-      if (cook.servant() != null) {
-        multiplier = multiplier.add(BigDecimal.valueOf(0.5d));
-        details.add(canExerciseRole(cook.servant(), COOK_CODE)
-            ? "Sirviente: " + cook.servant().fullName() + " (cocinero): +0.5"
-            : "Sirviente: " + cook.servant().fullName() + " (no puede ser cocinero): +0.5");
-        if (canExerciseRole(cook.servant(), COOK_CODE)) {
-          multiplier = multiplier.add(BigDecimal.valueOf(0.5d));
-        } else {
-        }
+    details.add("Cocinero: " + cook.traveler().fullName());
+    if (cook.servant() != null) {
+      multiplier = multiplier.add(HALF);
+      var servantCanCook = canExerciseRole(cook.servant(), COOK_CODE);
+      details.add(servantCanCook
+          ? "Sirviente: " + cook.servant().fullName() + " (cocinero): +0.5"
+          : "Sirviente: " + cook.servant().fullName() + " (no puede ser cocinero): +0.5");
+      if (servantCanCook) {
+        multiplier = multiplier.add(HALF);
+        details.add("El sirviente también puede ser cocinero: +0.5 adicional");
       }
+    }
     if (portableKitchenUsed) {
       multiplier = multiplier.add(ONE);
       details.add("Cocina portátil aplicada: +100%");
     }
-    var food = TEN.add(FIVE.multiply(multiplier));
     if (cook.teamworkApplied()) {
-      food = food.multiply(teamwork.multiplier());
+      multiplier = multiplier.add(teamwork.cookBonus());
       appendTeamworkDetails(details, teamwork);
     }
+    var food = FIFTEEN.multiply(multiplier);
     details.add("Comida obtenida por esta unidad: " + formatBigDecimalString(food));
     logs.add(new CaravanDayCycleLogEntryView("cook", cook.traveler().fullName(), details, food));
     return food;
@@ -775,7 +919,7 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
         "Trabajo en equipo en cocineros",
         List.of(
             "Beneficiarios: " + teamwork.beneficiaryCount(),
-            "Multiplicador aplicado: x" + formatBigDecimalString(teamwork.multiplier())),
+            "Multiplicador aplicado: x" + formatBigDecimalString(ONE.add(teamwork.cookBonus()))),
         BigDecimal.ZERO));
   }
 
@@ -965,9 +1109,14 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
       CaravanDayCycleResult result,
       CaravanDayCyclePreviewView previewView,
       List<CaravanCargo> updatedCargo,
-      String sharedJobProductivityState,
+      CaravanSupplyState nextSupplyState,
       List<CaravanDayCycleLogEntryView> logs,
       List<String> warnings) {}
+
+  private record MultiDayCycleSimulation(
+      CaravanMultiDayCyclePreviewView previewView,
+      List<DayCycleSimulation> daySimulations,
+      DayCycleState finalState) {}
 
   private record TeamworkCandidate(UUID travelerId, int priority, String travelerFullName) {}
 
@@ -984,7 +1133,7 @@ public class CaravanDayCycleService implements PreviewCaravanDayCycleUseCase, Co
     static TeamworkAssignment of(String roleCode, List<UUID> beneficiaryTravelerIds) {
       var count = beneficiaryTravelerIds.size();
       var multiplier = ONE.add(QUARTER.multiply(BigDecimal.valueOf(Math.max(0, count - 1L))));
-      var cookBonus = QUARTER.multiply(BigDecimal.valueOf(Math.max(0, count - 1L)));
+      var cookBonus = HALF.multiply(BigDecimal.valueOf(Math.max(0, count - 1L)));
       return new TeamworkAssignment(roleCode, List.copyOf(beneficiaryTravelerIds), multiplier, cookBonus);
     }
 

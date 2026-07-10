@@ -1,15 +1,19 @@
 package com.gestioncaravana.application.usecase;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.gestioncaravana.application.model.CaravanCargoSummaryView;
 import com.gestioncaravana.application.model.CaravanDerivedStatsView;
 import com.gestioncaravana.application.model.CaravanMainStatsView;
+import com.gestioncaravana.application.model.CaravanMultiDayCyclePreviewView;
 import com.gestioncaravana.application.model.CaravanOtherStatsView;
 import com.gestioncaravana.application.model.CaravanStatisticsView;
 import com.gestioncaravana.application.port.in.ConfirmCaravanDayCycleUseCase.ConfirmCaravanDayCycleCommand;
+import com.gestioncaravana.application.port.in.ConfirmCaravanMultiDayCycleUseCase.ConfirmCaravanMultiDayCycleCommand;
 import com.gestioncaravana.application.port.in.GetCaravanStatisticsUseCase;
 import com.gestioncaravana.application.port.in.ListCaravanCargoSummaryUseCase;
+import com.gestioncaravana.application.port.in.PreviewCaravanMultiDayCycleUseCase.PreviewCaravanMultiDayCycleCommand;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanDayCycleResultRepositoryPort;
@@ -39,6 +43,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
 
 class CaravanDayCycleServiceTest {
 
@@ -205,7 +210,7 @@ class CaravanDayCycleServiceTest {
     configureCargoSummary(wagon.id(), 20);
     supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
     activateTeamworkFeat(caravan.id());
-    setConsumption(80);
+    setConsumption(100);
 
     createSupply(caravan.id(), wagon.id(), "suministros");
     createSupply(caravan.id(), wagon.id(), "suministros");
@@ -224,17 +229,137 @@ class CaravanDayCycleServiceTest {
     var preview = service.preview(caravan.id());
     var confirmed = service.confirm(caravan.id(), new ConfirmCaravanDayCycleCommand(preview.previewFingerprint()));
 
-    assertThat(findSimulationEntry(preview, "Cook A").foodDelta()).isEqualByComparingTo("30.0");
+    assertThat(findSimulationEntry(preview, "Cook A").foodDelta()).isEqualByComparingTo("45.0");
     assertThat(findSimulationEntry(preview, "Cook A").details()).contains("Trabajo en equipo aplicado.");
     assertThat(findSimulationEntry(preview, "Cook B").details()).contains("Trabajo en equipo aplicado.");
     assertThat(findSimulationEntry(preview, "Cook C").details()).contains("Trabajo en equipo aplicado.");
     assertThat(preview.simulation().stream().filter(entry -> "cook".equals(entry.section())).map(entry -> entry.title()).toList())
         .containsExactly("Cook A", "Cook B", "Cook C");
     assertThat(findSimulationEntry(preview, "Trabajo en equipo en cocineros").details())
-        .contains("Beneficiarios: 3", "Multiplicador aplicado: x1.5");
-    assertThat(preview.generatedFood()).isEqualByComparingTo("90.0");
+        .contains("Beneficiarios: 3", "Multiplicador aplicado: x2");
+    assertThat(preview.generatedFood()).isEqualByComparingTo("135.0");
     assertThat(confirmed.generatedFood()).isEqualByComparingTo(preview.generatedFood());
     assertThat(confirmed.leftoverFood()).isEqualByComparingTo(preview.leftoverFood());
+  }
+
+  @Test
+  void cookAddsServantPortableKitchenAndTeamworkMultipliersBeforeApplyingBaseFood() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id());
+    configureCargoSummary(wagon.id(), 20);
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
+    activateTeamworkFeat(caravan.id());
+    setConsumption(45);
+
+    createSupply(caravan.id(), wagon.id(), "suministros");
+    createCargo(caravan.id(), wagon.id(), "cocina-portatil");
+
+    var cook = createTraveler(
+        caravan.id(),
+        wagon.id(),
+        "Cook Prime",
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        TravelerRoleData.empty());
+    createTraveler(
+        caravan.id(),
+        wagon.id(),
+        "Cook Support",
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        TravelerRoleData.empty());
+    createServant(caravan.id(), wagon.id(), "Cook Servant", cook.id(), List.of("pasajero", "sirviente", "cocinero"));
+
+    var preview = service.preview(caravan.id());
+
+    assertThat(findSimulationEntry(preview, "Cook Prime").foodDelta()).isEqualByComparingTo("52.5");
+    assertThat(findSimulationEntry(preview, "Cook Prime").details())
+        .contains("Sirviente: Cook Servant (cocinero): +0.5")
+        .contains("El sirviente también puede ser cocinero: +0.5 adicional")
+        .contains("Cocina portátil aplicada: +100%")
+        .contains("Trabajo en equipo aplicado.")
+        .contains("Comida obtenida por esta unidad: 52.5");
+  }
+
+  @Test
+  void confirmAdvancesDaysPassed() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id());
+    configureCargoSummary(wagon.id(), 20);
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
+
+    createSupply(caravan.id(), wagon.id(), "suministros");
+
+    var preview = service.preview(caravan.id());
+    service.confirm(caravan.id(), new ConfirmCaravanDayCycleCommand(preview.previewFingerprint()));
+
+    var persistedState = supplyStateRepository.findByCaravanId(caravan.id()).orElseThrow();
+    assertThat(persistedState.daysPassed()).isEqualTo(1);
+  }
+
+  @Test
+  void multiDayPreviewChainsDaysFromPreviousSimulationState() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id());
+    configureCargoSummary(wagon.id(), 20);
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
+    setConsumption(15);
+
+    createSupply(caravan.id(), wagon.id(), "suministros");
+    createSupply(caravan.id(), wagon.id(), "suministros");
+
+    CaravanMultiDayCyclePreviewView preview = service.preview(
+        caravan.id(),
+        new PreviewCaravanMultiDayCycleCommand(2));
+
+    assertThat(preview.requestedDays()).isEqualTo(2);
+    assertThat(preview.dayPreviews()).hasSize(2);
+    assertThat(preview.dayPreviews().get(0).dayIndex()).isEqualTo(1);
+    assertThat(preview.dayPreviews().get(1).dayIndex()).isEqualTo(2);
+    assertThat(preview.dayPreviews().get(0).finalPerishableFood())
+        .isEqualByComparingTo(preview.dayPreviews().get(1).currentPerishableFood());
+    assertThat(preview.finalPerishableFood())
+        .isEqualByComparingTo(preview.dayPreviews().get(1).finalPerishableFood());
+  }
+
+  @Test
+  void multiDayConfirmPersistsEveryDayAndAdvancesSupplyState() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id());
+    configureCargoSummary(wagon.id(), 20);
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
+    setConsumption(15);
+
+    createSupply(caravan.id(), wagon.id(), "suministros");
+    createSupply(caravan.id(), wagon.id(), "suministros");
+
+    var preview = service.preview(caravan.id(), new PreviewCaravanMultiDayCycleCommand(2));
+    var confirmed = service.confirm(
+        caravan.id(),
+        new ConfirmCaravanMultiDayCycleCommand(2, preview.basePreviewFingerprint()));
+
+    assertThat(confirmed.confirmed()).isTrue();
+    assertThat(dayCycleResultRepository.findAllByCaravanId(caravan.id())).hasSize(2);
+    assertThat(supplyStateRepository.findByCaravanId(caravan.id()).orElseThrow().daysPassed()).isEqualTo(2);
+  }
+
+  @Test
+  void multiDayConfirmRejectsStaleBaseFingerprint() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id());
+    configureCargoSummary(wagon.id(), 20);
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
+
+    var preview = service.preview(caravan.id(), new PreviewCaravanMultiDayCycleCommand(2));
+    createSupply(caravan.id(), wagon.id(), "suministros");
+
+    assertThatThrownBy(() -> service.confirm(
+        caravan.id(),
+        new ConfirmCaravanMultiDayCycleCommand(2, preview.basePreviewFingerprint())))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("stale");
   }
 
   private CaravanCampaign createCaravan() {

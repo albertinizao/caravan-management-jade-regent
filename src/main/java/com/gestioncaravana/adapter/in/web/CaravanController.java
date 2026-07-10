@@ -49,8 +49,11 @@ import com.gestioncaravana.application.port.in.UpdateCaravanMainStatsUseCase;
 import com.gestioncaravana.application.port.in.RepairCaravanWagonUseCase;
 import com.gestioncaravana.application.port.in.PreviewCaravanDayCycleUseCase;
 import com.gestioncaravana.application.port.in.ConfirmCaravanDayCycleUseCase;
+import com.gestioncaravana.application.port.in.PreviewCaravanMultiDayCycleUseCase;
+import com.gestioncaravana.application.port.in.ConfirmCaravanMultiDayCycleUseCase;
 import com.gestioncaravana.application.model.CaravanBackupView;
 import com.gestioncaravana.application.model.CaravanDayCyclePreviewView;
+import com.gestioncaravana.application.model.CaravanMultiDayCyclePreviewView;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -78,6 +81,8 @@ public class CaravanController {
   private final GetCaravanStatisticsUseCase getCaravanStatisticsUseCase;
   private final PreviewCaravanDayCycleUseCase previewCaravanDayCycleUseCase;
   private final ConfirmCaravanDayCycleUseCase confirmCaravanDayCycleUseCase;
+  private final PreviewCaravanMultiDayCycleUseCase previewCaravanMultiDayCycleUseCase;
+  private final ConfirmCaravanMultiDayCycleUseCase confirmCaravanMultiDayCycleUseCase;
   private final SelectActiveCaravanUseCase selectActiveCaravanUseCase;
   private final GetActiveCaravanUseCase getActiveCaravanUseCase;
   private final ListWagonCatalogUseCase listWagonCatalogUseCase;
@@ -129,6 +134,8 @@ public class CaravanController {
       GetCaravanStatisticsUseCase getCaravanStatisticsUseCase,
       PreviewCaravanDayCycleUseCase previewCaravanDayCycleUseCase,
       ConfirmCaravanDayCycleUseCase confirmCaravanDayCycleUseCase,
+      PreviewCaravanMultiDayCycleUseCase previewCaravanMultiDayCycleUseCase,
+      ConfirmCaravanMultiDayCycleUseCase confirmCaravanMultiDayCycleUseCase,
       SelectActiveCaravanUseCase selectActiveCaravanUseCase,
       GetActiveCaravanUseCase getActiveCaravanUseCase,
       ListWagonCatalogUseCase listWagonCatalogUseCase,
@@ -178,6 +185,8 @@ public class CaravanController {
     this.getCaravanStatisticsUseCase = getCaravanStatisticsUseCase;
     this.previewCaravanDayCycleUseCase = previewCaravanDayCycleUseCase;
     this.confirmCaravanDayCycleUseCase = confirmCaravanDayCycleUseCase;
+    this.previewCaravanMultiDayCycleUseCase = previewCaravanMultiDayCycleUseCase;
+    this.confirmCaravanMultiDayCycleUseCase = confirmCaravanMultiDayCycleUseCase;
     this.selectActiveCaravanUseCase = selectActiveCaravanUseCase;
     this.getActiveCaravanUseCase = getActiveCaravanUseCase;
     this.listWagonCatalogUseCase = listWagonCatalogUseCase;
@@ -325,6 +334,20 @@ public class CaravanController {
       @PathVariable UUID caravanId,
       @Valid @RequestBody ConfirmCaravanDayCycleUseCase.ConfirmCaravanDayCycleCommand request) {
     return confirmCaravanDayCycleUseCase.confirm(caravanId, request);
+  }
+
+  @PostMapping("/caravans/{caravanId}/day-cycle/preview-multi")
+  CaravanMultiDayCyclePreviewView previewCaravanMultiDayCycle(
+      @PathVariable UUID caravanId,
+      @Valid @RequestBody PreviewCaravanMultiDayCycleUseCase.PreviewCaravanMultiDayCycleCommand request) {
+    return previewCaravanMultiDayCycleUseCase.preview(caravanId, request);
+  }
+
+  @PostMapping("/caravans/{caravanId}/day-cycle/confirm-multi")
+  CaravanMultiDayCyclePreviewView confirmCaravanMultiDayCycle(
+      @PathVariable UUID caravanId,
+      @Valid @RequestBody ConfirmCaravanMultiDayCycleUseCase.ConfirmCaravanMultiDayCycleCommand request) {
+    return confirmCaravanMultiDayCycleUseCase.confirm(caravanId, request);
   }
 
   @PatchMapping("/caravans/{caravanId}/main-stats")

@@ -70,6 +70,17 @@ public record CaravanSupplyState(
         sharedJobProductivityState);
   }
 
+  public CaravanSupplyState advanceDay(Instant now, String sharedJobProductivityState) {
+    return new CaravanSupplyState(
+        caravanId,
+        provisionReserve,
+        standardReserve,
+        perishableReserve,
+        daysPassed + 1,
+        now,
+        sharedJobProductivityState);
+  }
+
   private static String normalize(String value) {
     if (value == null || value.isBlank()) {
       return null;

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 
 import {
+  confirmCaravanMultiDayCycle,
   createCaravan,
   confirmCaravanDayCycle,
   deleteCaravan,
@@ -11,6 +12,7 @@ import {
   listCaravans,
   importCaravanBackup,
   previewCaravanDayCycle,
+  previewCaravanMultiDayCycle,
   selectActiveCaravan,
   updateCaravanDiscontent,
   updateCaravanLevel,
@@ -21,6 +23,7 @@ import type {
   Caravan,
   CaravanDayCyclePreview,
   CaravanMainStats,
+  CaravanMultiDayCyclePreview,
   CaravanStatistics,
 } from "@/types/caravan";
 import type { CaravanTraveler } from "@/types/traveler";
@@ -43,6 +46,11 @@ const dayCycleModalOpen = ref(false);
 const dayCycleLoading = ref(false);
 const dayCycleSubmitting = ref(false);
 const dayCyclePreview = ref<CaravanDayCyclePreview | null>(null);
+const multiDayModalOpen = ref(false);
+const multiDayLoading = ref(false);
+const multiDaySubmitting = ref(false);
+const multiDayRequestedDays = ref(2);
+const multiDayPreview = ref<CaravanMultiDayCyclePreview | null>(null);
 const caravanStatistics = ref<CaravanStatistics | null>(null);
 const editableMainStats = ref<CaravanMainStats | null>(null);
 const mainStatsSubmitting = ref(false);
@@ -134,6 +142,12 @@ interface DayCycleCookGapSummary {
   food: number;
 }
 
+interface DayCycleFoodSummary {
+  key: string;
+  label: string;
+  cards: DayCycleTimelineCard[];
+}
+
 const dayCycleTimelineSections = computed<DayCycleTimelineSection[]>(() => {
   const entries = dayCyclePreview.value?.simulation ?? [];
   const sections = new Map<string, DayCycleTimelineCard[]>();
@@ -170,11 +184,122 @@ const dayCycleTimelineSections = computed<DayCycleTimelineSection[]>(() => {
     cards: key === "cocineros" && uncookedSummary
       ? [...cards, createCookGapSummaryCard(uncookedSummary)]
       : cards,
-  }));
+    }));
 });
 
+const dayCycleFoodSummarySection = computed<DayCycleFoodSummary | null>(() => {
+  const preview = dayCyclePreview.value;
+  if (!preview) {
+    return null;
+  }
+
+  const entries = preview.simulation;
+  const batidorEntries = entries.filter((entry) => entry.section === "batidor");
+  const cookEntries = entries.filter((entry) => entry.section === "cook");
+  const unassignedFoodEntries = entries.filter(
+    (entry) =>
+      entry.section === "food" &&
+      entry.title === "Se consume una unidad de suministros" &&
+      entry.details.some((detail) => detail.includes("No había cocinero disponible.")),
+  );
+  const perishableFoodEntry = entries.find(
+    (entry) => entry.section === "food" && entry.title === "Suministros perecederos contabilizados",
+  );
+
+  const batidorFood = batidorEntries.reduce((total, entry) => total + entry.foodDelta, 0);
+  const perishableFood = perishableFoodEntry?.foodDelta ?? preview.currentPerishableFood;
+  const cookFood = cookEntries.reduce((total, entry) => total + entry.foodDelta, 0);
+  const unassignedFood = unassignedFoodEntries.reduce((total, entry) => total + entry.foodDelta, 0);
+  const cards: DayCycleTimelineCard[] = [];
+
+  if (batidorEntries.length > 0) {
+    cards.push({
+      key: "food-batidores",
+      sectionLabel: "Batidores",
+      title: `Batidores (${batidorEntries.length} viajeros)`,
+      details: [`${batidorEntries.length} viajeros aportan ${formatDecimal(batidorFood)} de comida.`],
+      foodDelta: batidorFood,
+      tone: "info",
+      resultLabel: `Comida +${formatDecimal(batidorFood)}`,
+      isSummary: false,
+    });
+  }
+
+  if (preview.currentPerishableUnits > 0 || perishableFood > 0) {
+    cards.push({
+      key: "food-perecedera",
+      sectionLabel: "Comida perecedera",
+      title: "Comida perecedera",
+      details: [`${preview.currentPerishableUnits} unidades contienen ${formatDecimal(perishableFood)} de comida.`],
+      foodDelta: perishableFood,
+      tone: "neutral",
+      resultLabel: `Comida +${formatDecimal(perishableFood)}`,
+      isSummary: false,
+    });
+  }
+
+  if (cookEntries.length > 0) {
+    cards.push({
+      key: "food-cocineros",
+      sectionLabel: "Cocineros",
+      title: `Cocineros (${cookEntries.length} viajeros)`,
+      details: [`${cookEntries.length} viajeros cocinan ${formatDecimal(cookFood)} de comida.`],
+      foodDelta: cookFood,
+      tone: "success",
+      resultLabel: `Comida +${formatDecimal(cookFood)}`,
+      isSummary: false,
+    });
+  }
+
+  if (unassignedFoodEntries.length > 0) {
+    cards.push({
+      key: "food-sin-cocinero",
+      sectionLabel: "Sin cocinero",
+      title: `Sin cocinero (${unassignedFoodEntries.length} unidades)`,
+      details: [
+        `${unassignedFoodEntries.length} unidades se consumen sin cocinero y suman ${formatDecimal(unassignedFood)} de comida.`,
+      ],
+      foodDelta: unassignedFood,
+      tone: "warning",
+      resultLabel: `Comida +${formatDecimal(unassignedFood)}`,
+      isSummary: false,
+    });
+  }
+
+  cards.push({
+    key: "food-total",
+    sectionLabel: "Resumen",
+    title: "Suma total de comida",
+    details: [
+      [
+        batidorEntries.length > 0 ? `Batidores +${formatDecimal(batidorFood)}` : null,
+        preview.currentPerishableUnits > 0 || perishableFood > 0 ? `Perecedera +${formatDecimal(perishableFood)}` : null,
+        cookEntries.length > 0 ? `Cocineros +${formatDecimal(cookFood)}` : null,
+        unassignedFoodEntries.length > 0 ? `Sin cocinero +${formatDecimal(unassignedFood)}` : null,
+      ]
+        .filter((item): item is string => item !== null)
+        .join(" · ") || "No hay fuentes de comida activas.",
+    ],
+    foodDelta: preview.generatedFood,
+    tone: "info",
+    resultLabel: `Comida +${formatDecimal(preview.generatedFood)}`,
+    isSummary: true,
+  });
+
+  return {
+    key: "comida",
+    label: "Comida",
+    cards,
+  };
+});
+
+const dayCycleTimelineSectionsWithFood = computed(() => [
+  ...dayCycleTimelineSections.value,
+  ...(dayCycleFoodSummarySection.value ? [dayCycleFoodSummarySection.value] : []),
+]);
+
 const dayCycleTimelineTabs = computed(() =>
-  dayCycleTimelineSections.value.map((section) => ({
+  dayCycleTimelineSectionsWithFood.value.map((section) => ({
     key: section.key,
     label: dayCycleTimelineTabLabel(section.key),
   })),
@@ -189,7 +314,7 @@ const activeDayCycleTimelineTab = computed(() => {
 });
 
 const visibleDayCycleTimelineSections = computed(() =>
-  dayCycleTimelineSections.value.filter((section) => section.key === activeDayCycleTimelineTab.value),
+  dayCycleTimelineSectionsWithFood.value.filter((section) => section.key === activeDayCycleTimelineTab.value),
 );
 
 function percentageOf(value: number, max: number) {
@@ -326,9 +451,11 @@ function dayCycleGroupTitle(key: string) {
     case "inventario":
       return "Inventario";
     case "sobrante":
-      return "Sobrante";
+      return "Sobrante y reasignación";
     case "reasignacion":
       return "Reasignación";
+    case "comida":
+      return "Comida";
     default:
       return "Simulación";
   }
@@ -347,9 +474,11 @@ function dayCycleTimelineTabLabel(key: string) {
     case "consumo":
       return "Comida total";
     case "sobrante":
-      return "Sobrante";
+      return "Sobrante y reasignación";
     case "reasignacion":
       return "Reasignación";
+    case "comida":
+      return "Comida";
     default:
       return "Simulación";
   }
@@ -370,9 +499,11 @@ function dayCycleGroupHint(key: string) {
     case "inventario":
       return "Las unidades se mueven antes de reasignarse.";
     case "sobrante":
-      return "La comida sobrante se transforma en perecederos.";
+      return "La comida sobrante y su reasignación a carros quedan en la misma pestaña.";
     case "reasignacion":
       return "El inventario temporal vuelve a los carros con capacidad disponible.";
+    case "comida":
+      return "Cada tarjeta resume una fuente distinta de comida y la suma total.";
     default:
       return "";
   }
@@ -408,7 +539,7 @@ function sectionBucketKey(section: string, title: string, details: string[]) {
     case "leftover":
       return "sobrante";
     case "cargo":
-      return "reasignacion";
+      return "sobrante";
     default:
       return section;
   }
@@ -542,6 +673,77 @@ async function confirmDayCycle() {
     error.value = cause instanceof Error ? cause.message : "No se pudo confirmar el paso del día";
   } finally {
     dayCycleSubmitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+function openMultiDayModal() {
+  if (!selectedCaravan.value) {
+    return;
+  }
+
+  multiDayRequestedDays.value = 2;
+  multiDayPreview.value = null;
+  multiDayModalOpen.value = true;
+  error.value = null;
+}
+
+function closeMultiDayModal() {
+  if (multiDaySubmitting.value) {
+    return;
+  }
+
+  multiDayModalOpen.value = false;
+  multiDayPreview.value = null;
+}
+
+async function previewMultipleDays() {
+  if (!selectedCaravan.value) {
+    return;
+  }
+
+  const days = Number(multiDayRequestedDays.value);
+  if (!Number.isInteger(days) || days < 1 || days > 30) {
+    error.value = "Debes indicar un número entero de días entre 1 y 30.";
+    return;
+  }
+
+  multiDayLoading.value = true;
+  error.value = null;
+
+  try {
+    multiDayPreview.value = await previewCaravanMultiDayCycle(selectedCaravan.value.id, days);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "No se pudo generar la simulación de varios días";
+  } finally {
+    multiDayLoading.value = false;
+  }
+}
+
+async function confirmMultipleDays() {
+  if (!selectedCaravan.value || !multiDayPreview.value) {
+    return;
+  }
+
+  multiDaySubmitting.value = true;
+  pendingAction.value = "multi-day-cycle-confirm";
+  error.value = null;
+
+  try {
+    const days = multiDayPreview.value.requestedDays;
+    const caravanName = selectedCaravan.value.name;
+    await confirmCaravanMultiDayCycle(
+      selectedCaravan.value.id,
+      days,
+      multiDayPreview.value.basePreviewFingerprint,
+    );
+    await refresh();
+    closeMultiDayModal();
+    showToast(`${days} días pasados en ${caravanName}.`);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "No se pudo confirmar el paso de varios días";
+  } finally {
+    multiDaySubmitting.value = false;
     pendingAction.value = null;
   }
 }
@@ -886,10 +1088,18 @@ onMounted(refresh);
           <button
             class="secondary-button"
             type="button"
-            :disabled="loading || submitting || !selectedCaravan || dayCycleLoading || dayCycleSubmitting"
+            :disabled="loading || submitting || !selectedCaravan || dayCycleLoading || dayCycleSubmitting || multiDayLoading || multiDaySubmitting"
             @click="openDayCycleModal"
           >
             Pasar el día
+          </button>
+          <button
+            class="secondary-button"
+            type="button"
+            :disabled="loading || submitting || !selectedCaravan || dayCycleLoading || dayCycleSubmitting || multiDayLoading || multiDaySubmitting"
+            @click="openMultiDayModal"
+          >
+            Pasar varios días
           </button>
           <button class="ghost-button" type="button" :disabled="loading || submitting" @click="refresh">
             <span class="button-with-spinner">
@@ -1478,6 +1688,159 @@ onMounted(refresh);
                 <span class="button-with-spinner">
                   <span v-if="dayCycleSubmitting" class="button-spinner" aria-hidden="true"></span>
                   <span>{{ dayCycleSubmitting ? "Confirmando…" : "Confirmar paso del día" }}</span>
+                </span>
+              </button>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div v-if="multiDayModalOpen" class="modal-backdrop" @click.self="closeMultiDayModal">
+        <div class="modal modal-cycle">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">Ciclo diario</p>
+              <h2>Pasar varios días</h2>
+            </div>
+            <button class="ghost-button" type="button" :disabled="multiDaySubmitting" @click="closeMultiDayModal">
+              Cerrar
+            </button>
+          </div>
+
+          <template v-if="!multiDayPreview">
+            <section class="multi-day-form">
+              <label class="field">
+                <span>Días a simular</span>
+                <input v-model.number="multiDayRequestedDays" type="number" min="1" max="30" step="1" />
+              </label>
+              <p class="muted">La simulación encadena cada jornada sobre el resultado de la anterior.</p>
+            </section>
+
+            <div class="modal-actions">
+              <button class="secondary-button" type="button" :disabled="multiDayLoading || multiDaySubmitting" @click="closeMultiDayModal">
+                Cancelar
+              </button>
+              <button class="primary-button" type="button" :disabled="multiDayLoading || multiDaySubmitting" @click="previewMultipleDays">
+                <span class="button-with-spinner">
+                  <span v-if="multiDayLoading" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ multiDayLoading ? "Simulando…" : "Simular varios días" }}</span>
+                </span>
+              </button>
+            </div>
+          </template>
+
+          <template v-else>
+            <section class="day-cycle-summary" :class="{ danger: multiDayPreview.daysWithUncoveredConsumption > 0 }">
+              <div class="day-cycle-summary__copy">
+                <p class="eyebrow">Resultado acumulado</p>
+                <h3>
+                  {{ multiDayPreview.daysWithUncoveredConsumption === 0 ? "Simulación completa" : "Hay días con consumo no cubierto" }}
+                </h3>
+                <p class="day-cycle-summary__text">
+                  Del día {{ multiDayPreview.startDayIndex }} al {{ multiDayPreview.endDayIndex }},
+                  la caravana necesita {{ formatDecimal(multiDayPreview.totalRequiredConsumption) }} de comida
+                  y genera {{ formatDecimal(multiDayPreview.totalGeneratedFood) }}.
+                </p>
+              </div>
+
+              <div class="day-cycle-summary__chips">
+                <span class="day-cycle-chip">Días {{ multiDayPreview.requestedDays }}</span>
+                <span class="day-cycle-chip">Suministros usados {{ multiDayPreview.totalSuppliesConsumed }}</span>
+                <span class="day-cycle-chip">Alertas {{ multiDayPreview.daysWithUncoveredConsumption }}</span>
+              </div>
+            </section>
+
+            <section class="day-cycle-layout">
+              <article class="day-cycle-panel">
+                <header class="day-cycle-panel__header">
+                  <div>
+                    <p class="eyebrow">Producción total</p>
+                    <h4>Recursos acumulados</h4>
+                  </div>
+                </header>
+                <dl class="day-cycle-metrics">
+                  <div>
+                    <dt>Agricultores</dt>
+                    <dd>{{ multiDayPreview.totalGeneratedSuppliesFromAgricultors }}</dd>
+                  </div>
+                  <div>
+                    <dt>Boticarios</dt>
+                    <dd>{{ formatDecimal(multiDayPreview.totalGeneratedAlchemyValueFromBoticarios) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Comida total</dt>
+                    <dd>{{ formatDecimal(multiDayPreview.totalGeneratedFood) }}</dd>
+                  </div>
+                </dl>
+              </article>
+
+              <article class="day-cycle-panel">
+                <header class="day-cycle-panel__header">
+                  <div>
+                    <p class="eyebrow">Estado final</p>
+                    <h4>Inventario</h4>
+                  </div>
+                </header>
+                <dl class="day-cycle-metrics">
+                  <div>
+                    <dt>Suministros</dt>
+                    <dd>{{ multiDayPreview.finalSupplyUnits }}</dd>
+                  </div>
+                  <div>
+                    <dt>Perecederos</dt>
+                    <dd>{{ multiDayPreview.finalPerishableUnits }}</dd>
+                  </div>
+                  <div>
+                    <dt>Comida perecedera</dt>
+                    <dd>{{ formatDecimal(multiDayPreview.finalPerishableFood) }}</dd>
+                  </div>
+                </dl>
+              </article>
+            </section>
+
+            <section v-if="multiDayPreview.warnings.length" class="warning-banner danger">
+              <strong>Avisos</strong>
+              <ul class="simple-list">
+                <li v-for="warning in multiDayPreview.warnings" :key="warning">{{ warning }}</li>
+              </ul>
+            </section>
+
+            <section class="multi-day-days">
+              <details v-for="preview in multiDayPreview.dayPreviews" :key="preview.dayIndex" class="multi-day-day" :open="preview.dayIndex === multiDayPreview.startDayIndex">
+                <summary class="multi-day-day__summary">
+                  <span>Día {{ preview.dayIndex }}</span>
+                  <span>{{ preview.consumptionCovered ? "Consumo cubierto" : "Consumo no cubierto" }}</span>
+                </summary>
+
+                <div class="multi-day-day__content">
+                  <div class="multi-day-day__metrics">
+                    <span>Suministros iniciales: {{ preview.currentSupplyUnits }}</span>
+                    <span>Suministros finales: {{ preview.finalSupplyUnits }}</span>
+                    <span>Sobrante: {{ formatDecimal(preview.leftoverFood) }}</span>
+                  </div>
+
+                  <ul class="multi-day-log">
+                    <li v-for="entry in preview.simulation" :key="`${preview.dayIndex}-${entry.section}-${entry.title}`">
+                      <strong>{{ entry.title }}</strong>
+                      <span> · {{ entry.section }}</span>
+                      <span> · {{ formatDecimal(entry.foodDelta) }}</span>
+                      <ul v-if="entry.details.length" class="simple-list">
+                        <li v-for="detail in entry.details" :key="detail">{{ detail }}</li>
+                      </ul>
+                    </li>
+                  </ul>
+                </div>
+              </details>
+            </section>
+
+            <div class="modal-actions">
+              <button class="secondary-button" type="button" :disabled="multiDaySubmitting" @click="closeMultiDayModal">
+                Cancelar
+              </button>
+              <button class="primary-button" type="button" :disabled="multiDaySubmitting" @click="confirmMultipleDays">
+                <span class="button-with-spinner">
+                  <span v-if="multiDaySubmitting" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ multiDaySubmitting ? "Confirmando…" : "Aceptar pasar esos días" }}</span>
                 </span>
               </button>
             </div>
@@ -2401,6 +2764,71 @@ dd {
   line-height: 1.35;
 }
 
+.multi-day-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.field {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.field input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.9rem;
+  padding: 0.8rem 0.9rem;
+  font: inherit;
+}
+
+.multi-day-days {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.multi-day-day {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 1rem;
+  background: rgba(248, 250, 252, 0.8);
+  overflow: hidden;
+}
+
+.multi-day-day__summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.95rem 1rem;
+  cursor: pointer;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.multi-day-day__content {
+  display: grid;
+  gap: 0.85rem;
+  padding: 0 1rem 1rem;
+}
+
+.multi-day-day__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  color: #475569;
+  font-size: 0.92rem;
+}
+
+.multi-day-log {
+  display: grid;
+  gap: 0.85rem;
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.multi-day-log > li {
+  color: #334155;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -2508,3 +2936,5 @@ dd {
   }
 }
 </style>
+
+

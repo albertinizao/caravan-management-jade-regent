@@ -3,6 +3,7 @@ import type {
   CaravanBackup,
   Caravan,
   CaravanDayCyclePreview,
+  CaravanMultiDayCyclePreview,
   CaravanStatistics,
 } from "@/types/caravan";
 
@@ -112,5 +113,23 @@ export function confirmCaravanDayCycle(caravanId: string, previewFingerprint: st
   return fetchJson<CaravanDayCyclePreview>(`/caravans/${caravanId}/day-cycle/confirm`, {
     method: "POST",
     body: JSON.stringify({ previewFingerprint }),
+  });
+}
+
+export function previewCaravanMultiDayCycle(caravanId: string, days: number) {
+  return fetchJson<CaravanMultiDayCyclePreview>(`/caravans/${caravanId}/day-cycle/preview-multi`, {
+    method: "POST",
+    body: JSON.stringify({ days }),
+  });
+}
+
+export function confirmCaravanMultiDayCycle(
+  caravanId: string,
+  days: number,
+  basePreviewFingerprint: string,
+) {
+  return fetchJson<CaravanMultiDayCyclePreview>(`/caravans/${caravanId}/day-cycle/confirm-multi`, {
+    method: "POST",
+    body: JSON.stringify({ days, basePreviewFingerprint }),
   });
 }

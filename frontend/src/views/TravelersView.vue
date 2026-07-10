@@ -126,6 +126,9 @@ const travelersWithoutWagon = computed(() => travelers.value.filter((traveler) =
 const totalTravelerOccupiedSpace = computed(() =>
   travelers.value.reduce((total, traveler) => total + traveler.occupiedSpace, 0),
 );
+const totalTravelerSalary = computed(() =>
+  travelers.value.reduce((total, traveler) => total + (traveler.salary ?? 0), 0),
+);
 const totalTravelerCapacity = computed(() =>
   wagons.value.reduce((total, wagon) => total + wagon.travelerCapacity, 0),
 );
@@ -902,7 +905,7 @@ onMounted(refresh);
           :stats="[
             { label: 'Espacio', value: `${formatSpace(totalTravelerOccupiedSpace)} / ${formatSpace(totalTravelerCapacity)}` },
             { label: 'Viajeros', value: travelers.length },
-            { label: 'Pasajeros', value: travelersActingAsPassengers },
+            { label: 'Sueldo total', value: `${gpFormatter.format(totalTravelerSalary)} gp` },
           ]"
         :meter="{
           ariaLabel: `Espacio ocupado por viajeros ${formatSpace(totalTravelerOccupiedSpace)} de ${formatSpace(totalTravelerCapacity)}`,

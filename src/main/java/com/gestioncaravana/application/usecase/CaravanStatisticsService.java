@@ -91,7 +91,7 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
     if (otherStats.cargoRemaining() < 0) {
       warnings.add("La caravana supera su capacidad de cargamento.");
     }
-    if (otherStats.travelerCount() > otherStats.travelerCapacity()) {
+    if (otherStats.travelerCount() + otherStats.travelingBeastCount() > otherStats.travelerCapacity()) {
       warnings.add("La caravana supera su capacidad de viajeros.");
     }
     if (otherStats.wagonCount() > otherStats.maxWagons()) {
@@ -281,6 +281,9 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
 
     var speed = deriveSpeed(wagons, beasts, contributions);
     var beastCount = beasts.size();
+    var travelingBeastCount = (int) beasts.stream()
+        .filter(beast -> beast.assignmentType() == CaravanBeastAssignmentType.TRAVELER)
+        .count();
     var additionalWagons = countActiveFeats(feats, "carros-adicionales");
     var maxWagons = 10 + caravan.level() + (caravan.level() * additionalWagons);
     if (additionalWagons > 0) {
@@ -291,6 +294,14 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
     contributions.add(contribution("cargoLoad", "CARGO", caravan.id().toString(), "Carga transportada", "+" + cargoLoad, "BASE", "Carga total actual"));
     contributions.add(contribution("wagonCount", "WAGON", caravan.id().toString(), "Caravana", "+" + wagons.size(), "BASE", "Número de carros"));
     contributions.add(contribution("travelerCount", "TRAVELER", caravan.id().toString(), "Caravana", "+" + travelers.size(), "BASE", "Número de viajeros"));
+    contributions.add(contribution(
+        "travelingBeastCount",
+        "BEAST",
+        caravan.id().toString(),
+        "Caravana",
+        "+" + travelingBeastCount,
+        "BASE",
+        "Número de bestias asignadas como viajeras"));
     contributions.add(contribution("beastCount", "BEAST", caravan.id().toString(), "Caravana", "+" + beastCount, "BASE", "Número de bestias"));
 
     return new CaravanOtherStatsView(
@@ -301,6 +312,7 @@ public class CaravanStatisticsService implements GetCaravanStatisticsUseCase {
         cargoRemaining,
         totalConsumption,
         travelers.size(),
+        travelingBeastCount,
         wagons.size(),
         beastCount,
         maxWagons);

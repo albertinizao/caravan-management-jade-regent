@@ -4,10 +4,10 @@ import com.gestioncaravana.application.model.CalendarDayView;
 import com.gestioncaravana.application.model.CalendarEventView;
 import com.gestioncaravana.application.model.CalendarMonthView;
 import com.gestioncaravana.application.model.GolarionDateView;
-import com.gestioncaravana.application.model.WeatherSnapshotView;
 import com.gestioncaravana.application.port.in.AdvanceCaravanCalendarUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanCalendarDayUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanCalendarMonthUseCase;
+import com.gestioncaravana.application.port.in.GetCaravanWeatherSnapshotUseCase;
 import com.gestioncaravana.application.port.in.SetCaravanCalendarCurrentDateUseCase;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort;
@@ -31,21 +31,23 @@ public class CaravanCalendarService
 
   private static final List<String> WEEK_HEADERS = List.of("Lun", "Tra", "For", "Jur", "Fue", "Est", "Sol");
   private static final List<CalendarEventView> NO_CUSTOM_EVENTS = List.of();
-  private static final WeatherSnapshotView NO_WEATHER = null;
 
   private final CaravanCampaignRepositoryPort campaignRepository;
   private final CaravanSupplyStateRepositoryPort supplyStateRepository;
   private final GolarionCalendarEventCatalogPort eventCatalogPort;
+  private final GetCaravanWeatherSnapshotUseCase weatherSnapshotUseCase;
   private final Clock clock;
 
   public CaravanCalendarService(
       CaravanCampaignRepositoryPort campaignRepository,
       CaravanSupplyStateRepositoryPort supplyStateRepository,
       GolarionCalendarEventCatalogPort eventCatalogPort,
+      GetCaravanWeatherSnapshotUseCase weatherSnapshotUseCase,
       Clock clock) {
     this.campaignRepository = campaignRepository;
     this.supplyStateRepository = supplyStateRepository;
     this.eventCatalogPort = eventCatalogPort;
+    this.weatherSnapshotUseCase = weatherSnapshotUseCase;
     this.clock = clock;
   }
 
@@ -61,7 +63,7 @@ public class CaravanCalendarService
     var leadingDays = firstDay.dayOfWeek().index();
     var gridStart = GolarionCalendar.addDays(firstDay, -leadingDays);
     var cells = java.util.stream.IntStream.range(0, 42)
-        .mapToObj(index -> toDayView(GolarionCalendar.addDays(gridStart, index), currentDate, month))
+        .mapToObj(index -> toDayView(caravanId, GolarionCalendar.addDays(gridStart, index), currentDate, month))
         .toList();
 
     return new CalendarMonthView(
@@ -81,7 +83,7 @@ public class CaravanCalendarService
     var currentDate = currentDate(caravanId);
     var requestedDate = new GolarionDate(year, month, day);
     GolarionCalendar.validateSupportedRange(requestedDate);
-    return toDayView(requestedDate, currentDate, month);
+    return toDayView(caravanId, requestedDate, currentDate, month);
   }
 
   @Override
@@ -103,7 +105,7 @@ public class CaravanCalendarService
         clock.instant(),
         state.sharedJobProductivityState());
     supplyStateRepository.save(updated);
-    return toDayView(requestedDate, requestedDate, requestedDate.month());
+    return toDayView(caravanId, requestedDate, requestedDate, requestedDate.month());
   }
 
   @Override
@@ -126,10 +128,10 @@ public class CaravanCalendarService
         clock.instant(),
         state.sharedJobProductivityState());
     supplyStateRepository.save(updated);
-    return toDayView(nextDate, nextDate, nextDate.month());
+    return toDayView(caravanId, nextDate, nextDate, nextDate.month());
   }
 
-  private CalendarDayView toDayView(GolarionDate date, GolarionDate currentDate, int requestedMonth) {
+  private CalendarDayView toDayView(UUID caravanId, GolarionDate date, GolarionDate currentDate, int requestedMonth) {
     var canonicalEvents = List.copyOf(eventCatalogPort.findEventsByDate(date));
     return new CalendarDayView(
         toView(date),
@@ -137,7 +139,7 @@ public class CaravanCalendarService
         date.month() == requestedMonth,
         canonicalEvents,
         NO_CUSTOM_EVENTS,
-        NO_WEATHER);
+        weatherSnapshotUseCase.getWeather(caravanId, date));
   }
 
   private GolarionDateView toView(GolarionDate date) {

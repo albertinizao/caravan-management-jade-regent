@@ -10,9 +10,17 @@ import {
   previewCaravanMultiDayCycle,
 } from "@/services/caravans";
 import { getCalendarDay, getCalendarMonth, setCalendarCurrentDate } from "@/services/calendar";
+import { getCaravanWeatherProfile, updateCaravanWeatherProfile } from "@/services/weather";
 import type { Caravan } from "@/types/caravan";
 import type { CaravanDayCyclePreview, CaravanMultiDayCyclePreview } from "@/types/caravan";
-import type { CalendarDay, CalendarMonth, GolarionDate } from "@/types/calendar";
+import type { CalendarDay, CalendarMonth, GolarionDate, WeatherSnapshot } from "@/types/calendar";
+import type { CaravanWeatherProfile } from "@/types/weather";
+import {
+  getWeatherPrecipitationIcon,
+  getWeatherTemperatureRiskIcon,
+  getWeatherTemperatureTooltip,
+  getWeatherWindIcon,
+} from "@/utils/weatherIcons";
 
 const activeCaravan = ref<Caravan | null>(null);
 const monthView = ref<CalendarMonth | null>(null);
@@ -29,11 +37,22 @@ const dayCycleModalOpen = ref(false);
 const dayCycleLoading = ref(false);
 const dayCycleSubmitting = ref(false);
 const dayCyclePreview = ref<CaravanDayCyclePreview | null>(null);
+const manualDateModalOpen = ref(false);
 const multiDayModalOpen = ref(false);
 const multiDayLoading = ref(false);
 const multiDaySubmitting = ref(false);
 const multiDayRequestedDays = ref(2);
 const multiDayPreview = ref<CaravanMultiDayCyclePreview | null>(null);
+const weatherProfile = ref<CaravanWeatherProfile | null>(null);
+const weatherProfileLoading = ref(false);
+const weatherProfileSaving = ref(false);
+const weatherConfigModalOpen = ref(false);
+const weatherClimateBaseline = ref<CaravanWeatherProfile["climateBaseline"]>("TEMPERATE");
+const weatherElevation = ref<CaravanWeatherProfile["elevation"]>("SEA_LEVEL");
+const weatherCrownOfWorld = ref(false);
+const weatherEffectiveFromYear = ref(4712);
+const weatherEffectiveFromMonth = ref(1);
+const weatherEffectiveFromDay = ref(1);
 const { showToast } = useToast();
 
 const supportedYears = Array.from({ length: 11 }, (_, index) => 4712 + index);
@@ -51,10 +70,89 @@ const supportedMonths = [
   { value: 11, label: "Neth" },
   { value: 12, label: "Kuthona" },
 ];
+const weatherClimateBaselineOptions: Array<{ value: CaravanWeatherProfile["climateBaseline"]; label: string; description: string }> = [
+  { value: "COLD", label: "Frío", description: "Más nieve y temperaturas más duras." },
+  { value: "TEMPERATE", label: "Templado", description: "Base equilibrada para la mayoría de campañas." },
+  { value: "TROPICAL", label: "Tropical", description: "Más calor y lluvia con menos hielo." },
+];
+const weatherElevationOptions: Array<{ value: CaravanWeatherProfile["elevation"]; label: string; description: string }> = [
+  { value: "SEA_LEVEL", label: "Nivel del mar", description: "Aumenta el calor base." },
+  { value: "LOWLAND", label: "Tierras bajas", description: "Sin gran corrección por altitud." },
+  { value: "HIGHLAND", label: "Tierras altas", description: "Enfría y endurece el clima." },
+  { value: "PEAK", label: "Cima", description: "Penalización fuerte de temperatura." },
+];
+const calendarEventNameTranslations: Record<string, string> = {
+  "Abjurant Day": "Día de la abjuración",
+  "Archerfeast / Archer's Day": "Fiesta de los arqueros / Día del arquero",
+  "Ascendance Day": "Día del ascenso",
+  "Ascendance Night": "Noche del ascenso",
+  "Ascension Day": "Día de la ascensión",
+  "Baptism of Ice": "Bautismo de hielo",
+  "Bastion Day": "Día del bastión",
+  "Blightmother's Eve": "Víspera de la Madre de la Plaga",
+  "Breaching Festival": "Festival de la ruptura",
+  "Burning Blades": "Hojas ardientes",
+  "Burning Night": "Noche ardiente",
+  "Conquest Day": "Día de la conquista",
+  "Crabfest": "Fiesta del cangrejo",
+  "Darkness Eternal": "Oscuridad eterna",
+  "Day of Bones": "Día de los huesos",
+  "Day of Destiny": "Día del destino",
+  "Day of Silenced Whispers": "Día de los susurros silenciados",
+  "Day of Sundering": "Día de la ruptura",
+  "Day of the Inheritor": "Día del Heredero",
+  "Days of Wrath": "Días de la ira",
+  "Even-Tongued Day": "Día de la lengua persuasiva",
+  "Evoking Day": "Día de la evocación",
+  "Feast of the Survivors": "Banquete de los supervivientes",
+  "Feast of Vigor": "Banquete del vigor",
+  "Festival of Flowers": "Festival de las flores",
+  "Festival of Making and Breaking": "Festival de la creación y la destrucción",
+  "First Day of Summer": "Primer día del verano",
+  "First Day of Winter": "Primer día del invierno",
+  "First Crusader Day / Crusader Memorial Day": "Día del primer cruzado / Día conmemorativo de los cruzados",
+  "Firstbloom": "Primera floración",
+  "Foundation Day": "Día de la fundación",
+  "Founder's Day": "Día del fundador",
+  "Founding Day": "Día de la fundación",
+  "Founding Festival": "Festival de la fundación",
+  "Gala of Sails": "Gala de las velas",
+  "Goblin Flea Market": "Mercado de pulgas goblin",
+  "Golemwalk Parade": "Desfile de gólems",
+  "Grand Day of Independence": "Gran día de la independencia",
+  "Great Fire Remembrance": "Conmemoración del gran incendio",
+  "Harvest Feast": "Fiesta de la cosecha",
+  "Independence Day": "Día de la independencia",
+  "Independence Day / Liberty Day": "Día de la independencia / Día de la libertad",
+  "Inheritor's Ascendance": "Ascenso del Heredero",
+  "Jestercap": "Gorro del bufón",
+  "Kraken Carnival": "Carnaval del kraken",
+  "Last Day of Summer": "Último día del verano",
+  "Leap Day": "Día bisiesto",
+  "Longnight": "Noche larga",
+  "Lust Festival": "Festival de la lujuria",
+  "Merrymead": "Fiesta de la hidromiel",
+  "Mirror Poet's Farewell": "Despedida del poeta del espejo",
+  "Mooncall": "Llamado lunar",
+  "New Year": "Año Nuevo",
+  "Night of Tears": "Noche de las lágrimas",
+  "Old-Mage Day": "Día del viejo mago",
+  "Planting Week": "Semana de la siembra",
+  "Pseudodragon Festival": "Festival de los pseudodragones",
+  "Ritual of Stardust": "Ritual del polvo estelar",
+  "Ritual of the Whip Sting": "Ritual del aguijón del látigo",
+  "Sable Company Founding Day": "Día de la fundación de la Compañía Sable",
+  "Seven Veils": "Siete velos",
+  "Swallowtail Festival / Swallowtail Release": "Festival de la cola de golondrina / Liberación de la cola de golondrina",
+  "Tempest Day": "Día de la tempestad",
+  "The Final Day": "El día final",
+  "Vault Day": "Día de la bóveda",
+  "Winter Week": "Semana de invierno",
+  "Winterbloom": "Floración invernal",
+};
 
-const manualDayOptions = computed(() => {
-  const month = manualMonth.value;
-  const leapYear = manualYear.value % 8 === 0;
+function monthLengthFor(year: number, month: number) {
+  const leapYear = year % 8 === 0;
   const monthLengths: Record<number, number> = {
     1: 31,
     2: leapYear ? 29 : 28,
@@ -69,12 +167,22 @@ const manualDayOptions = computed(() => {
     11: 30,
     12: 31,
   };
-  const maxDay = monthLengths[month] ?? 31;
-  if (manualDay.value > maxDay) {
-    manualDay.value = maxDay;
+  return monthLengths[month] ?? 31;
+}
+
+function dayOptionsFor(year: number, month: number, selectedDay?: typeof manualDay) {
+  const maxDay = monthLengthFor(year, month);
+  if (selectedDay && selectedDay.value > maxDay) {
+    selectedDay.value = maxDay;
   }
   return Array.from({ length: maxDay }, (_, index) => index + 1);
-});
+}
+
+const manualDayOptions = computed(() => dayOptionsFor(manualYear.value, manualMonth.value, manualDay));
+
+const weatherEffectiveFromDayOptions = computed(() =>
+  dayOptionsFor(weatherEffectiveFromYear.value, weatherEffectiveFromMonth.value, weatherEffectiveFromDay),
+);
 
 const currentDateLabel = computed(() =>
   monthView.value
@@ -100,6 +208,151 @@ function isPending(action: string) {
 
 function formatDecimal(value: number) {
   return Number.isInteger(value) ? `${value}` : value.toFixed(1).replace(/\.0$/, "");
+}
+
+function formatWeatherToken(value: string | null | undefined) {
+  if (!value) {
+    return "—";
+  }
+  if (value === "NONE") {
+    return "Sin precipitación";
+  }
+  return value.split("_").join(" ");
+}
+
+function formatCalendarEventName(name: string) {
+  return calendarEventNameTranslations[name] ?? name;
+}
+
+function weatherPrecipitationIcon(value: string | null | undefined) {
+  return getWeatherPrecipitationIcon(value);
+}
+
+function weatherWindIcon(value: string | null | undefined) {
+  return getWeatherWindIcon(value);
+}
+
+function weatherTemperatureIcon(temperatureF: number | null | undefined) {
+  return getWeatherTemperatureRiskIcon(temperatureF);
+}
+
+function weatherTemperatureTooltip(temperatureC: number | null | undefined, temperatureF: number | null | undefined) {
+  return getWeatherTemperatureTooltip(temperatureC, temperatureF);
+}
+
+function weatherPeriodRows(weather: WeatherSnapshot | null) {
+  if (!weather) {
+    return [];
+  }
+
+  return [
+    { key: "midnightToDawn", label: "Madrugada", period: weather.midnightToDawn },
+    { key: "dawnToNoon", label: "Mañana", period: weather.dawnToNoon },
+    { key: "noonToDusk", label: "Tarde", period: weather.noonToDusk },
+    { key: "duskToMidnight", label: "Noche", period: weather.duskToMidnight },
+  ];
+}
+
+function syncWeatherProfileForm(profile: CaravanWeatherProfile) {
+  weatherClimateBaseline.value = profile.climateBaseline;
+  weatherElevation.value = profile.elevation;
+  weatherCrownOfWorld.value = profile.crownOfWorld;
+}
+
+function syncWeatherEffectiveFromDate(date: GolarionDate) {
+  weatherEffectiveFromYear.value = date.year;
+  weatherEffectiveFromMonth.value = date.month;
+  weatherEffectiveFromDay.value = date.day;
+}
+
+function weatherClimateBaselineDescription() {
+  return weatherClimateBaselineOptions.find((option) => option.value === weatherClimateBaseline.value)?.description ?? "";
+}
+
+function weatherElevationDescription() {
+  return weatherElevationOptions.find((option) => option.value === weatherElevation.value)?.description ?? "";
+}
+
+async function loadWeatherProfile() {
+  if (!activeCaravan.value) {
+    return;
+  }
+
+  weatherProfileLoading.value = true;
+  try {
+    const profile = await getCaravanWeatherProfile(activeCaravan.value.id);
+    weatherProfile.value = profile;
+    syncWeatherProfileForm(profile);
+  } finally {
+    weatherProfileLoading.value = false;
+  }
+}
+
+async function saveWeatherProfile() {
+  if (!activeCaravan.value) {
+    return;
+  }
+
+  weatherProfileSaving.value = true;
+  pendingAction.value = "weather-profile";
+  try {
+    const updated = await updateCaravanWeatherProfile(activeCaravan.value.id, {
+      climateBaseline: weatherClimateBaseline.value,
+      elevation: weatherElevation.value,
+      crownOfWorld: weatherCrownOfWorld.value,
+      effectiveFromYear: weatherEffectiveFromYear.value,
+      effectiveFromMonth: weatherEffectiveFromMonth.value,
+      effectiveFromDay: weatherEffectiveFromDay.value,
+    });
+    weatherProfile.value = updated;
+    syncWeatherProfileForm(updated);
+    if (monthView.value) {
+      await loadCalendarMonth(
+        monthView.value.displayYear,
+        monthView.value.displayMonth,
+        selectedDay.value?.date ?? monthView.value.currentDate,
+      );
+    }
+    showToast("La configuración climática se ha guardado.", "success");
+  } catch (caughtError) {
+    showToast(caughtError instanceof Error ? caughtError.message : "No se pudo guardar el clima.", "error");
+  } finally {
+    weatherProfileSaving.value = false;
+    pendingAction.value = null;
+  }
+}
+
+function openManualDateModal() {
+  if (!activeCaravan.value) {
+    return;
+  }
+
+  manualDateModalOpen.value = true;
+}
+
+function closeManualDateModal() {
+  if (pendingAction.value === "manual-date") {
+    return;
+  }
+
+  manualDateModalOpen.value = false;
+}
+
+function openWeatherConfigModal() {
+  if (!activeCaravan.value || !monthView.value) {
+    return;
+  }
+
+  syncWeatherEffectiveFromDate(selectedDay.value?.date ?? monthView.value.currentDate);
+  weatherConfigModalOpen.value = true;
+}
+
+function closeWeatherConfigModal() {
+  if (weatherProfileSaving.value) {
+    return;
+  }
+
+  weatherConfigModalOpen.value = false;
 }
 
 async function loadCalendarMonth(year: number, month: number, selected?: GolarionDate) {
@@ -131,6 +384,7 @@ async function loadActiveCaravan() {
     const response = await getActiveCaravan();
     activeCaravan.value = response.caravan;
     if (activeCaravan.value) {
+      await loadWeatherProfile();
       const bootstrapMonth = await getCalendarMonth(activeCaravan.value.id, 4712, 1);
       await loadCalendarMonth(
         bootstrapMonth.currentDate.year,
@@ -378,6 +632,12 @@ onMounted(loadActiveCaravan);
             <button class="secondary-button" type="button" @click="jumpToCampaignToday" :disabled="calendarLoading">
               Hoy de campaña
             </button>
+            <button class="secondary-button" type="button" @click="openManualDateModal">
+              Actualizar fecha
+            </button>
+            <button class="secondary-button" type="button" @click="openWeatherConfigModal">
+              Generar clima
+            </button>
             <button class="primary-button" type="button" @click="openDayCycleModal" :disabled="dayCycleLoading || dayCycleSubmitting">
               {{ dayCycleLoading || dayCycleSubmitting ? "Abriendo…" : "+1 día" }}
             </button>
@@ -427,62 +687,14 @@ onMounted(loadActiveCaravan);
                 </div>
                 <ul class="day-cell__events">
                   <li v-for="event in day.canonicalEvents.slice(0, 3)" :key="event.name">
-                    {{ event.name }}
+                    {{ formatCalendarEventName(event.name) }}
                   </li>
                   <li v-if="day.canonicalEvents.length > 3" class="day-cell__more">+{{ day.canonicalEvents.length - 3 }} más</li>
                 </ul>
               </button>
             </div>
           </article>
-
-          <div class="sidebar-column">
-            <article class="card controls-card">
-              <div class="section-header">
-                <div>
-                  <p class="eyebrow">Control temporal</p>
-                  <h2>Actualizar fecha actual</h2>
-                </div>
-              </div>
-
-              <div class="control-grid">
-                <label>
-                  <span>Año</span>
-                  <select v-model.number="manualYear">
-                    <option v-for="year in supportedYears" :key="year" :value="year">{{ year }} AR</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Mes</span>
-                  <select v-model.number="manualMonth">
-                    <option v-for="month in supportedMonths" :key="month.value" :value="month.value">{{ month.label }}</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Día</span>
-                  <select v-model.number="manualDay">
-                    <option v-for="day in manualDayOptions" :key="day" :value="day">{{ day }}</option>
-                  </select>
-                </label>
-              </div>
-
-              <div class="control-actions">
-                <button class="primary-button" type="button" @click="applyManualDate" :disabled="isPending('manual-date')">
-                  {{ isPending("manual-date") ? "Guardando…" : "Fijar fecha actual" }}
-                </button>
-              </div>
-
-              <div class="bulk-advance">
-                <label>
-                  <span>Avance rápido</span>
-                  <input v-model.number="bulkAdvanceDays" type="number" min="1" max="365" />
-                </label>
-                <button class="secondary-button" type="button" @click="openMultiDayModal" :disabled="multiDayLoading || multiDaySubmitting || bulkAdvanceDays < 1">
-                  {{ multiDayLoading || multiDaySubmitting ? "Abriendo…" : `+${bulkAdvanceDays} días` }}
-                </button>
-              </div>
-            </article>
-
-            <article class="card detail-card">
+          <article class="card detail-card">
               <div class="section-header">
                 <div>
                   <p class="eyebrow">Detalle diario</p>
@@ -496,7 +708,7 @@ onMounted(loadActiveCaravan);
                   <ul v-if="selectedDay.canonicalEvents.length > 0" class="event-list">
                     <li v-for="event in selectedDay.canonicalEvents" :key="`${event.category}-${event.name}-${event.scope}`" class="event-item">
                       <div class="event-item__title">
-                        <strong>{{ event.name }}</strong>
+                        <strong>{{ formatCalendarEventName(event.name) }}</strong>
                         <span v-if="event.category === 'BIRTHDAY'" class="pill">Cumpleaños</span>
                         <span v-else-if="event.category === 'ASTRONOMICAL'" class="pill">Astronómico</span>
                       </div>
@@ -509,15 +721,50 @@ onMounted(loadActiveCaravan);
 
                 <section class="detail-section placeholder-block">
                   <h3>Clima</h3>
-                  <p class="muted">
-                    No disponible todavía. Este hueco queda reservado para precipitación, viento y temperatura por tramos del día.
+                  <div v-if="selectedDay.weather" class="weather-period-list">
+                    <article v-for="period in weatherPeriodRows(selectedDay.weather)" :key="period.key" class="weather-period-card">
+                      <header class="weather-period-card__header">
+                        <strong>{{ period.label }}</strong>
+                        <span class="pill pill--weather" :title="formatWeatherToken(period.period?.precipitation)">
+                          <img
+                            v-if="weatherPrecipitationIcon(period.period?.precipitation)"
+                            class="weather-pill__icon"
+                            :src="weatherPrecipitationIcon(period.period?.precipitation)?.src ?? ''"
+                            :alt="weatherPrecipitationIcon(period.period?.precipitation)?.alt ?? ''"
+                          />
+                          <span v-else class="weather-pill__empty" aria-hidden="true">∅</span>
+                        </span>
+                      </header>
+                      <dl class="weather-period-metrics">
+                        <div>
+                          <dt>Viento</dt>
+                          <dd class="weather-metric__value" :title="formatWeatherToken(period.period?.windStrength)">
+                            <img
+                              v-if="weatherWindIcon(period.period?.windStrength)"
+                              class="weather-metric__icon"
+                              :src="weatherWindIcon(period.period?.windStrength)?.src ?? ''"
+                              :alt="weatherWindIcon(period.period?.windStrength)?.alt ?? ''"
+                            />
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Temp. ºC</dt>
+                          <dd class="weather-temperature__value" :title="weatherTemperatureTooltip(period.period?.temperatureC, period.period?.temperatureF)">
+                            <img
+                              v-if="weatherTemperatureIcon(period.period?.temperatureF)"
+                              class="weather-metric__icon"
+                              :src="weatherTemperatureIcon(period.period?.temperatureF)?.src ?? ''"
+                              :alt="weatherTemperatureIcon(period.period?.temperatureF)?.alt ?? ''"
+                            />
+                            <span>{{ period.period?.temperatureC ?? "—" }} ºC</span>
+                          </dd>
+                        </div>
+                      </dl>
+                    </article>
+                  </div>
+                  <p v-else class="muted">
+                    No hay clima generado todavía para este día.
                   </p>
-                  <ul class="placeholder-list">
-                    <li>Medianoche → amanecer</li>
-                    <li>Amanecer → mediodía</li>
-                    <li>Mediodía → atardecer</li>
-                    <li>Atardecer → medianoche</li>
-                  </ul>
                 </section>
 
                 <section class="detail-section placeholder-block">
@@ -528,9 +775,143 @@ onMounted(loadActiveCaravan);
 
               <p v-else class="muted">Selecciona un día del calendario para ver el detalle.</p>
             </article>
-          </div>
         </section>
       </template>
+
+      <div v-if="manualDateModalOpen" class="modal-backdrop" @click.self="closeManualDateModal">
+        <div class="modal modal-cycle">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">Control temporal</p>
+              <h2>Actualizar fecha actual</h2>
+            </div>
+            <button class="ghost-button" type="button" :disabled="isPending('manual-date')" @click="closeManualDateModal">
+              Cerrar
+            </button>
+          </div>
+
+          <section class="modal-section">
+            <p class="muted">Ajusta la fecha de campaña sin salir del calendario.</p>
+            <div class="control-grid">
+              <label>
+                <span>Año</span>
+                <select v-model.number="manualYear">
+                  <option v-for="year in supportedYears" :key="year" :value="year">{{ year }} AR</option>
+                </select>
+              </label>
+              <label>
+                <span>Mes</span>
+                <select v-model.number="manualMonth">
+                  <option v-for="month in supportedMonths" :key="month.value" :value="month.value">{{ month.label }}</option>
+                </select>
+              </label>
+              <label>
+                <span>Día</span>
+                <select v-model.number="manualDay">
+                  <option v-for="day in manualDayOptions" :key="day" :value="day">{{ day }}</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <div class="modal-actions">
+            <button class="secondary-button" type="button" :disabled="isPending('manual-date')" @click="closeManualDateModal">
+              Cancelar
+            </button>
+            <button class="primary-button" type="button" @click="applyManualDate" :disabled="isPending('manual-date')">
+              {{ isPending("manual-date") ? "Guardando…" : "Fijar fecha actual" }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="weatherConfigModalOpen" class="modal-backdrop" @click.self="closeWeatherConfigModal">
+        <div class="modal modal-cycle">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">Clima de campaña</p>
+              <h2>Perfil climático</h2>
+            </div>
+            <button class="ghost-button" type="button" :disabled="weatherProfileSaving" @click="closeWeatherConfigModal">
+              Cerrar
+            </button>
+          </div>
+
+          <p v-if="weatherProfileLoading" class="muted">Cargando configuración climática…</p>
+
+          <template v-else>
+            <section class="modal-section">
+              <p class="muted">Genera el clima de campaña a partir del perfil activo.</p>
+              <div class="weather-effective-date-grid">
+                <label>
+                  <span>Aplicar desde año</span>
+                  <select v-model="weatherEffectiveFromYear">
+                    <option v-for="year in supportedYears" :key="year" :value="year">
+                      {{ year }}
+                    </option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>Aplicar desde mes</span>
+                  <select v-model="weatherEffectiveFromMonth">
+                    <option v-for="month in supportedMonths" :key="month.value" :value="month.value">
+                      {{ month.label }}
+                    </option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>Aplicar desde día</span>
+                  <select v-model="weatherEffectiveFromDay">
+                    <option v-for="day in weatherEffectiveFromDayOptions" :key="day" :value="day">
+                      {{ day }}
+                    </option>
+                  </select>
+                </label>
+              </div>
+              <p class="muted">
+                Las fechas anteriores conservarán el clima ya generado. Solo se regenerará desde el día indicado.
+              </p>
+              <div class="weather-config-grid">
+                <label>
+                  <span>Baseline</span>
+                  <select v-model="weatherClimateBaseline">
+                    <option v-for="option in weatherClimateBaselineOptions" :key="option.value" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                  <small class="muted">{{ weatherClimateBaselineDescription() }}</small>
+                </label>
+
+                <label>
+                  <span>Elevación</span>
+                  <select v-model="weatherElevation">
+                    <option v-for="option in weatherElevationOptions" :key="option.value" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                  <small class="muted">{{ weatherElevationDescription() }}</small>
+                </label>
+
+                <label class="checkbox-field">
+                  <input v-model="weatherCrownOfWorld" type="checkbox" />
+                  <span>Crown of the World</span>
+                </label>
+              </div>
+            </section>
+
+            <div class="modal-actions">
+              <button class="secondary-button" type="button" :disabled="weatherProfileSaving" @click="closeWeatherConfigModal">
+                Cancelar
+              </button>
+              <button class="primary-button" type="button" @click="saveWeatherProfile" :disabled="weatherProfileSaving || !activeCaravan">
+                {{ weatherProfileSaving ? "Guardando…" : "Guardar clima" }}
+              </button>
+            </div>
+          </template>
+        </div>
+      </div>
 
       <div v-if="dayCycleModalOpen" class="modal-backdrop" @click.self="closeDayCycleModal">
         <div class="modal modal-cycle">
@@ -806,8 +1187,7 @@ onMounted(loadActiveCaravan);
 .calendar-toolbar,
 .current-day-card,
 .current-day-actions,
-.control-actions,
-.bulk-advance {
+.control-actions {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
@@ -906,17 +1286,10 @@ p {
 
 .calendar-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+  grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
   gap: 1.25rem;
   align-items: start;
 }
-
-.sidebar-column {
-  display: grid;
-  gap: 1.25rem;
-}
-
-.controls-card,
 .detail-card {
   display: grid;
   gap: 1rem;
@@ -940,14 +1313,6 @@ input {
   border: 1px solid #d1d5db;
   border-radius: 0.75rem;
   font: inherit;
-}
-
-.bulk-advance {
-  align-items: end;
-}
-
-.bulk-advance label {
-  flex: 1;
 }
 
 .calendar-card {
@@ -1090,6 +1455,148 @@ input {
   gap: 0.25rem;
 }
 
+.weather-config-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.weather-config-grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.weather-effective-date-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.9rem;
+  background: #f8fafc;
+}
+
+.checkbox-field input {
+  width: auto;
+}
+
+.weather-period-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.weather-period-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border-radius: 0.9rem;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  min-width: 0;
+}
+
+.weather-period-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.weather-period-card__header strong {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pill--weather {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.pill--weather {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.weather-pill__icon,
+.weather-metric__icon {
+  width: 1.15rem;
+  height: 1.15rem;
+  object-fit: contain;
+  flex: none;
+}
+
+.weather-pill__empty {
+  display: inline-grid;
+  place-items: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #6d28d9;
+}
+
+.weather-metric__value {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: fit-content;
+  justify-content: center;
+}
+
+.weather-period-metrics {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.45fr);
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.weather-period-metrics div {
+  padding: 0.7rem;
+  border-radius: 0.85rem;
+  background: white;
+  display: grid;
+  gap: 0.35rem;
+  justify-items: center;
+  text-align: center;
+  align-content: center;
+}
+
+.weather-period-metrics dt {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+
+.weather-period-metrics dd {
+  margin: 0.25rem 0 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.weather-temperature__value {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  white-space: nowrap;
+  min-width: 4.75rem;
+  justify-content: center;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1108,6 +1615,11 @@ input {
   border-radius: 1.2rem;
   padding: 1.25rem;
   box-shadow: 0 24px 48px rgba(15, 23, 42, 0.25);
+  display: grid;
+  gap: 1rem;
+}
+
+.modal-section {
   display: grid;
   gap: 1rem;
 }
@@ -1294,6 +1806,10 @@ input {
   .calendar-layout {
     grid-template-columns: 1fr;
   }
+
+  .weather-period-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 900px) {
@@ -1306,7 +1822,7 @@ input {
   .calendar-toolbar,
   .current-day-card,
   .current-day-actions,
-  .bulk-advance {
+  .detail-card {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -1316,13 +1832,14 @@ input {
   }
 
   .calendar-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 0.65fr) minmax(0, 1.35fr);
   }
 
   .weekday {
     display: none;
   }
 
+  .weather-effective-date-grid,
   .day-cycle-layout,
   .day-cycle-metrics {
     grid-template-columns: 1fr;

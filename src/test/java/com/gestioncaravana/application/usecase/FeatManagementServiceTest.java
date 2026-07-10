@@ -438,7 +438,7 @@ class FeatManagementServiceTest {
           2,
           new CaravanMainStatsView(5, 5, 5, 5, 0),
           new CaravanDerivedStatsView(0, 0, 8, 12),
-          new CaravanOtherStatsView(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+          new CaravanOtherStatsView(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
           0,
           0,
           List.<CaravanStatContributionView>of(),

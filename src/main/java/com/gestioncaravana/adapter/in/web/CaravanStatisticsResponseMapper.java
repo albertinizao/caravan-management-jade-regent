@@ -41,6 +41,7 @@ final class CaravanStatisticsResponseMapper {
         view.cargoRemaining(),
         view.consumption(),
         view.travelerCount(),
+        view.travelingBeastCount(),
         view.wagonCount(),
         view.beastCount(),
         view.maxWagons());

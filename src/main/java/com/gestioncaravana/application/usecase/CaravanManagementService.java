@@ -57,6 +57,7 @@ public class CaravanManagementService
   private final CaravanFeatRepositoryPort featRepository;
   private final CaravanSupplyStateRepositoryPort supplyStateRepository;
   private final CaravanDayResolutionRepositoryPort dayResolutionRepository;
+  private final CaravanWeatherService weatherService;
   private final CaravanFeatCatalogPort featCatalogPort;
   private final ActiveCaravanSelectionPort activeSelectionPort;
   private final Clock clock;
@@ -72,6 +73,7 @@ public class CaravanManagementService
       CaravanFeatRepositoryPort featRepository,
       CaravanSupplyStateRepositoryPort supplyStateRepository,
       CaravanDayResolutionRepositoryPort dayResolutionRepository,
+      CaravanWeatherService weatherService,
       CaravanFeatCatalogPort featCatalogPort,
       ActiveCaravanSelectionPort activeSelectionPort,
       Clock clock) {
@@ -84,6 +86,7 @@ public class CaravanManagementService
     this.featRepository = featRepository;
     this.supplyStateRepository = supplyStateRepository;
     this.dayResolutionRepository = dayResolutionRepository;
+    this.weatherService = weatherService;
     this.featCatalogPort = featCatalogPort;
     this.activeSelectionPort = activeSelectionPort;
     this.clock = clock;
@@ -99,6 +102,7 @@ public class CaravanManagementService
       CaravanFeatRepositoryPort featRepository,
       CaravanSupplyStateRepositoryPort supplyStateRepository,
       CaravanDayResolutionRepositoryPort dayResolutionRepository,
+      CaravanWeatherService weatherService,
       ActiveCaravanSelectionPort activeSelectionPort,
       Clock clock) {
     this(
@@ -111,6 +115,7 @@ public class CaravanManagementService
         featRepository,
         supplyStateRepository,
         dayResolutionRepository,
+        weatherService,
         new NoopCaravanFeatCatalogPort(),
         activeSelectionPort,
         clock);
@@ -125,6 +130,7 @@ public class CaravanManagementService
       CaravanBeastRepositoryPort beastRepository,
       CaravanSupplyStateRepositoryPort supplyStateRepository,
       CaravanDayResolutionRepositoryPort dayResolutionRepository,
+      CaravanWeatherService weatherService,
       ActiveCaravanSelectionPort activeSelectionPort,
       Clock clock) {
     this(
@@ -137,6 +143,7 @@ public class CaravanManagementService
         new NoopCaravanFeatRepositoryPort(),
         supplyStateRepository,
         dayResolutionRepository,
+        weatherService,
         new NoopCaravanFeatCatalogPort(),
         activeSelectionPort,
         clock);
@@ -288,6 +295,7 @@ public class CaravanManagementService
     featRepository.deleteByCaravanId(caravanId);
     supplyStateRepository.deleteByCaravanId(caravanId);
     dayResolutionRepository.deleteByCaravanId(caravanId);
+    weatherService.deleteByCaravanId(caravanId);
 
     for (var wagon : wagonRepository.findAllByCaravanId(caravanId)) {
       for (var improvement : wagonImprovementRepository.findAllByCaravanIdAndWagonId(caravanId, wagon.id())) {

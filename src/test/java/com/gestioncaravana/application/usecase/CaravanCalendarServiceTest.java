@@ -9,8 +9,12 @@ import com.gestioncaravana.application.port.in.SetCaravanCalendarCurrentDateUseC
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort;
 import com.gestioncaravana.application.port.out.GolarionCalendarEventCatalogPort;
+import com.gestioncaravana.application.port.out.CaravanWeatherProfileRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanWeatherSnapshotRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
 import com.gestioncaravana.domain.CaravanSupplyState;
+import com.gestioncaravana.domain.CaravanWeatherProfile;
+import com.gestioncaravana.domain.CaravanWeatherSnapshot;
 import com.gestioncaravana.domain.GolarionDate;
 import java.time.Clock;
 import java.time.Instant;
@@ -27,6 +31,8 @@ class CaravanCalendarServiceTest {
 
   private InMemoryCaravanRepository campaignRepository;
   private InMemorySupplyStateRepository supplyStateRepository;
+  private InMemoryWeatherProfileRepository weatherProfileRepository;
+  private InMemoryWeatherSnapshotRepository weatherSnapshotRepository;
   private CaravanCalendarService service;
   private UUID caravanId;
 
@@ -34,6 +40,13 @@ class CaravanCalendarServiceTest {
   void setUp() {
     campaignRepository = new InMemoryCaravanRepository();
     supplyStateRepository = new InMemorySupplyStateRepository();
+    weatherProfileRepository = new InMemoryWeatherProfileRepository();
+    weatherSnapshotRepository = new InMemoryWeatherSnapshotRepository();
+    var weatherService = new CaravanWeatherService(
+        campaignRepository,
+        weatherProfileRepository,
+        weatherSnapshotRepository,
+        Clock.fixed(Instant.parse("2026-07-10T12:00:00Z"), ZoneOffset.UTC));
     service = new CaravanCalendarService(
         campaignRepository,
         supplyStateRepository,
@@ -46,6 +59,7 @@ class CaravanCalendarServiceTest {
           }
           return List.of();
         },
+        weatherService,
         Clock.fixed(Instant.parse("2026-07-10T12:00:00Z"), ZoneOffset.UTC));
 
     caravanId = UUID.randomUUID();
@@ -75,6 +89,8 @@ class CaravanCalendarServiceTest {
 
     assertThat(day.canonicalEvents()).extracting(CalendarEventView::name)
         .contains("Equinoccio de primavera");
+    assertThat(day.weather()).isNotNull();
+    assertThat(day.weather().dawnToNoon()).isNotNull();
   }
 
   @Test
@@ -151,6 +167,50 @@ class CaravanCalendarServiceTest {
     @Override
     public void deleteByCaravanId(UUID caravanId) {
       states.remove(caravanId);
+    }
+  }
+
+  private static final class InMemoryWeatherProfileRepository implements CaravanWeatherProfileRepositoryPort {
+    private final Map<UUID, CaravanWeatherProfile> profiles = new java.util.HashMap<>();
+
+    @Override
+    public CaravanWeatherProfile save(CaravanWeatherProfile profile) {
+      profiles.put(profile.caravanId(), profile);
+      return profile;
+    }
+
+    @Override
+    public Optional<CaravanWeatherProfile> findByCaravanId(UUID caravanId) {
+      return Optional.ofNullable(profiles.get(caravanId));
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      profiles.remove(caravanId);
+    }
+  }
+
+  private static final class InMemoryWeatherSnapshotRepository implements CaravanWeatherSnapshotRepositoryPort {
+    private final Map<String, CaravanWeatherSnapshot> snapshots = new java.util.HashMap<>();
+
+    @Override
+    public CaravanWeatherSnapshot save(CaravanWeatherSnapshot snapshot) {
+      snapshots.put(key(snapshot.caravanId(), snapshot.date()), snapshot);
+      return snapshot;
+    }
+
+    @Override
+    public Optional<CaravanWeatherSnapshot> findByCaravanIdAndDate(UUID caravanId, GolarionDate date) {
+      return Optional.ofNullable(snapshots.get(key(caravanId, date)));
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      snapshots.entrySet().removeIf(entry -> entry.getKey().startsWith(caravanId + ":"));
+    }
+
+    private String key(UUID caravanId, GolarionDate date) {
+      return caravanId + ":" + date.year() + ":" + date.month() + ":" + date.day();
     }
   }
 }

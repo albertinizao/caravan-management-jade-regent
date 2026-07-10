@@ -66,6 +66,7 @@ const hiddenContributionStats = new Set([
   "cargoCapacity",
   "cargoLoad",
   "consumption",
+  "travelingBeastCount",
   "beastCount",
   "wagonCount",
   "travelerCount",
@@ -1334,13 +1335,13 @@ onMounted(refresh);
                   <RouterLink class="nav-card" to="/travelers">
                     <h3>Viajeros</h3>
                     <p class="muted">
-                      {{ caravanStatistics.otherStats.travelerCount }} + {{ caravanStatistics.otherStats.beastCount }} /
+                      {{ caravanStatistics.otherStats.travelerCount }} + {{ caravanStatistics.otherStats.travelingBeastCount }} /
                       {{ caravanStatistics.otherStats.travelerCapacity }}
                     </p>
                     <div
                       class="nav-meter nav-meter--travelers"
-                      :aria-label="`Viajeros ${caravanStatistics.otherStats.travelerCount} y bestias ${caravanStatistics.otherStats.beastCount} de ${caravanStatistics.otherStats.travelerCapacity}`"
-                      :title="`Viajeros ${caravanStatistics.otherStats.travelerCount} · Bestias ${caravanStatistics.otherStats.beastCount} de ${caravanStatistics.otherStats.travelerCapacity}`"
+                      :aria-label="`Viajeros ${caravanStatistics.otherStats.travelerCount} y bestias viajeras ${caravanStatistics.otherStats.travelingBeastCount} de ${caravanStatistics.otherStats.travelerCapacity}`"
+                      :title="`Viajeros ${caravanStatistics.otherStats.travelerCount} · Bestias viajeras ${caravanStatistics.otherStats.travelingBeastCount} de ${caravanStatistics.otherStats.travelerCapacity}`"
                     >
                       <span
                         class="nav-meter-segment nav-meter-segment--travelers"
@@ -1348,7 +1349,7 @@ onMounted(refresh);
                       ></span>
                       <span
                         class="nav-meter-segment nav-meter-segment--beasts"
-                        :style="{ width: `${percentageOf(caravanStatistics.otherStats.beastCount, caravanStatistics.otherStats.travelerCapacity)}%` }"
+                        :style="{ width: `${percentageOf(caravanStatistics.otherStats.travelingBeastCount, caravanStatistics.otherStats.travelerCapacity)}%` }"
                       ></span>
                     </div>
                     <span class="nav-card-link">Abrir vista de viajeros</span>

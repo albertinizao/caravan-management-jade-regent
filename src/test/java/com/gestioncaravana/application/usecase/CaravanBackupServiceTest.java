@@ -15,6 +15,8 @@ import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanWeatherProfileRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanWeatherSnapshotRepositoryPort;
 import com.gestioncaravana.domain.CaravanBeast;
 import com.gestioncaravana.domain.CaravanBeastAssignmentType;
 import com.gestioncaravana.domain.CaravanBeastSourceType;
@@ -29,9 +31,12 @@ import com.gestioncaravana.domain.CaravanSupplyState;
 import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
 import com.gestioncaravana.domain.CaravanWagonImprovement;
+import com.gestioncaravana.domain.CaravanWeatherProfile;
+import com.gestioncaravana.domain.CaravanWeatherSnapshot;
 import com.gestioncaravana.domain.TravelerContract;
 import com.gestioncaravana.domain.TravelerRoleCatalog;
 import com.gestioncaravana.domain.TravelerRoleData;
+import com.gestioncaravana.domain.GolarionDate;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -55,6 +60,8 @@ class CaravanBackupServiceTest {
   private InMemorySupplyStateRepository supplyStateRepository;
   private InMemoryDayResolutionRepository dayResolutionRepository;
   private InMemoryActiveSelection activeSelection;
+  private InMemoryWeatherProfileRepository weatherProfileRepository;
+  private InMemoryWeatherSnapshotRepository weatherSnapshotRepository;
   private CaravanManagementService managementService;
   private CaravanBackupService backupService;
 
@@ -70,8 +77,15 @@ class CaravanBackupServiceTest {
     supplyStateRepository = new InMemorySupplyStateRepository();
     dayResolutionRepository = new InMemoryDayResolutionRepository();
     activeSelection = new InMemoryActiveSelection();
+    weatherProfileRepository = new InMemoryWeatherProfileRepository();
+    weatherSnapshotRepository = new InMemoryWeatherSnapshotRepository();
 
     var clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
+    var weatherService = new CaravanWeatherService(
+        campaignRepository,
+        weatherProfileRepository,
+        weatherSnapshotRepository,
+        clock);
     managementService = new CaravanManagementService(
         campaignRepository,
         wagonRepository,
@@ -82,6 +96,7 @@ class CaravanBackupServiceTest {
         featRepository,
         supplyStateRepository,
         dayResolutionRepository,
+        weatherService,
         new NoopCaravanFeatCatalogPort(),
         activeSelection,
         clock);
@@ -626,6 +641,50 @@ class CaravanBackupServiceTest {
     @Override
     public void deleteByCaravanId(UUID caravanId) {
       resolutions.removeIf(resolution -> resolution.caravanId().equals(caravanId));
+    }
+  }
+
+  private static final class InMemoryWeatherProfileRepository implements CaravanWeatherProfileRepositoryPort {
+    private final java.util.Map<UUID, CaravanWeatherProfile> profiles = new java.util.HashMap<>();
+
+    @Override
+    public CaravanWeatherProfile save(CaravanWeatherProfile profile) {
+      profiles.put(profile.caravanId(), profile);
+      return profile;
+    }
+
+    @Override
+    public Optional<CaravanWeatherProfile> findByCaravanId(UUID caravanId) {
+      return Optional.ofNullable(profiles.get(caravanId));
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      profiles.remove(caravanId);
+    }
+  }
+
+  private static final class InMemoryWeatherSnapshotRepository implements CaravanWeatherSnapshotRepositoryPort {
+    private final java.util.Map<String, CaravanWeatherSnapshot> snapshots = new java.util.HashMap<>();
+
+    @Override
+    public CaravanWeatherSnapshot save(CaravanWeatherSnapshot snapshot) {
+      snapshots.put(key(snapshot.caravanId(), snapshot.date()), snapshot);
+      return snapshot;
+    }
+
+    @Override
+    public Optional<CaravanWeatherSnapshot> findByCaravanIdAndDate(UUID caravanId, GolarionDate date) {
+      return Optional.ofNullable(snapshots.get(key(caravanId, date)));
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      snapshots.entrySet().removeIf(entry -> entry.getKey().startsWith(caravanId + ":"));
+    }
+
+    private String key(UUID caravanId, GolarionDate date) {
+      return caravanId + ":" + date.year() + ":" + date.month() + ":" + date.day();
     }
   }
 

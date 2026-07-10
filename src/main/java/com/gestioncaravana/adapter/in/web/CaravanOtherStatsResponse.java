@@ -8,6 +8,7 @@ public record CaravanOtherStatsResponse(
     int cargoRemaining,
     int consumption,
     int travelerCount,
+    int travelingBeastCount,
     int wagonCount,
     int beastCount,
     int maxWagons) {}

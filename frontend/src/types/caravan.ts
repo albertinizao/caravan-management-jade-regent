@@ -23,6 +23,7 @@ export interface CaravanOtherStats {
   cargoRemaining: number;
   consumption: number;
   travelerCount: number;
+  travelingBeastCount: number;
   wagonCount: number;
   beastCount: number;
   maxWagons: number;

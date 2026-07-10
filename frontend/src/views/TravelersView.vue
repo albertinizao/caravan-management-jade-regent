@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 
+import CaravanSummaryHero from "@/components/caravan/CaravanSummaryHero.vue";
 import { useToast } from "@/composables/useToast";
 import { getActiveCaravan, listCaravans } from "@/services/caravans";
 import { listCaravanBeasts } from "@/services/beasts";
@@ -882,9 +883,6 @@ onMounted(refresh);
               <span>{{ isPending('refresh') ? "Refrescando…" : "Refrescar" }}</span>
             </span>
           </button>
-          <button class="primary-button" type="button" :disabled="!activeCaravan || loading || submitting" @click="openCreateModal">
-            Añadir
-          </button>
         </div>
       </header>
 
@@ -897,37 +895,37 @@ onMounted(refresh);
       </section>
 
       <template v-else>
-        <section class="card summary">
-          <div>
-            <h2>{{ activeCaravan.name }}</h2>
-            <p class="muted">Resumen rápido de la ocupación y el reparto actual de viajeros.</p>
-          </div>
-
-          <div class="summary-overview">
-            <div class="summary-stats">
-              <div><span>Espacio</span><strong>{{ formatSpace(totalTravelerOccupiedSpace) }} / {{ formatSpace(totalTravelerCapacity) }}</strong></div>
-              <div><span>Viajeros</span><strong>{{ travelers.length }}</strong></div>
-              <div><span>Pasajeros</span><strong>{{ travelersActingAsPassengers }}</strong></div>
-            </div>
-
-            <div class="summary-meter-block summary-meter-block--compact">
-              <div
-                class="meter-strip"
-                :aria-label="`Espacio ocupado por viajeros ${formatSpace(totalTravelerOccupiedSpace)} de ${formatSpace(totalTravelerCapacity)}`"
-                :title="`Espacio ocupado por viajeros ${formatSpace(totalTravelerOccupiedSpace)} de ${formatSpace(totalTravelerCapacity)}`"
-              >
-                <span
-                  class="meter-segment meter-segment--travelers"
-                  :style="{ width: `${percentageOf(totalTravelerOccupiedSpace, totalTravelerCapacity)}%` }"
-                ></span>
-              </div>
-              <div class="meter-values meter-values--compact">
-                <span><strong>{{ formatSpace(totalTravelerOccupiedSpace) }}</strong> actual</span>
-                <span><strong>{{ formatSpace(totalTravelerCapacity) }}</strong> máximo</span>
-              </div>
-            </div>
-          </div>
-        </section>
+        <CaravanSummaryHero
+          eyebrow="Vástagos de Amatatsu"
+          :title="activeCaravan.name"
+          description="Resumen rápido de la ocupación y el reparto actual de viajeros."
+          :stats="[
+            { label: 'Espacio', value: `${formatSpace(totalTravelerOccupiedSpace)} / ${formatSpace(totalTravelerCapacity)}` },
+            { label: 'Viajeros', value: travelers.length },
+            { label: 'Pasajeros', value: travelersActingAsPassengers },
+          ]"
+        :meter="{
+          ariaLabel: `Espacio ocupado por viajeros ${formatSpace(totalTravelerOccupiedSpace)} de ${formatSpace(totalTravelerCapacity)}`,
+          title: `Espacio ocupado por viajeros ${formatSpace(totalTravelerOccupiedSpace)} de ${formatSpace(totalTravelerCapacity)}`,
+          currentValue: formatSpace(totalTravelerOccupiedSpace),
+            currentLabel: 'actual',
+            maxValue: formatSpace(totalTravelerCapacity),
+            maxLabel: 'máximo',
+          segmentWidth: `${percentageOf(totalTravelerOccupiedSpace, totalTravelerCapacity)}%`,
+          segmentClass: 'meter-segment--travelers',
+        }"
+        >
+          <template #action>
+            <button
+              class="primary-button"
+              type="button"
+              :disabled="!activeCaravan || loading || submitting"
+              @click="openCreateModal"
+            >
+              Añadir
+            </button>
+          </template>
+        </CaravanSummaryHero>
 
         <section class="card">
           <div class="section-header">
@@ -2137,7 +2135,6 @@ dd {
     padding: 1rem;
   }
 
-  .hero-actions,
   .modal-actions {
     width: 100%;
     flex-direction: column;

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 
+import CaravanSummaryHero from "@/components/caravan/CaravanSummaryHero.vue";
 import { useToast } from "@/composables/useToast";
 import { getActiveCaravan } from "@/services/caravans";
 import { listCaravanTravelers, listTravelerRoleCatalog } from "@/services/travelers";
@@ -96,6 +97,29 @@ const passengerRoleCode = "pasajero";
 
 const wagonById = computed(() =>
   Object.fromEntries(wagons.value.map((wagon) => [wagon.id, wagon] as const)),
+);
+
+const draftLargeBeastCount = computed(() =>
+  beasts.value.filter((beast) => beast.assignmentType === "DRAFT" && beast.size.toUpperCase() === "G").length,
+);
+
+const travelerBeastCount = computed(() =>
+  beasts.value.filter((beast) => beast.assignmentType === "TRAVELER").length,
+);
+
+const draftLargeBeastCapacity = computed(() =>
+  wagons.value.reduce((total, wagon) => {
+    const requirement = parseDraftRequirement(wagon.propulsion);
+    return total + (requirement ? requirement.maxLargeBeasts : 0);
+  }, 0),
+);
+
+const wagonsWithoutDraft = computed(() =>
+  wagons.value.filter((wagon) => (draftBeastsByWagonId.value.get(wagon.id) ?? []).length === 0).length,
+);
+
+const draftBeastUsagePercentage = computed(() =>
+  draftLargeBeastCapacity.value === 0 ? 0 : Math.min(100, (draftLargeBeastCount.value / draftLargeBeastCapacity.value) * 100),
 );
 
 const travelersByWagonId = computed(() => {
@@ -1014,12 +1038,6 @@ onMounted(refresh);
               <span>{{ isPending('refresh') ? "Refrescando…" : "Refrescar" }}</span>
             </span>
           </button>
-          <button class="primary-button" type="button" :disabled="!activeCaravan || loading || submitting" @click="openCatalogModal">
-            Añadir del catálogo
-          </button>
-          <button class="secondary-button" type="button" :disabled="!activeCaravan || loading || submitting" @click="openCustomModal">
-            Crear personalizada
-          </button>
         </div>
       </header>
 
@@ -1032,19 +1050,37 @@ onMounted(refresh);
       </section>
 
       <template v-else>
-        <section class="card">
-          <div class="section-header">
-            <div>
-              <h2>{{ activeCaravan.name }}</h2>
-              <p v-if="activeCaravan.description" class="muted">{{ activeCaravan.description }}</p>
-            </div>
-            <div class="stats-inline">
-              <div><span>Bestias</span><strong>{{ beasts.length }}</strong></div>
-              <div><span>Carros</span><strong>{{ wagons.length }}</strong></div>
-              <div><span>Viajeros</span><strong>{{ travelers.length }}</strong></div>
-            </div>
-          </div>
+        <CaravanSummaryHero
+          eyebrow="Caravana activa"
+          :title="activeCaravan.name"
+          :description="activeCaravan.description ?? 'Resumen operativo de las bestias de tiro, las bestias viajeras y los carros sin tiro.'"
+          :stats="[
+            { label: 'Bestias de tiro grandes', value: `${draftLargeBeastCount} / ${draftLargeBeastCapacity}` },
+            { label: 'Bestias viajeras', value: travelerBeastCount },
+            { label: 'Carros sin tiro', value: wagonsWithoutDraft },
+          ]"
+          :meter="{
+            ariaLabel: `Bestias de tiro grandes ${draftLargeBeastCount} de ${draftLargeBeastCapacity}`,
+            title: `Bestias de tiro grandes ${draftLargeBeastCount} de ${draftLargeBeastCapacity}`,
+            currentValue: draftLargeBeastCount,
+            currentLabel: 'actuales',
+            maxValue: draftLargeBeastCapacity,
+            maxLabel: 'máximas',
+            segmentWidth: `${draftBeastUsagePercentage}%`,
+            segmentClass: 'meter-segment--draft',
+          }"
+        >
+          <template #action>
+            <button class="primary-button" type="button" :disabled="!activeCaravan || loading || submitting" @click="openCatalogModal">
+              Añadir
+            </button>
+            <button class="secondary-button" type="button" :disabled="!activeCaravan || loading || submitting" @click="openCustomModal">
+              Añadir personalizada
+            </button>
+          </template>
+        </CaravanSummaryHero>
 
+        <section class="card">
           <div v-if="unassignedBeasts.length > 0" class="warning-banner" role="status" aria-live="polite">
             <strong>{{ unassignedBeasts.length }} bestia{{ unassignedBeasts.length === 1 ? "" : "s" }} sin asignar.</strong>
             <p>Estas bestias están sin carro y deben destacarse claramente para evitar descuidos operativos.</p>

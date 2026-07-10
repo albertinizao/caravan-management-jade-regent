@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 
+import CaravanSummaryHero from "@/components/caravan/CaravanSummaryHero.vue";
 import { useToast } from "@/composables/useToast";
 import { getActiveCaravan, getCaravanStatistics, listCaravans } from "@/services/caravans";
 import {
@@ -2174,40 +2175,32 @@ onMounted(refresh);
       </section>
 
       <template v-else>
-        <section class="summary card">
-          <div>
-            <h2>{{ activeCaravan.name }}</h2>
-            <p class="muted" v-if="activeCaravan.description">{{ activeCaravan.description }}</p>
-          </div>
-          <div class="summary-actions">
-            <div class="summary-overview">
-              <div class="summary-stats">
-                <div><span>Carros</span><strong>{{ wagons.length }} / {{ maxWagons }}</strong></div>
-                <div><span>Nivel</span><strong>{{ activeCaravan.level }}</strong></div>
-                <div><span>Descontento</span><strong>{{ activeCaravan.discontent }}</strong></div>
-              </div>
-              <div class="summary-meter-block summary-meter-block--compact">
-                <div
-                  class="meter-strip"
-                  :aria-label="`Descontento ${activeCaravan.discontent} de ${activeCaravanDiscontentThreshold}`"
-                  :title="`Descontento ${activeCaravan.discontent} de ${activeCaravanDiscontentThreshold}`"
-                >
-                  <span
-                    class="meter-segment meter-segment--discontent"
-                    :style="{ width: `${percentageOf(activeCaravan.discontent, activeCaravanDiscontentThreshold)}%` }"
-                  ></span>
-                </div>
-                <div class="meter-values meter-values--compact">
-                  <span><strong>{{ activeCaravan.discontent }}</strong> actual</span>
-                  <span><strong>{{ activeCaravanDiscontentThreshold }}</strong> máximo</span>
-                </div>
-              </div>
-            </div>
+        <CaravanSummaryHero
+          eyebrow="Caravana activa"
+          :title="activeCaravan.name"
+          :description="activeCaravan.description"
+          :stats="[
+            { label: 'Carros', value: `${wagons.length} / ${maxWagons}` },
+            { label: 'Nivel', value: activeCaravan.level },
+            { label: 'Descontento', value: activeCaravan.discontent },
+          ]"
+          :meter="{
+            ariaLabel: `Descontento ${activeCaravan.discontent} de ${activeCaravanDiscontentThreshold}`,
+            title: `Descontento ${activeCaravan.discontent} de ${activeCaravanDiscontentThreshold}`,
+            currentValue: activeCaravan.discontent,
+            currentLabel: 'actual',
+            maxValue: activeCaravanDiscontentThreshold,
+            maxLabel: 'máximo',
+            segmentWidth: `${percentageOf(activeCaravan.discontent, activeCaravanDiscontentThreshold)}%`,
+            segmentClass: 'meter-segment--discontent',
+          }"
+        >
+          <template #action>
             <button class="primary-button" type="button" :disabled="loading || submitting" @click="openAddModal">
               Añadir
             </button>
-          </div>
-        </section>
+          </template>
+        </CaravanSummaryHero>
 
         <div v-if="caravanWagonLimitState" class="warning-block caravan-limit-alert">
           <strong>Alerta</strong>

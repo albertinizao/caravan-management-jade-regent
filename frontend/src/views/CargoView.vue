@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { RouterLink } from "vue-router";
 
+import CaravanSummaryHero from "@/components/caravan/CaravanSummaryHero.vue";
 import { useToast } from "@/composables/useToast";
 import { getActiveCaravan, listCaravans } from "@/services/caravans";
 import { listCaravanWagons } from "@/services/wagons";
@@ -947,46 +947,47 @@ onMounted(refresh);
         </div>
 
         <div class="hero-actions">
-          <RouterLink class="secondary-button" to="/wagons">Carros</RouterLink>
-          <button class="primary-button" type="button" :disabled="loading || submitting" @click="openCatalogModal">
-            Añadir carga
-          </button>
-          <button class="secondary-button" type="button" :disabled="loading || submitting" @click="openCustomModal">
-            Carga personalizada
+          <button class="ghost-button" type="button" :disabled="loading || submitting" @click="refresh">
+            <span class="button-with-spinner">
+              <span v-if="isPending('refresh')" class="button-spinner" aria-hidden="true"></span>
+              <span>{{ isPending('refresh') ? "Refrescando…" : "Refrescar" }}</span>
+            </span>
           </button>
         </div>
       </header>
 
       <div v-if="error" class="error">{{ error }}</div>
 
-      <section v-if="activeCaravan" class="card cargo-summary">
-        <div>
-          <h2>{{ activeCaravan.name }}</h2>
-          <p class="muted">Resumen rápido del cargamento transportado por la caravana.</p>
-        </div>
-
-        <div class="summary-overview">
-          <div class="summary-stats">
-            <div><span>Carga</span><strong>{{ totalTransportedCargoUnits }} / {{ totalCargoCapacity }}</strong></div>
-            <div><span>Suministros</span><strong>{{ transportedSupplyUnits }}</strong></div>
-            <div><span>Mercancías + locales</span><strong>{{ transportedMerchandiseUnits }}</strong></div>
-          </div>
-
-          <div class="summary-meter-block summary-meter-block--compact">
-            <div
-              class="meter-strip"
-              :aria-label="`Carga transportada ${totalTransportedCargoUnits} de ${totalCargoCapacity}`"
-              :title="`Carga transportada ${totalTransportedCargoUnits} de ${totalCargoCapacity}`"
-            >
-              <span class="meter-segment meter-segment--cargo" :style="{ width: `${cargoUsagePercentage()}%` }"></span>
-            </div>
-            <div class="meter-values meter-values--compact">
-              <span><strong>{{ totalTransportedCargoUnits }}</strong> actual</span>
-              <span><strong>{{ totalCargoCapacity }}</strong> máximo</span>
-            </div>
-          </div>
-        </div>
-      </section>
+      <CaravanSummaryHero
+        v-if="activeCaravan"
+        eyebrow="Vástagos de Amatatsu"
+        :title="activeCaravan.name"
+        description="Resumen rápido del cargamento transportado por la caravana."
+        :stats="[
+          { label: 'Carga', value: `${totalTransportedCargoUnits} / ${totalCargoCapacity}` },
+          { label: 'Suministros', value: transportedSupplyUnits },
+          { label: 'Mercancías + locales', value: transportedMerchandiseUnits },
+        ]"
+        :meter="{
+          ariaLabel: `Carga transportada ${totalTransportedCargoUnits} de ${totalCargoCapacity}`,
+          title: `Carga transportada ${totalTransportedCargoUnits} de ${totalCargoCapacity}`,
+          currentValue: totalTransportedCargoUnits,
+          currentLabel: 'actual',
+          maxValue: totalCargoCapacity,
+          maxLabel: 'máximo',
+          segmentWidth: `${cargoUsagePercentage()}%`,
+          segmentClass: 'meter-segment--cargo',
+        }"
+      >
+        <template #action>
+          <button class="primary-button" type="button" :disabled="loading || submitting" @click="openCatalogModal">
+            Añadir
+          </button>
+          <button class="secondary-button" type="button" :disabled="loading || submitting" @click="openCustomModal">
+            Añadir carga personalizada
+          </button>
+        </template>
+      </CaravanSummaryHero>
 
       <section class="card">
         <div class="section-header">
@@ -1513,13 +1514,7 @@ onMounted(refresh);
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
-}
-
-.cargo-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  justify-content: flex-end;
 }
 
 .eyebrow {
@@ -1942,7 +1937,6 @@ dd {
     grid-template-columns: 1fr;
   }
 
-  .cargo-summary,
   .hero,
   .modal-header,
   .section-header {
@@ -1956,7 +1950,6 @@ dd {
     padding: 1rem;
   }
 
-  .hero-actions,
   .modal-actions {
     width: 100%;
     flex-direction: column;

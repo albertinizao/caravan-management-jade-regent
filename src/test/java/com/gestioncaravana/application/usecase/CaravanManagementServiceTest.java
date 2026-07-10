@@ -7,21 +7,26 @@ import com.gestioncaravana.application.port.in.CreateCaravanUseCase.CreateCarava
 import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanDayResolutionRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanFeatCatalogPort;
 import com.gestioncaravana.application.port.out.CaravanFeatRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
 import com.gestioncaravana.domain.CaravanBeast;
 import com.gestioncaravana.domain.CaravanBeastAssignmentType;
+import com.gestioncaravana.domain.CaravanCargo;
+import com.gestioncaravana.domain.CaravanCargoSourceType;
 import com.gestioncaravana.domain.CaravanFeat;
 import com.gestioncaravana.domain.CaravanFeatAcquisitionSourceType;
 import com.gestioncaravana.domain.CaravanDayResolution;
 import com.gestioncaravana.domain.CaravanSupplyState;
 import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
+import com.gestioncaravana.domain.CaravanWagonImprovement;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -36,6 +41,9 @@ class CaravanManagementServiceTest {
 
   private InMemoryCaravanRepository repository;
   private InMemoryActiveSelection activeSelection;
+  private InMemoryCaravanWagonRepository wagonRepository;
+  private InMemoryWagonImprovementRepository wagonImprovementRepository;
+  private InMemoryCargoRepository cargoRepository;
   private InMemoryFeatRepository featRepository;
   private CaravanManagementService service;
 
@@ -43,11 +51,16 @@ class CaravanManagementServiceTest {
   void setUp() {
     repository = new InMemoryCaravanRepository();
     activeSelection = new InMemoryActiveSelection();
+    wagonRepository = new InMemoryCaravanWagonRepository();
+    wagonImprovementRepository = new InMemoryWagonImprovementRepository();
+    cargoRepository = new InMemoryCargoRepository();
     featRepository = new InMemoryFeatRepository();
     service = new CaravanManagementService(
         repository,
-        new InMemoryCaravanWagonRepository(),
+        wagonRepository,
+        wagonImprovementRepository,
         new InMemoryTravelerRepository(),
+        cargoRepository,
         new InMemoryBeastRepository(),
         featRepository,
         new InMemorySupplyStateRepository(),
@@ -81,6 +94,29 @@ class CaravanManagementServiceTest {
   @Test
   void deletesCaravansAndClearsTheActiveSelectionWhenNeeded() {
     var created = service.execute(new CreateCaravanCommand("Campaign", null, null, null, null, null));
+    var wagonId = UUID.randomUUID();
+    wagonRepository.save(CaravanWagon.create(wagonId, created.id(), "wagon", "Load Bearer", Instant.parse("2026-01-01T00:00:00Z")));
+    wagonImprovementRepository.save(CaravanWagonImprovement.create(
+        UUID.randomUUID(),
+        created.id(),
+        wagonId,
+        "reinforced-axle",
+        Instant.parse("2026-01-01T00:00:00Z")));
+    cargoRepository.save(CaravanCargo.create(
+        UUID.randomUUID(),
+        created.id(),
+        CaravanCargoSourceType.CUSTOM,
+        null,
+        "Supplies",
+        "Food",
+        1,
+        1,
+        wagonId,
+        null,
+        null,
+        null,
+        null,
+        Instant.parse("2026-01-01T00:00:00Z")));
     featRepository.save(CaravanFeat.create(
         UUID.randomUUID(),
         created.id(),
@@ -99,6 +135,9 @@ class CaravanManagementServiceTest {
 
     assertThat(service.list()).isEmpty();
     assertThat(service.getActive()).isEmpty();
+    assertThat(wagonRepository.findAllByCaravanId(created.id())).isEmpty();
+    assertThat(wagonImprovementRepository.findAllByCaravanIdAndWagonId(created.id(), wagonId)).isEmpty();
+    assertThat(cargoRepository.findAllByCaravanId(created.id())).isEmpty();
     assertThat(featRepository.findAllByCaravanId(created.id())).isEmpty();
   }
 
@@ -296,6 +335,46 @@ class CaravanManagementServiceTest {
     }
   }
 
+  private static final class InMemoryCargoRepository implements CaravanCargoRepositoryPort {
+    private final List<CaravanCargo> cargos = new ArrayList<>();
+
+    @Override
+    public CaravanCargo save(CaravanCargo cargo) {
+      cargos.removeIf(existing -> existing.id().equals(cargo.id()));
+      cargos.add(cargo);
+      return cargo;
+    }
+
+    @Override
+    public List<CaravanCargo> findAllByCaravanId(UUID caravanId) {
+      return cargos.stream().filter(cargo -> cargo.caravanId().equals(caravanId)).toList();
+    }
+
+    @Override
+    public Optional<CaravanCargo> findById(UUID caravanId, UUID cargoId) {
+      return cargos.stream()
+          .filter(cargo -> cargo.caravanId().equals(caravanId) && cargo.id().equals(cargoId))
+          .findFirst();
+    }
+
+    @Override
+    public void deleteById(UUID caravanId, UUID cargoId) {
+      cargos.removeIf(cargo -> cargo.caravanId().equals(caravanId) && cargo.id().equals(cargoId));
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      cargos.removeIf(cargo -> cargo.caravanId().equals(caravanId));
+    }
+
+    @Override
+    public long countByCaravanIdAndWagonId(UUID caravanId, UUID wagonId) {
+      return cargos.stream()
+          .filter(cargo -> cargo.caravanId().equals(caravanId) && wagonId.equals(cargo.wagonId()))
+          .count();
+    }
+  }
+
   private static final class InMemoryBeastRepository implements CaravanBeastRepositoryPort {
     private final List<CaravanBeast> beasts = new ArrayList<>();
 
@@ -336,8 +415,49 @@ class CaravanManagementServiceTest {
     }
 
     @Override
+    public void deleteByCaravanIdAndId(UUID caravanId, UUID beastId) {
+      beasts.removeIf(beast -> beast.caravanId().equals(caravanId) && beast.id().equals(beastId));
+    }
+
+    @Override
     public void deleteByCaravanId(UUID caravanId) {
       beasts.removeIf(beast -> beast.caravanId().equals(caravanId));
+    }
+  }
+
+  private static final class InMemoryWagonImprovementRepository implements CaravanWagonImprovementRepositoryPort {
+    private final List<CaravanWagonImprovement> improvements = new ArrayList<>();
+
+    @Override
+    public CaravanWagonImprovement save(CaravanWagonImprovement improvement) {
+      improvements.removeIf(existing -> existing.id().equals(improvement.id()));
+      improvements.add(improvement);
+      return improvement;
+    }
+
+    @Override
+    public List<CaravanWagonImprovement> findAllByCaravanIdAndWagonId(UUID caravanId, UUID wagonId) {
+      return improvements.stream()
+          .filter(improvement -> improvement.caravanId().equals(caravanId) && improvement.wagonId().equals(wagonId))
+          .toList();
+    }
+
+    @Override
+    public Optional<CaravanWagonImprovement> findById(UUID caravanId, UUID wagonId, UUID improvementId) {
+      return improvements.stream()
+          .filter(improvement ->
+              improvement.caravanId().equals(caravanId)
+                  && improvement.wagonId().equals(wagonId)
+                  && improvement.id().equals(improvementId))
+          .findFirst();
+    }
+
+    @Override
+    public void deleteById(UUID caravanId, UUID wagonId, UUID improvementId) {
+      improvements.removeIf(improvement ->
+          improvement.caravanId().equals(caravanId)
+              && improvement.wagonId().equals(wagonId)
+              && improvement.id().equals(improvementId));
     }
   }
 

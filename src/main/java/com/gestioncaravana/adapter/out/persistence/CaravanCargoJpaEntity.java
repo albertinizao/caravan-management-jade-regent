@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.time.Instant;
 
 @Entity
@@ -36,7 +37,7 @@ public class CaravanCargoJpaEntity {
   private int cargoUnits;
 
   @Column
-  private Integer currentProvisions;
+  private BigDecimal currentProvisions;
 
   @Column
   private Boolean dayPassed;
@@ -128,11 +129,11 @@ public class CaravanCargoJpaEntity {
     this.cargoUnits = cargoUnits;
   }
 
-  public Integer getCurrentProvisions() {
+  public BigDecimal getCurrentProvisions() {
     return currentProvisions;
   }
 
-  public void setCurrentProvisions(Integer currentProvisions) {
+  public void setCurrentProvisions(BigDecimal currentProvisions) {
     this.currentProvisions = currentProvisions;
   }
 

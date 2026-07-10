@@ -49,6 +49,7 @@ public class CaravanDayResolutionRepositoryAdapter implements CaravanDayResoluti
     entity.setTotalGeneration(resolution.totalGeneration());
     entity.setNetDelta(resolution.netDelta());
     entity.setShortage(resolution.shortage());
+    entity.setCargoMovementSummary(resolution.cargoMovementSummary());
     entity.setChoicesSummary(resolution.choicesSummary());
     entity.setContributionsSummary(resolution.contributionsSummary());
     entity.setWarningsSummary(resolution.warningsSummary());
@@ -68,6 +69,7 @@ public class CaravanDayResolutionRepositoryAdapter implements CaravanDayResoluti
         entity.getTotalGeneration(),
         entity.getNetDelta(),
         entity.getShortage(),
+        entity.getCargoMovementSummary(),
         entity.getChoicesSummary(),
         entity.getContributionsSummary(),
         entity.getWarningsSummary());

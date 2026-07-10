@@ -14,12 +14,14 @@ import com.gestioncaravana.application.port.in.UpdateCaravanMainStatsUseCase;
 import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanDayResolutionRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanFeatCatalogPort;
 import com.gestioncaravana.application.port.out.CaravanFeatRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
 import com.gestioncaravana.domain.CaravanFeatType;
 import com.gestioncaravana.domain.CaravanBeastAssignmentType;
@@ -48,7 +50,9 @@ public class CaravanManagementService
 
   private final CaravanCampaignRepositoryPort campaignRepository;
   private final CaravanWagonRepositoryPort wagonRepository;
+  private final CaravanWagonImprovementRepositoryPort wagonImprovementRepository;
   private final CaravanTravelerRepositoryPort travelerRepository;
+  private final CaravanCargoRepositoryPort cargoRepository;
   private final CaravanBeastRepositoryPort beastRepository;
   private final CaravanFeatRepositoryPort featRepository;
   private final CaravanSupplyStateRepositoryPort supplyStateRepository;
@@ -61,7 +65,9 @@ public class CaravanManagementService
   public CaravanManagementService(
       CaravanCampaignRepositoryPort campaignRepository,
       CaravanWagonRepositoryPort wagonRepository,
+      CaravanWagonImprovementRepositoryPort wagonImprovementRepository,
       CaravanTravelerRepositoryPort travelerRepository,
+      CaravanCargoRepositoryPort cargoRepository,
       CaravanBeastRepositoryPort beastRepository,
       CaravanFeatRepositoryPort featRepository,
       CaravanSupplyStateRepositoryPort supplyStateRepository,
@@ -71,7 +77,9 @@ public class CaravanManagementService
       Clock clock) {
     this.campaignRepository = campaignRepository;
     this.wagonRepository = wagonRepository;
+    this.wagonImprovementRepository = wagonImprovementRepository;
     this.travelerRepository = travelerRepository;
+    this.cargoRepository = cargoRepository;
     this.beastRepository = beastRepository;
     this.featRepository = featRepository;
     this.supplyStateRepository = supplyStateRepository;
@@ -84,7 +92,9 @@ public class CaravanManagementService
   CaravanManagementService(
       CaravanCampaignRepositoryPort campaignRepository,
       CaravanWagonRepositoryPort wagonRepository,
+      CaravanWagonImprovementRepositoryPort wagonImprovementRepository,
       CaravanTravelerRepositoryPort travelerRepository,
+      CaravanCargoRepositoryPort cargoRepository,
       CaravanBeastRepositoryPort beastRepository,
       CaravanFeatRepositoryPort featRepository,
       CaravanSupplyStateRepositoryPort supplyStateRepository,
@@ -94,7 +104,9 @@ public class CaravanManagementService
     this(
         campaignRepository,
         wagonRepository,
+        wagonImprovementRepository,
         travelerRepository,
+        cargoRepository,
         beastRepository,
         featRepository,
         supplyStateRepository,
@@ -107,7 +119,9 @@ public class CaravanManagementService
   CaravanManagementService(
       CaravanCampaignRepositoryPort campaignRepository,
       CaravanWagonRepositoryPort wagonRepository,
+      CaravanWagonImprovementRepositoryPort wagonImprovementRepository,
       CaravanTravelerRepositoryPort travelerRepository,
+      CaravanCargoRepositoryPort cargoRepository,
       CaravanBeastRepositoryPort beastRepository,
       CaravanSupplyStateRepositoryPort supplyStateRepository,
       CaravanDayResolutionRepositoryPort dayResolutionRepository,
@@ -116,7 +130,9 @@ public class CaravanManagementService
     this(
         campaignRepository,
         wagonRepository,
+        wagonImprovementRepository,
         travelerRepository,
+        cargoRepository,
         beastRepository,
         new NoopCaravanFeatRepositoryPort(),
         supplyStateRepository,
@@ -198,12 +214,7 @@ public class CaravanManagementService
   public void delete(UUID id) {
     var exists = campaignRepository.findById(id)
         .orElseThrow(() -> new IllegalArgumentException("Caravan not found: " + id));
-    campaignRepository.deleteById(exists.id());
-    travelerRepository.deleteByCaravanId(exists.id());
-    beastRepository.deleteByCaravanId(exists.id());
-    featRepository.deleteByCaravanId(exists.id());
-    supplyStateRepository.deleteByCaravanId(exists.id());
-    dayResolutionRepository.deleteByCaravanId(exists.id());
+    deleteCaravanData(exists.id());
 
     activeSelectionPort.getActiveCaravanId()
         .filter(activeId -> activeId.equals(id))
@@ -267,6 +278,23 @@ public class CaravanManagementService
 
   private boolean isActiveCaravan(UUID caravanId) {
     return activeSelectionPort.getActiveCaravanId().filter(caravanId::equals).isPresent();
+  }
+
+  private void deleteCaravanData(UUID caravanId) {
+    campaignRepository.deleteById(caravanId);
+    cargoRepository.deleteByCaravanId(caravanId);
+    travelerRepository.deleteByCaravanId(caravanId);
+    beastRepository.deleteByCaravanId(caravanId);
+    featRepository.deleteByCaravanId(caravanId);
+    supplyStateRepository.deleteByCaravanId(caravanId);
+    dayResolutionRepository.deleteByCaravanId(caravanId);
+
+    for (var wagon : wagonRepository.findAllByCaravanId(caravanId)) {
+      for (var improvement : wagonImprovementRepository.findAllByCaravanIdAndWagonId(caravanId, wagon.id())) {
+        wagonImprovementRepository.deleteById(caravanId, wagon.id(), improvement.id());
+      }
+      wagonRepository.deleteById(caravanId, wagon.id());
+    }
   }
 
   private static int requireDelta(int delta) {

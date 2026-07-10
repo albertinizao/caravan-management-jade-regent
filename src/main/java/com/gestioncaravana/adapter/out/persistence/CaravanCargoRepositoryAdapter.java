@@ -3,6 +3,7 @@ package com.gestioncaravana.adapter.out.persistence;
 import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
 import com.gestioncaravana.domain.CaravanCargo;
 import com.gestioncaravana.domain.CaravanCargoSourceType;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -79,7 +80,7 @@ public class CaravanCargoRepositoryAdapter implements CaravanCargoRepositoryPort
         entity.getCategory(),
         entity.getQuantity(),
         entity.getCargoUnits(),
-        entity.getCurrentProvisions(),
+        entity.getCurrentProvisions() == null ? null : entity.getCurrentProvisions(),
         entity.getDayPassed() == null ? Boolean.FALSE : entity.getDayPassed(),
         entity.getWagonId() == null ? null : UUID.fromString(entity.getWagonId()),
         entity.getOrigin(),

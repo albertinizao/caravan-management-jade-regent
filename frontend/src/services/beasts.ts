@@ -4,6 +4,7 @@ import type {
   BeastAssignmentType,
   BeastCatalogItem,
   CaravanBeast,
+  UpdateCaravanBeastPayload,
   UpdateCaravanBeastAssignmentPayload,
 } from "@/types/beast";
 
@@ -41,6 +42,25 @@ export function getCaravanBeast(caravanId: string, beastId: string) {
   return fetchJson<CaravanBeast>(`/caravans/${caravanId}/beasts/${beastId}`);
 }
 
+export function updateCaravanBeast(caravanId: string, beastId: string, payload: UpdateCaravanBeastPayload) {
+  return fetchJson<CaravanBeast>(`/caravans/${caravanId}/beasts/${beastId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteCaravanBeast(caravanId: string, beastId: string) {
+  return fetchJson<void>(`/caravans/${caravanId}/beasts/${beastId}`, {
+    method: "DELETE",
+  });
+}
+
+export function deleteUnassignedCaravanBeasts(caravanId: string) {
+  return fetchJson<void>(`/caravans/${caravanId}/beasts/unassigned`, {
+    method: "DELETE",
+  });
+}
+
 export function addCaravanBeast(caravanId: string, payload: AddCaravanBeastPayload) {
   return fetchJson<CaravanBeast>(`/caravans/${caravanId}/beasts`, {
     method: "POST",
@@ -48,8 +68,13 @@ export function addCaravanBeast(caravanId: string, payload: AddCaravanBeastPaylo
   });
 }
 
-export function addCaravanBeastFromCatalog(caravanId: string, beastCode: string) {
-  return fetchJson<CaravanBeast>(`/caravans/${caravanId}/beasts/catalog/${beastCode}`, {
+export function addCaravanBeastFromCatalog(caravanId: string, beastCode: string, quantity = 1) {
+  const searchParams = new URLSearchParams();
+  if (quantity > 1) {
+    searchParams.set("quantity", String(quantity));
+  }
+  const queryString = searchParams.toString();
+  return fetchJson<CaravanBeast>(`/caravans/${caravanId}/beasts/catalog/${beastCode}${queryString ? `?${queryString}` : ""}`, {
     method: "POST",
   });
 }

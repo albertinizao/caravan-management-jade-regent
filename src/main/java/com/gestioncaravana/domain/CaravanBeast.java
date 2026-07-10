@@ -2,6 +2,7 @@ package com.gestioncaravana.domain;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record CaravanBeast(
@@ -20,6 +21,9 @@ public record CaravanBeast(
     String specialNote,
     String description,
     String customNotes,
+    int consumption,
+    List<String> availableRoleCodes,
+    String activeRoleCode,
     CaravanBeastAssignmentType assignmentType,
     UUID assignedWagonId,
     Instant createdAt,
@@ -42,6 +46,7 @@ public record CaravanBeast(
       String specialNote,
       String description,
       String customNotes,
+      int consumption,
       CaravanBeastAssignmentType assignmentType,
       UUID assignedWagonId,
       Instant createdAt,
@@ -62,6 +67,9 @@ public record CaravanBeast(
         specialNote,
         description,
         customNotes,
+        consumption,
+        List.of(),
+        null,
         assignmentType,
         assignedWagonId,
         createdAt,
@@ -69,7 +77,156 @@ public record CaravanBeast(
         BigDecimal.ONE);
   }
 
+  public CaravanBeast(
+      UUID id,
+      UUID caravanId,
+      CaravanBeastSourceType sourceType,
+      String catalogBeastCode,
+      String name,
+      String size,
+      int strength,
+      int speed,
+      Integer thermalAdaptation,
+      Integer basePrice,
+      Integer trainedPrice,
+      boolean fourLegged,
+      String specialNote,
+      String description,
+      String customNotes,
+      int consumption,
+      CaravanBeastAssignmentType assignmentType,
+      UUID assignedWagonId,
+      Instant createdAt,
+      Instant updatedAt,
+      BigDecimal occupiedSpace) {
+    this(
+        id,
+        caravanId,
+        sourceType,
+        catalogBeastCode,
+        name,
+        size,
+        strength,
+        speed,
+        thermalAdaptation,
+        basePrice,
+        trainedPrice,
+        fourLegged,
+        specialNote,
+        description,
+        customNotes,
+        consumption,
+        List.of(),
+        null,
+        assignmentType,
+        assignedWagonId,
+        createdAt,
+        updatedAt,
+        occupiedSpace);
+  }
+
+  public CaravanBeast(
+      UUID id,
+      UUID caravanId,
+      CaravanBeastSourceType sourceType,
+      String catalogBeastCode,
+      String name,
+      String size,
+      int strength,
+      int speed,
+      Integer thermalAdaptation,
+      Integer basePrice,
+      Integer trainedPrice,
+      boolean fourLegged,
+      String specialNote,
+      String description,
+      String customNotes,
+      List<String> availableRoleCodes,
+      String activeRoleCode,
+      int consumption,
+      CaravanBeastAssignmentType assignmentType,
+      UUID assignedWagonId,
+      Instant createdAt,
+      Instant updatedAt) {
+    this(
+        id,
+        caravanId,
+        sourceType,
+        catalogBeastCode,
+        name,
+        size,
+        strength,
+        speed,
+        thermalAdaptation,
+        basePrice,
+        trainedPrice,
+        fourLegged,
+        specialNote,
+        description,
+        customNotes,
+        consumption,
+        availableRoleCodes,
+        activeRoleCode,
+        assignmentType,
+        assignedWagonId,
+        createdAt,
+        updatedAt,
+        BigDecimal.ONE);
+  }
+
+  public CaravanBeast(
+      UUID id,
+      UUID caravanId,
+      CaravanBeastSourceType sourceType,
+      String catalogBeastCode,
+      String name,
+      String size,
+      int strength,
+      int speed,
+      Integer thermalAdaptation,
+      Integer basePrice,
+      Integer trainedPrice,
+      boolean fourLegged,
+      String specialNote,
+      String description,
+      String customNotes,
+      List<String> availableRoleCodes,
+      String activeRoleCode,
+      int consumption,
+      CaravanBeastAssignmentType assignmentType,
+      UUID assignedWagonId,
+      Instant createdAt,
+      Instant updatedAt,
+      BigDecimal occupiedSpace) {
+    this(
+        id,
+        caravanId,
+        sourceType,
+        catalogBeastCode,
+        name,
+        size,
+        strength,
+        speed,
+        thermalAdaptation,
+        basePrice,
+        trainedPrice,
+        fourLegged,
+        specialNote,
+        description,
+        customNotes,
+        consumption,
+        availableRoleCodes,
+        activeRoleCode,
+        assignmentType,
+        assignedWagonId,
+        createdAt,
+        updatedAt,
+        occupiedSpace);
+  }
+
   public CaravanBeast {
+    availableRoleCodes = normalizeRoleCodes(availableRoleCodes);
+    activeRoleCode = normalize(activeRoleCode);
     if (id == null) {
       throw new IllegalArgumentException("id is required");
     }
@@ -96,6 +253,9 @@ public record CaravanBeast(
     }
     if (description == null || description.isBlank()) {
       throw new IllegalArgumentException("description is required");
+    }
+    if (consumption < 0) {
+      throw new IllegalArgumentException("consumption must be greater than or equal to 0");
     }
     if (assignmentType == null) {
       throw new IllegalArgumentException("assignmentType is required");
@@ -139,6 +299,9 @@ public record CaravanBeast(
         catalogItem.specialNote(),
         catalogItem.description(),
         catalogItem.notes(),
+        1,
+        List.of(),
+        null,
         CaravanBeastAssignmentType.NONE,
         null,
         now,
@@ -175,6 +338,7 @@ public record CaravanBeast(
         specialNote,
         description,
         customNotes,
+        null,
         BigDecimal.ONE,
         now);
   }
@@ -195,6 +359,77 @@ public record CaravanBeast(
       String customNotes,
       BigDecimal occupiedSpace,
       Instant now) {
+    return createCustom(
+        id,
+        caravanId,
+        name,
+        size,
+        strength,
+        speed,
+        thermalAdaptation,
+        basePrice,
+        trainedPrice,
+        fourLegged,
+        specialNote,
+        description,
+        customNotes,
+        null,
+        occupiedSpace,
+        now);
+  }
+
+  public static CaravanBeast createCustom(
+      UUID id,
+      UUID caravanId,
+      String name,
+      String size,
+      int strength,
+      int speed,
+      Integer thermalAdaptation,
+      Integer basePrice,
+      Integer trainedPrice,
+      boolean fourLegged,
+      String specialNote,
+      String description,
+      String customNotes,
+      Integer consumption,
+      Instant now) {
+    return createCustom(
+        id,
+        caravanId,
+        name,
+        size,
+        strength,
+        speed,
+        thermalAdaptation,
+        basePrice,
+        trainedPrice,
+        fourLegged,
+        specialNote,
+        description,
+        customNotes,
+        consumption,
+        BigDecimal.ONE,
+        now);
+  }
+
+  public static CaravanBeast createCustom(
+      UUID id,
+      UUID caravanId,
+      String name,
+      String size,
+      int strength,
+      int speed,
+      Integer thermalAdaptation,
+      Integer basePrice,
+      Integer trainedPrice,
+      boolean fourLegged,
+      String specialNote,
+      String description,
+      String customNotes,
+      Integer consumption,
+      BigDecimal occupiedSpace,
+      Instant now) {
     return new CaravanBeast(
         id,
         caravanId,
@@ -211,11 +446,46 @@ public record CaravanBeast(
         specialNote,
         description,
         normalize(customNotes),
+        consumption == null ? 1 : consumption,
+        List.of(),
+        null,
         CaravanBeastAssignmentType.NONE,
         null,
         now,
         now,
         occupiedSpace == null ? BigDecimal.ONE : occupiedSpace);
+  }
+
+  public CaravanBeast updateCustomEconomy(Integer consumption, BigDecimal occupiedSpace, Instant now) {
+    if (sourceType != CaravanBeastSourceType.CUSTOM) {
+      throw new IllegalArgumentException("Only custom beasts can be updated");
+    }
+    var resolvedConsumption = consumption == null ? this.consumption : consumption;
+    var resolvedOccupiedSpace = occupiedSpace == null ? this.occupiedSpace : occupiedSpace;
+    return new CaravanBeast(
+        id,
+        caravanId,
+        sourceType,
+        catalogBeastCode,
+        name,
+        size,
+        strength,
+        speed,
+        thermalAdaptation,
+        basePrice,
+        trainedPrice,
+        fourLegged,
+        specialNote,
+        description,
+        customNotes,
+        resolvedConsumption,
+        availableRoleCodes,
+        activeRoleCode,
+        assignmentType,
+        assignedWagonId,
+        createdAt,
+        now,
+        resolvedOccupiedSpace);
   }
 
   public CaravanBeast assignDraft(UUID wagonId, Instant now) {
@@ -235,6 +505,9 @@ public record CaravanBeast(
         specialNote,
         description,
         customNotes,
+        consumption,
+        availableRoleCodes,
+        activeRoleCode,
         CaravanBeastAssignmentType.DRAFT,
         wagonId,
         createdAt,
@@ -243,6 +516,14 @@ public record CaravanBeast(
   }
 
   public CaravanBeast assignTraveler(UUID wagonId, Instant now) {
+    return assignTraveler(wagonId, availableRoleCodes, activeRoleCode, now);
+  }
+
+  public CaravanBeast assignTraveler(
+      UUID wagonId,
+      List<String> availableRoleCodes,
+      String activeRoleCode,
+      Instant now) {
     return new CaravanBeast(
         id,
         caravanId,
@@ -259,6 +540,9 @@ public record CaravanBeast(
         specialNote,
         description,
         customNotes,
+        consumption,
+        availableRoleCodes,
+        activeRoleCode,
         CaravanBeastAssignmentType.TRAVELER,
         wagonId,
         createdAt,
@@ -283,6 +567,9 @@ public record CaravanBeast(
         specialNote,
         description,
         customNotes,
+        consumption,
+        availableRoleCodes,
+        activeRoleCode,
         CaravanBeastAssignmentType.NONE,
         null,
         createdAt,
@@ -295,6 +582,17 @@ public record CaravanBeast(
       return null;
     }
     return value.trim();
+  }
+
+  private static List<String> normalizeRoleCodes(List<String> roleCodes) {
+    if (roleCodes == null) {
+      return List.of();
+    }
+    return roleCodes.stream()
+        .map(CaravanBeast::normalize)
+        .filter(code -> code != null && !code.isBlank())
+        .distinct()
+        .toList();
   }
 
   private static void validateOccupiedSpace(BigDecimal occupiedSpace) {

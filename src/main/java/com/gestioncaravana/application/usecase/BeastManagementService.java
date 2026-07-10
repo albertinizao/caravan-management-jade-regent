@@ -4,10 +4,13 @@ import com.gestioncaravana.application.model.CaravanBeastCatalogItemView;
 import com.gestioncaravana.application.model.CaravanBeastView;
 import com.gestioncaravana.application.port.in.AddCaravanBeastUseCase;
 import com.gestioncaravana.application.port.in.ClearCaravanBeastAssignmentUseCase;
+import com.gestioncaravana.application.port.in.DeleteCaravanBeastUseCase;
+import com.gestioncaravana.application.port.in.DeleteUnassignedCaravanBeastsUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanBeastUseCase;
 import com.gestioncaravana.application.port.in.ListBeastCatalogUseCase;
 import com.gestioncaravana.application.port.in.ListCaravanBeastsUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanBeastAssignmentUseCase;
+import com.gestioncaravana.application.port.in.UpdateCaravanBeastUseCase;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort;
@@ -19,6 +22,7 @@ import com.gestioncaravana.domain.CaravanBeastCatalog;
 import com.gestioncaravana.domain.CaravanBeastCatalogItem;
 import com.gestioncaravana.domain.CaravanBeastSourceType;
 import com.gestioncaravana.domain.CaravanWagonImprovement;
+import com.gestioncaravana.domain.TravelerRoleCatalog;
 import com.gestioncaravana.domain.WagonDraftConstraint;
 import com.gestioncaravana.domain.WagonImprovementCatalog;
 import com.gestioncaravana.domain.WagonCatalog;
@@ -28,6 +32,7 @@ import java.math.BigDecimal;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,7 +43,10 @@ public class BeastManagementService
         ListCaravanBeastsUseCase,
         GetCaravanBeastUseCase,
         AddCaravanBeastUseCase,
+        DeleteCaravanBeastUseCase,
+        DeleteUnassignedCaravanBeastsUseCase,
         UpdateCaravanBeastAssignmentUseCase,
+        UpdateCaravanBeastUseCase,
         ClearCaravanBeastAssignmentUseCase {
 
   private final CaravanCampaignRepositoryPort caravanRepository;
@@ -95,6 +103,10 @@ public class BeastManagementService
   public CaravanBeastView execute(UUID caravanId, AddCaravanBeastCommand command) {
     requireCaravan(caravanId);
     var now = clock.instant();
+    var quantity = command.quantity() == null ? 1 : command.quantity();
+    if (quantity < 1) {
+      throw new IllegalArgumentException("quantity must be greater than or equal to 1");
+    }
     var sourceType = command.sourceType() == null ? CaravanBeastSourceType.CUSTOM : command.sourceType();
     if (sourceType == CaravanBeastSourceType.CATALOG) {
       var catalogCode = command.catalogBeastCode();
@@ -103,28 +115,50 @@ public class BeastManagementService
       }
       var catalogItem = CaravanBeastCatalog.findByCode(catalogCode)
           .orElseThrow(() -> new IllegalArgumentException("Beast type not found: " + catalogCode));
-      var beast = CaravanBeast.createFromCatalog(UUID.randomUUID(), caravanId, catalogItem, now);
-      return toView(beastRepository.save(beast));
+      CaravanBeast saved = null;
+      for (var index = 0; index < quantity; index++) {
+        saved = beastRepository.save(CaravanBeast.createFromCatalog(UUID.randomUUID(), caravanId, catalogItem, now));
+      }
+      return toView(saved);
     }
 
     validateCustomPayload(command);
-    var beast = CaravanBeast.createCustom(
-        UUID.randomUUID(),
-        caravanId,
-        command.name(),
-        command.size(),
-        command.strength(),
-        command.speed(),
-        command.thermalAdaptation(),
-        command.basePrice(),
-        command.trainedPrice(),
-        command.fourLegged() != null && command.fourLegged(),
-        command.specialNote(),
-        command.description(),
-        command.customNotes(),
-        command.occupiedSpace(),
-        now);
-    return toView(beastRepository.save(beast));
+    CaravanBeast saved = null;
+    for (var index = 0; index < quantity; index++) {
+      saved = beastRepository.save(CaravanBeast.createCustom(
+          UUID.randomUUID(),
+          caravanId,
+          command.name(),
+          command.size(),
+          command.strength(),
+          command.speed(),
+          command.thermalAdaptation(),
+          command.basePrice(),
+          command.trainedPrice(),
+          command.fourLegged() != null && command.fourLegged(),
+          command.specialNote(),
+          command.description(),
+          command.customNotes(),
+          command.consumption(),
+          command.occupiedSpace(),
+          now));
+    }
+    return toView(saved);
+  }
+
+  @Override
+  public void delete(UUID caravanId, UUID beastId) {
+    requireCaravan(caravanId);
+    requireBeast(caravanId, beastId);
+    beastRepository.deleteByCaravanIdAndId(caravanId, beastId);
+  }
+
+  @Override
+  public void delete(UUID caravanId) {
+    requireCaravan(caravanId);
+    beastRepository.findAllByCaravanIdAndAssignmentType(caravanId, CaravanBeastAssignmentType.NONE).stream()
+        .map(CaravanBeast::id)
+        .forEach(beastId -> beastRepository.deleteByCaravanIdAndId(caravanId, beastId));
   }
 
   @Override
@@ -154,10 +188,32 @@ public class BeastManagementService
 
     if (command.assignmentType() == CaravanBeastAssignmentType.TRAVELER) {
       validateTravelerAssignment(caravanId, beast, wagon, beast.assignedWagonId());
-      return toView(beastRepository.save(beast.assignTraveler(wagonId, clock.instant())));
+      var availableRoleCodes = beast.sourceType() == CaravanBeastSourceType.CUSTOM
+          ? normalizeTravelerAvailableRoleCodes(command.availableRoleCodes())
+          : null;
+      var activeRoleCode = beast.sourceType() == CaravanBeastSourceType.CUSTOM
+          ? normalizeTravelerActiveRoleCode(command.activeRoleCode(), availableRoleCodes)
+          : null;
+      validateTravelerRoleAssignment(beast, availableRoleCodes, activeRoleCode);
+      return toView(beastRepository.save(beast.assignTraveler(
+          wagonId,
+          availableRoleCodes,
+          activeRoleCode,
+          clock.instant())));
     }
 
     throw new IllegalArgumentException("Unsupported assignment type: " + command.assignmentType());
+  }
+
+  @Override
+  public CaravanBeastView execute(UUID caravanId, UUID beastId, UpdateCaravanBeastCommand command) {
+    requireCaravan(caravanId);
+    var beast = requireBeast(caravanId, beastId);
+    if (beast.sourceType() != CaravanBeastSourceType.CUSTOM) {
+      throw new IllegalArgumentException("Only custom beasts can be edited");
+    }
+    validateCustomEconomy(command);
+    return toView(beastRepository.save(beast.updateCustomEconomy(command.consumption(), command.occupiedSpace(), clock.instant())));
   }
 
   @Override
@@ -199,6 +255,26 @@ public class BeastManagementService
     if (command.description() == null || command.description().isBlank()) {
       throw new IllegalArgumentException("description is required");
     }
+    if (command.consumption() != null && command.consumption() < 0) {
+      throw new IllegalArgumentException("consumption must be greater than or equal to 0");
+    }
+  }
+
+  private void validateCustomEconomy(UpdateCaravanBeastCommand command) {
+    if (command.consumption() != null && command.consumption() < 0) {
+      throw new IllegalArgumentException("consumption must be greater than or equal to 0");
+    }
+    if (command.occupiedSpace() != null) {
+      if (command.occupiedSpace().signum() < 0) {
+        throw new IllegalArgumentException("occupiedSpace must be greater than or equal to 0");
+      }
+      if (command.occupiedSpace().compareTo(BigDecimal.valueOf(4)) > 0) {
+        throw new IllegalArgumentException("occupiedSpace must be less than or equal to 4");
+      }
+      if (command.occupiedSpace().multiply(BigDecimal.valueOf(2)).stripTrailingZeros().scale() > 0) {
+        throw new IllegalArgumentException("occupiedSpace must use 0.5 increments");
+      }
+    }
   }
 
   private void validateDraftAssignment(UUID caravanId, CaravanBeast beast, CaravanWagon wagon) {
@@ -233,23 +309,64 @@ public class BeastManagementService
     var alreadyOccupiesTargetSlot = beast.assignmentType() == CaravanBeastAssignmentType.TRAVELER
         && wagon.id().equals(currentWagonId);
     if (!alreadyOccupiesTargetSlot) {
-      if (currentCount.add(BigDecimal.ONE).compareTo(BigDecimal.valueOf(currentWagonCapacity(caravanId, wagon.id()))) > 0) {
+      if (currentCount.add(beast.occupiedSpace()).compareTo(BigDecimal.valueOf(currentWagonCapacity(caravanId, wagon.id()))) > 0) {
         throw new IllegalArgumentException("Wagon capacity reached");
       }
     }
   }
 
+  private void validateTravelerRoleAssignment(
+      CaravanBeast beast,
+      List<String> availableRoleCodes,
+      String activeRoleCode) {
+    if (beast.sourceType() != CaravanBeastSourceType.CUSTOM) {
+      return;
+    }
+    if (availableRoleCodes.stream().anyMatch(code -> TravelerRoleCatalog.findByCode(code).isEmpty())) {
+      throw new IllegalArgumentException("availableRoleCodes must contain known traveler role codes");
+    }
+    if (!availableRoleCodes.contains(activeRoleCode)) {
+      throw new IllegalArgumentException("activeRoleCode must be one of availableRoleCodes");
+    }
+  }
+
+  private List<String> normalizeTravelerAvailableRoleCodes(List<String> availableRoleCodes) {
+    var normalized = availableRoleCodes == null ? List.<String>of() : availableRoleCodes.stream()
+        .filter(code -> code != null && !code.isBlank())
+        .distinct()
+        .toList();
+    if (normalized.contains(TravelerRoleCatalog.PASSENGER_CODE)) {
+      return normalized;
+    }
+    return Stream.concat(Stream.of(TravelerRoleCatalog.PASSENGER_CODE), normalized.stream()).distinct().toList();
+  }
+
+  private String normalizeTravelerActiveRoleCode(String activeRoleCode, List<String> availableRoleCodes) {
+    if (activeRoleCode == null || activeRoleCode.isBlank()) {
+      return TravelerRoleCatalog.PASSENGER_CODE;
+    }
+    if (availableRoleCodes == null || !availableRoleCodes.contains(activeRoleCode)) {
+      throw new IllegalArgumentException("activeRoleCode must be one of availableRoleCodes");
+    }
+    return activeRoleCode;
+  }
+
   private BigDecimal travelerOccupancySpace(UUID caravanId, UUID wagonId) {
-    var travelerCount = travelerRepository.countByCaravanIdAndWagonId(caravanId, wagonId);
-    var beastCount = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
-        caravanId, wagonId, CaravanBeastAssignmentType.TRAVELER).size();
-    return BigDecimal.valueOf(travelerCount + beastCount);
+    var travelerSpace = travelerRepository.findAllByCaravanId(caravanId).stream()
+        .filter(traveler -> wagonId.equals(traveler.wagonId()))
+        .map(com.gestioncaravana.domain.CaravanTraveler::occupiedSpace)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
+    var beastSpace = beastRepository.findAllByCaravanIdAndWagonIdAndAssignmentType(
+        caravanId, wagonId, CaravanBeastAssignmentType.TRAVELER).stream()
+        .map(CaravanBeast::occupiedSpace)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
+    return travelerSpace.add(beastSpace);
   }
 
   private int currentWagonCapacity(UUID caravanId, UUID wagonId) {
     var wagon = wagonRepository.findById(caravanId, wagonId)
         .orElseThrow(() -> new IllegalArgumentException("Wagon not found: " + wagonId));
-    return deriveTravelerCapacity(wagonId, wagon);
+    return deriveTravelerCapacity(caravanId, wagon);
   }
 
   private int deriveTravelerCapacity(UUID caravanId, CaravanWagon wagon) {
@@ -329,6 +446,9 @@ public class BeastManagementService
         beast.specialNote(),
         beast.description(),
         beast.customNotes(),
+        beast.consumption(),
+        beast.availableRoleCodes(),
+        beast.activeRoleCode(),
         beast.assignmentType(),
         beast.assignedWagonId(),
         assignedWagonName,

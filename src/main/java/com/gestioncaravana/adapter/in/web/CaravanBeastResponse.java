@@ -4,6 +4,7 @@ import com.gestioncaravana.domain.CaravanBeastAssignmentType;
 import com.gestioncaravana.domain.CaravanBeastSourceType;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record CaravanBeastResponse(
@@ -22,6 +23,9 @@ public record CaravanBeastResponse(
     String specialNote,
     String description,
     String customNotes,
+    int consumption,
+    List<String> availableRoleCodes,
+    String activeRoleCode,
     CaravanBeastAssignmentType assignmentType,
     UUID assignedWagonId,
     String assignedWagonName,

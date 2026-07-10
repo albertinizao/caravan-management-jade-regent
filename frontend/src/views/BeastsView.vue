@@ -2,27 +2,33 @@
 import { computed, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 
+import CaravanSummaryHero from "@/components/caravan/CaravanSummaryHero.vue";
 import { useToast } from "@/composables/useToast";
 import { getActiveCaravan } from "@/services/caravans";
-import { listCaravanTravelers } from "@/services/travelers";
+import { listCaravanTravelers, listTravelerRoleCatalog } from "@/services/travelers";
 import { listCaravanWagons } from "@/services/wagons";
 import {
   addCaravanBeast,
   addCaravanBeastFromCatalog,
+  deleteCaravanBeast,
+  deleteUnassignedCaravanBeasts,
   clearCaravanBeastAssignment,
   getCaravanBeast,
   listBeastCatalog,
   listCaravanBeasts,
+  updateCaravanBeast,
   updateCaravanBeastAssignment,
 } from "@/services/beasts";
 import type { Caravan } from "@/types/caravan";
-import type { CaravanTraveler } from "@/types/traveler";
+import type { CaravanTraveler, TravelerRoleCatalogItem } from "@/types/traveler";
 import type { CaravanWagon } from "@/types/wagon";
 import type {
   AddCaravanBeastPayload,
   BeastAssignmentType,
   BeastCatalogItem,
   CaravanBeast,
+  UpdateCaravanBeastPayload,
+  UpdateCaravanBeastAssignmentPayload,
 } from "@/types/beast";
 
 interface DraftRequirement {
@@ -34,6 +40,7 @@ interface DraftRequirement {
 const activeCaravan = ref<Caravan | null>(null);
 const beasts = ref<CaravanBeast[]>([]);
 const catalog = ref<BeastCatalogItem[]>([]);
+const roleCatalog = ref<TravelerRoleCatalogItem[]>([]);
 const wagons = ref<CaravanWagon[]>([]);
 const travelers = ref<CaravanTraveler[]>([]);
 const loading = ref(true);
@@ -48,11 +55,17 @@ const selectedBeast = ref<CaravanBeast | null>(null);
 const assignmentMode = ref<"DRAFT" | "TRAVELER">("DRAFT");
 const selectedDraftWagonId = ref("");
 const selectedTravelerWagonId = ref("");
+const selectedTravelerAvailableRoleCodes = ref<string[]>([]);
+const selectedTravelerActiveRoleCode = ref("");
 const selectedBeastError = ref<string | null>(null);
+const customEditConsumption = ref("");
+const customEditOccupiedSpace = ref("");
 const catalogModalOpen = ref(false);
 const customModalOpen = ref(false);
 const catalogModalError = ref<string | null>(null);
 const customModalError = ref<string | null>(null);
+const catalogQuantity = ref("1");
+const customQuantity = ref("1");
 const customName = ref("");
 const customSize = ref("M");
 const customStrength = ref("2");
@@ -61,6 +74,8 @@ const customThermalAdaptation = ref("");
 const customBasePrice = ref("");
 const customTrainedPrice = ref("");
 const customFourLegged = ref(true);
+const customConsumption = ref("1");
+const customOccupiedSpace = ref("1");
 const customSpecialNote = ref("Ninguno");
 const customDescription = ref("");
 const customNotes = ref("");
@@ -74,8 +89,37 @@ const catalogByCode = computed(() =>
   Object.fromEntries(catalog.value.map((item) => [item.code, item] as const)),
 );
 
+const roleCatalogByCode = computed(() =>
+  Object.fromEntries(roleCatalog.value.map((item) => [item.code, item] as const)),
+);
+
+const passengerRoleCode = "pasajero";
+
 const wagonById = computed(() =>
   Object.fromEntries(wagons.value.map((wagon) => [wagon.id, wagon] as const)),
+);
+
+const draftLargeBeastCount = computed(() =>
+  beasts.value.filter((beast) => beast.assignmentType === "DRAFT" && beast.size.toUpperCase() === "G").length,
+);
+
+const travelerBeastCount = computed(() =>
+  beasts.value.filter((beast) => beast.assignmentType === "TRAVELER").length,
+);
+
+const draftLargeBeastCapacity = computed(() =>
+  wagons.value.reduce((total, wagon) => {
+    const requirement = parseDraftRequirement(wagon.propulsion);
+    return total + (requirement ? requirement.maxLargeBeasts : 0);
+  }, 0),
+);
+
+const wagonsWithoutDraft = computed(() =>
+  wagons.value.filter((wagon) => (draftBeastsByWagonId.value.get(wagon.id) ?? []).length === 0).length,
+);
+
+const draftBeastUsagePercentage = computed(() =>
+  draftLargeBeastCapacity.value === 0 ? 0 : Math.min(100, (draftLargeBeastCount.value / draftLargeBeastCapacity.value) * 100),
 );
 
 const travelersByWagonId = computed(() => {
@@ -119,6 +163,25 @@ const selectedDraftRequirement = computed(() =>
 
 const selectedTravelerWagon = computed(() =>
   selectedTravelerWagonId.value ? wagonById.value[selectedTravelerWagonId.value] ?? null : null,
+);
+
+const selectedTravelerAvailableRoleOptions = computed(() =>
+  roleCatalog.value.filter((role) => selectedTravelerAvailableRoleCodes.value.includes(role.code)),
+);
+
+const selectedTravelerActiveRoleOptions = computed(() =>
+  selectedTravelerAvailableRoleOptions.value,
+);
+
+const selectedBeastRequiresTravelerRoles = computed(() =>
+  selectedBeast.value?.sourceType === "CUSTOM" && assignmentMode.value === "TRAVELER",
+);
+
+const selectedTravelerRoleSelectionReady = computed(() =>
+  !selectedBeastRequiresTravelerRoles.value
+    || (selectedTravelerAvailableRoleCodes.value.length > 0
+      && selectedTravelerActiveRoleCode.value.trim().length > 0
+      && selectedTravelerAvailableRoleCodes.value.includes(selectedTravelerActiveRoleCode.value)),
 );
 
 const activeAssignmentWagons = computed(() =>
@@ -176,17 +239,19 @@ async function refresh() {
     activeCaravan.value = activeResponse.caravan;
 
     if (activeResponse.caravan) {
-      const [beastList, catalogList, wagonList, travelerList] = await Promise.all([
+      const [beastList, catalogList, wagonList, travelerList, roleList] = await Promise.all([
         listCaravanBeasts(activeResponse.caravan.id),
         listBeastCatalog(activeResponse.caravan.id),
         listCaravanWagons(activeResponse.caravan.id),
         listCaravanTravelers(activeResponse.caravan.id),
+        listTravelerRoleCatalog(activeResponse.caravan.id),
       ]);
 
       beasts.value = beastList;
       catalog.value = catalogList;
       wagons.value = wagonList;
       travelers.value = travelerList;
+      roleCatalog.value = roleList;
 
       if (selectedBeast.value) {
         const refreshed = beastList.find((beast) => beast.id === selectedBeast.value?.id);
@@ -195,16 +260,22 @@ async function refresh() {
           syncAssignmentModeWithBeast(refreshed);
           selectedDraftWagonId.value = pickDefaultDraftWagonId(refreshed);
           selectedTravelerWagonId.value = pickDefaultTravelerWagonId(refreshed);
+          syncTravelerRoleSelection(refreshed);
+          resetCustomEditForm(refreshed);
         }
       }
     } else {
       beasts.value = [];
       catalog.value = [];
+      roleCatalog.value = [];
       wagons.value = [];
       travelers.value = [];
       selectedBeast.value = null;
       selectedDraftWagonId.value = "";
       selectedTravelerWagonId.value = "";
+      selectedTravelerAvailableRoleCodes.value = [];
+      selectedTravelerActiveRoleCode.value = "";
+      resetCustomEditForm(null);
     }
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to load beasts";
@@ -216,6 +287,7 @@ async function refresh() {
 
 function openCatalogModal() {
   catalogModalError.value = null;
+  catalogQuantity.value = "1";
   catalogModalOpen.value = true;
 }
 
@@ -236,6 +308,7 @@ function closeCustomModal() {
 }
 
 function resetCustomForm() {
+  customQuantity.value = "1";
   customName.value = "";
   customSize.value = "M";
   customStrength.value = "2";
@@ -244,13 +317,40 @@ function resetCustomForm() {
   customBasePrice.value = "";
   customTrainedPrice.value = "";
   customFourLegged.value = true;
+  customConsumption.value = "1";
+  customOccupiedSpace.value = "1";
   customSpecialNote.value = "Ninguno";
   customDescription.value = "";
   customNotes.value = "";
 }
 
+function resetCustomEditForm(beast: CaravanBeast | null) {
+  if (!beast || beast.sourceType !== "CUSTOM") {
+    customEditConsumption.value = "";
+    customEditOccupiedSpace.value = "";
+    return;
+  }
+
+  customEditConsumption.value = String(beast.consumption);
+  customEditOccupiedSpace.value = String(beast.occupiedSpace);
+}
+
+function parsePositiveQuantity(input: string): number | null {
+  const parsed = Number.parseInt(input, 10);
+  if (Number.isNaN(parsed) || parsed < 1) {
+    return null;
+  }
+  return parsed;
+}
+
 async function handleAddCatalogBeast(beastCode: string) {
   if (!activeCaravan.value) {
+    return;
+  }
+
+  const quantity = parsePositiveQuantity(catalogQuantity.value);
+  if (quantity === null) {
+    catalogModalError.value = "La cantidad debe ser un número entero mayor o igual a 1";
     return;
   }
 
@@ -259,14 +359,15 @@ async function handleAddCatalogBeast(beastCode: string) {
   catalogModalError.value = null;
 
   try {
-    const created = await addCaravanBeastFromCatalog(activeCaravan.value.id, beastCode);
+    const created = await addCaravanBeastFromCatalog(activeCaravan.value.id, beastCode, quantity);
     selectedBeast.value = created;
     syncAssignmentModeWithBeast(created);
     selectedDraftWagonId.value = pickDefaultDraftWagonId(created);
     selectedTravelerWagonId.value = pickDefaultTravelerWagonId(created);
+    syncTravelerRoleSelection(created);
     closeCatalogModal();
     await refresh();
-    showToast(`Bestia añadida: ${created.name}.`);
+    showToast(quantity === 1 ? `Bestia añadida: ${created.name}.` : `${quantity} bestias añadidas: ${created.name}.`);
   } catch (cause) {
     catalogModalError.value = cause instanceof Error ? cause.message : "Failed to add beast";
   } finally {
@@ -292,12 +393,17 @@ async function handleCreateCustomBeast() {
 
   const parsedStrength = Number(customStrength.value);
   const parsedSpeed = Number(customSpeed.value);
+  const quantity = parsePositiveQuantity(customQuantity.value);
   const thermalInput = normalizeInputValue(customThermalAdaptation.value);
   const basePriceInput = normalizeInputValue(customBasePrice.value);
   const trainedPriceInput = normalizeInputValue(customTrainedPrice.value);
+  const consumptionInput = normalizeInputValue(customConsumption.value);
+  const occupiedSpaceInput = normalizeInputValue(customOccupiedSpace.value).replace(",", ".");
   const parsedThermal = thermalInput === "" ? null : Number(thermalInput);
   const parsedBasePrice = basePriceInput === "" ? null : Number(basePriceInput);
   const parsedTrainedPrice = trainedPriceInput === "" ? null : Number(trainedPriceInput);
+  const parsedConsumption = consumptionInput === "" ? 1 : Number(consumptionInput);
+  const parsedOccupiedSpace = occupiedSpaceInput === "" ? 1 : Number(occupiedSpaceInput);
 
   if (Number.isNaN(parsedStrength) || parsedStrength < 0) {
     customModalError.value = "La fuerza debe ser un número válido";
@@ -305,6 +411,10 @@ async function handleCreateCustomBeast() {
   }
   if (Number.isNaN(parsedSpeed) || parsedSpeed < 0) {
     customModalError.value = "La velocidad debe ser un número válido";
+    return;
+  }
+  if (quantity === null) {
+    customModalError.value = "La cantidad debe ser un número entero mayor o igual a 1";
     return;
   }
   if (parsedThermal !== null && Number.isNaN(parsedThermal)) {
@@ -317,6 +427,14 @@ async function handleCreateCustomBeast() {
   }
   if (parsedTrainedPrice !== null && Number.isNaN(parsedTrainedPrice)) {
     customModalError.value = "El precio adiestrado debe ser un número válido";
+    return;
+  }
+  if (Number.isNaN(parsedConsumption) || parsedConsumption < 0) {
+    customModalError.value = "El consumo debe ser un número mayor o igual a 0";
+    return;
+  }
+  if (Number.isNaN(parsedOccupiedSpace) || parsedOccupiedSpace < 0 || parsedOccupiedSpace > 4 || !Number.isInteger(parsedOccupiedSpace * 2)) {
+    customModalError.value = "El espacio ocupado debe ser un número entre 0 y 4 en incrementos de 0,5";
     return;
   }
 
@@ -334,9 +452,12 @@ async function handleCreateCustomBeast() {
     basePrice: parsedBasePrice,
     trainedPrice: parsedTrainedPrice,
     fourLegged: customFourLegged.value,
+    consumption: parsedConsumption,
+    occupiedSpace: parsedOccupiedSpace,
     specialNote: normalizeInputValue(customSpecialNote.value) || "Ninguno",
     description: normalizeInputValue(customDescription.value),
     customNotes: normalizeInputValue(customNotes.value) || null,
+    quantity,
   };
 
   try {
@@ -345,9 +466,10 @@ async function handleCreateCustomBeast() {
     syncAssignmentModeWithBeast(created);
     selectedDraftWagonId.value = pickDefaultDraftWagonId(created);
     selectedTravelerWagonId.value = pickDefaultTravelerWagonId(created);
+    syncTravelerRoleSelection(created);
     closeCustomModal();
     await refresh();
-    showToast(`Bestia añadida: ${created.name}.`);
+    showToast(quantity === 1 ? `Bestia añadida: ${created.name}.` : `${quantity} bestias añadidas: ${created.name}.`);
   } catch (cause) {
     customModalError.value = cause instanceof Error ? cause.message : "Failed to create beast";
   } finally {
@@ -367,6 +489,8 @@ async function openBeastDetails(beast: CaravanBeast) {
     syncAssignmentModeWithBeast(detailed);
     selectedDraftWagonId.value = pickDefaultDraftWagonId(detailed);
     selectedTravelerWagonId.value = pickDefaultTravelerWagonId(detailed);
+    syncTravelerRoleSelection(detailed);
+    resetCustomEditForm(detailed);
     selectedBeastError.value = null;
   } catch (cause) {
     selectedBeastError.value = cause instanceof Error ? cause.message : "Failed to load beast details";
@@ -378,7 +502,10 @@ function closeBeastDetails() {
   assignmentMode.value = "DRAFT";
   selectedDraftWagonId.value = "";
   selectedTravelerWagonId.value = "";
+  selectedTravelerAvailableRoleCodes.value = [];
+  selectedTravelerActiveRoleCode.value = "";
   selectedBeastError.value = null;
+  resetCustomEditForm(null);
 }
 
 async function assignAsDraft() {
@@ -398,6 +525,7 @@ async function assignAsDraft() {
     selectedBeast.value = updated;
     assignmentMode.value = "DRAFT";
     syncAssignmentWagonSelection("DRAFT", updated);
+    syncTravelerRoleSelection(updated);
     await refresh();
     showToast(`Bestia asignada al tiro: ${updated.name}.`);
     closeBeastDetails();
@@ -414,18 +542,35 @@ async function assignAsTraveler() {
     return;
   }
 
+  if (selectedBeastRequiresTravelerRoles.value && !selectedTravelerRoleSelectionReady.value) {
+    selectedBeastError.value = "Selecciona al menos un rol disponible y un rol activo válido.";
+    return;
+  }
+
   submitting.value = true;
   pendingAction.value = "assign-traveler";
   selectedBeastError.value = null;
 
   try {
-    const updated = await updateCaravanBeastAssignment(activeCaravan.value.id, selectedBeast.value.id, {
-      assignmentType: "TRAVELER",
-      wagonId: selectedTravelerWagonId.value,
-    });
+    const availableRoleCodes = normalizeTravelerAvailableRoleCodes(selectedTravelerAvailableRoleCodes.value);
+    const activeRoleCode = selectedTravelerActiveRoleCode.value.trim() || passengerRoleCode;
+    const payload: UpdateCaravanBeastAssignmentPayload =
+      selectedBeastRequiresTravelerRoles.value
+        ? {
+            assignmentType: "TRAVELER" as const,
+            wagonId: selectedTravelerWagonId.value,
+            availableRoleCodes,
+            activeRoleCode,
+          }
+        : {
+            assignmentType: "TRAVELER" as const,
+            wagonId: selectedTravelerWagonId.value,
+          };
+    const updated = await updateCaravanBeastAssignment(activeCaravan.value.id, selectedBeast.value.id, payload);
     selectedBeast.value = updated;
     assignmentMode.value = "TRAVELER";
     syncAssignmentWagonSelection("TRAVELER", updated);
+    syncTravelerRoleSelection(updated);
     await refresh();
     showToast(`Bestia asignada como viajera: ${updated.name}.`);
     closeBeastDetails();
@@ -449,12 +594,121 @@ async function clearAssignment(): Promise<CaravanBeast | null> {
   try {
     const updated = await clearCaravanBeastAssignment(activeCaravan.value.id, selectedBeast.value.id);
     selectedBeast.value = updated;
+    syncTravelerRoleSelection(updated);
     await refresh();
     showToast(`Asignación quitada: ${updated.name}.`);
     return updated;
   } catch (cause) {
     selectedBeastError.value = cause instanceof Error ? cause.message : "Failed to clear assignment";
     return null;
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+type CustomBeastEditFormParseResult =
+  | { error: string; payload?: never }
+  | { payload: UpdateCaravanBeastPayload; error?: never };
+
+function parseCustomBeastEditForm(): CustomBeastEditFormParseResult {
+  const consumptionInput = normalizeInputValue(customEditConsumption.value);
+  const occupiedSpaceInput = normalizeInputValue(customEditOccupiedSpace.value).replace(",", ".");
+  const parsedConsumption = consumptionInput === "" ? 1 : Number(consumptionInput);
+  const parsedOccupiedSpace = occupiedSpaceInput === "" ? 1 : Number(occupiedSpaceInput);
+
+  if (Number.isNaN(parsedConsumption) || parsedConsumption < 0) {
+    return { error: "El consumo debe ser un número mayor o igual a 0" };
+  }
+  if (Number.isNaN(parsedOccupiedSpace) || parsedOccupiedSpace < 0 || parsedOccupiedSpace > 4 || !Number.isInteger(parsedOccupiedSpace * 2)) {
+    return { error: "El espacio ocupado debe ser un número entre 0 y 4 en incrementos de 0,5" };
+  }
+
+  return { payload: { consumption: parsedConsumption, occupiedSpace: parsedOccupiedSpace } };
+}
+
+async function saveCustomBeastEconomy() {
+  if (!activeCaravan.value || !selectedBeast.value || selectedBeast.value.sourceType !== "CUSTOM") {
+    return;
+  }
+
+  const parsed = parseCustomBeastEditForm();
+  if ("error" in parsed) {
+    selectedBeastError.value = parsed.error ?? null;
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = "save-custom-beast";
+  selectedBeastError.value = null;
+
+  try {
+    const updated = await updateCaravanBeast(activeCaravan.value.id, selectedBeast.value.id, parsed.payload);
+    selectedBeast.value = updated;
+    resetCustomEditForm(updated);
+    await refresh();
+    showToast(`Bestia actualizada: ${updated.name}.`);
+  } catch (cause) {
+    selectedBeastError.value = cause instanceof Error ? cause.message : "Failed to update beast";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+async function deleteSelectedBeast() {
+  if (!activeCaravan.value || !selectedBeast.value) {
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Vas a eliminar definitivamente "${selectedBeast.value.name}". Esta acción no se puede deshacer.`,
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = "delete-beast";
+  selectedBeastError.value = null;
+
+  try {
+    await deleteCaravanBeast(activeCaravan.value.id, selectedBeast.value.id);
+    const deletedName = selectedBeast.value.name;
+    closeBeastDetails();
+    await refresh();
+    showToast(`Bestia eliminada: ${deletedName}.`);
+  } catch (cause) {
+    selectedBeastError.value = cause instanceof Error ? cause.message : "Failed to delete beast";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
+async function deleteAllUnassignedBeasts() {
+  if (!activeCaravan.value || unassignedBeasts.value.length === 0) {
+    return;
+  }
+
+  const count = unassignedBeasts.value.length;
+  const confirmed = window.confirm(
+    `Vas a eliminar ${count} bestia${count === 1 ? "" : "s"} sin asignación. Esta acción no se puede deshacer.`,
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = "delete-unassigned";
+  error.value = null;
+
+  try {
+    await deleteUnassignedCaravanBeasts(activeCaravan.value.id);
+    await refresh();
+    showToast(count === 1 ? "1 bestia sin asignación eliminada." : `${count} bestias sin asignación eliminadas.`);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Failed to delete unassigned beasts";
   } finally {
     submitting.value = false;
     pendingAction.value = null;
@@ -497,6 +751,63 @@ function syncAssignmentModeWithBeast(beast: CaravanBeast) {
   } else if (beast.assignmentType === "DRAFT") {
     assignmentMode.value = "DRAFT";
   }
+}
+
+function syncTravelerRoleSelection(beast: CaravanBeast | null) {
+  if (!beast || beast.sourceType !== "CUSTOM") {
+    selectedTravelerAvailableRoleCodes.value = [];
+    selectedTravelerActiveRoleCode.value = "";
+    return;
+  }
+
+  const availableRoleCodes = normalizeTravelerAvailableRoleCodes(
+    Array.isArray(beast.availableRoleCodes) ? beast.availableRoleCodes : [],
+  );
+  selectedTravelerAvailableRoleCodes.value = availableRoleCodes;
+  selectedTravelerActiveRoleCode.value =
+    beast.activeRoleCode && availableRoleCodes.includes(beast.activeRoleCode)
+      ? beast.activeRoleCode
+      : passengerRoleCode;
+}
+
+function toggleTravelerAvailableRole(roleCode: string) {
+  if (!selectedBeastRequiresTravelerRoles.value) {
+    return;
+  }
+
+  selectedBeastError.value = null;
+
+  if (roleCode === passengerRoleCode) {
+    selectedTravelerAvailableRoleCodes.value = normalizeTravelerAvailableRoleCodes(
+      selectedTravelerAvailableRoleCodes.value,
+    );
+    if (!selectedTravelerActiveRoleCode.value) {
+      selectedTravelerActiveRoleCode.value = passengerRoleCode;
+    }
+    return;
+  }
+
+  if (selectedTravelerAvailableRoleCodes.value.includes(roleCode)) {
+    selectedTravelerAvailableRoleCodes.value = selectedTravelerAvailableRoleCodes.value.filter((code) => code !== roleCode);
+    if (selectedTravelerActiveRoleCode.value === roleCode) {
+      selectedTravelerActiveRoleCode.value = passengerRoleCode;
+    }
+    return;
+  }
+
+  selectedTravelerAvailableRoleCodes.value = [...selectedTravelerAvailableRoleCodes.value, roleCode];
+  if (!selectedTravelerActiveRoleCode.value) {
+    selectedTravelerActiveRoleCode.value = roleCode;
+  }
+}
+
+function roleName(roleCode: string): string {
+  return roleCatalogByCode.value[roleCode]?.name ?? roleCode;
+}
+
+function normalizeTravelerAvailableRoleCodes(roleCodes: string[]) {
+  const normalized = [...new Set(roleCodes.map((code) => code.trim()).filter(Boolean))];
+  return normalized.includes(passengerRoleCode) ? normalized : [passengerRoleCode, ...normalized];
 }
 
 function syncAssignmentWagonSelection(mode: "DRAFT" | "TRAVELER", beast: CaravanBeast | null) {
@@ -727,12 +1038,6 @@ onMounted(refresh);
               <span>{{ isPending('refresh') ? "Refrescando…" : "Refrescar" }}</span>
             </span>
           </button>
-          <button class="primary-button" type="button" :disabled="!activeCaravan || loading || submitting" @click="openCatalogModal">
-            Añadir del catálogo
-          </button>
-          <button class="secondary-button" type="button" :disabled="!activeCaravan || loading || submitting" @click="openCustomModal">
-            Crear personalizada
-          </button>
         </div>
       </header>
 
@@ -745,22 +1050,54 @@ onMounted(refresh);
       </section>
 
       <template v-else>
-        <section class="card">
-          <div class="section-header">
-            <div>
-              <h2>{{ activeCaravan.name }}</h2>
-              <p v-if="activeCaravan.description" class="muted">{{ activeCaravan.description }}</p>
-            </div>
-            <div class="stats-inline">
-              <div><span>Bestias</span><strong>{{ beasts.length }}</strong></div>
-              <div><span>Carros</span><strong>{{ wagons.length }}</strong></div>
-              <div><span>Viajeros</span><strong>{{ travelers.length }}</strong></div>
-            </div>
-          </div>
+        <CaravanSummaryHero
+          eyebrow="Caravana activa"
+          :title="activeCaravan.name"
+          :description="activeCaravan.description ?? 'Resumen operativo de las bestias de tiro, las bestias viajeras y los carros sin tiro.'"
+          :stats="[
+            { label: 'Bestias de tiro grandes', value: `${draftLargeBeastCount} / ${draftLargeBeastCapacity}` },
+            { label: 'Bestias viajeras', value: travelerBeastCount },
+            { label: 'Carros sin tiro', value: wagonsWithoutDraft },
+          ]"
+          :meter="{
+            ariaLabel: `Bestias de tiro grandes ${draftLargeBeastCount} de ${draftLargeBeastCapacity}`,
+            title: `Bestias de tiro grandes ${draftLargeBeastCount} de ${draftLargeBeastCapacity}`,
+            currentValue: draftLargeBeastCount,
+            currentLabel: 'actuales',
+            maxValue: draftLargeBeastCapacity,
+            maxLabel: 'máximas',
+            segmentWidth: `${draftBeastUsagePercentage}%`,
+            segmentClass: 'meter-segment--draft',
+          }"
+        >
+          <template #action>
+            <button class="primary-button" type="button" :disabled="!activeCaravan || loading || submitting" @click="openCatalogModal">
+              Añadir
+            </button>
+            <button class="secondary-button" type="button" :disabled="!activeCaravan || loading || submitting" @click="openCustomModal">
+              Añadir personalizada
+            </button>
+          </template>
+        </CaravanSummaryHero>
 
+        <section class="card">
           <div v-if="unassignedBeasts.length > 0" class="warning-banner" role="status" aria-live="polite">
             <strong>{{ unassignedBeasts.length }} bestia{{ unassignedBeasts.length === 1 ? "" : "s" }} sin asignar.</strong>
             <p>Estas bestias están sin carro y deben destacarse claramente para evitar descuidos operativos.</p>
+            <div class="warning-actions">
+              <button
+                class="secondary-button warning-button"
+                type="button"
+                :disabled="loading || submitting"
+                :aria-busy="isPending('delete-unassigned')"
+                @click="deleteAllUnassignedBeasts"
+              >
+                <span class="button-with-spinner">
+                  <span v-if="isPending('delete-unassigned')" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ isPending('delete-unassigned') ? "Eliminando…" : "Eliminar todas sin asignación" }}</span>
+                </span>
+              </button>
+            </div>
           </div>
 
           <div class="filters">
@@ -856,6 +1193,11 @@ onMounted(refresh);
             <button class="ghost-button" type="button" @click="closeCatalogModal">Cerrar</button>
           </div>
 
+          <label class="quantity-field">
+            <span>Cantidad</span>
+            <input v-model="catalogQuantity" type="number" min="1" step="1" />
+          </label>
+
           <p v-if="catalogModalError" class="error">{{ catalogModalError }}</p>
 
           <div class="catalog-grid">
@@ -946,11 +1288,27 @@ onMounted(refresh);
                 <span>Precio adiestrado</span>
                 <input v-model="customTrainedPrice" type="number" min="0" step="1" placeholder="Opcional" />
               </label>
+              <label>
+                <span>Consumo</span>
+                <input v-model="customConsumption" type="number" min="0" step="1" placeholder="1" />
+              </label>
+            </div>
+
+            <div class="two-columns">
               <label class="checkbox-row">
                 <input v-model="customFourLegged" type="checkbox" />
                 <span>Cuenta como criatura de cuatro patas para el tiro</span>
               </label>
+              <label>
+                <span>Espacio ocupado</span>
+                <input v-model="customOccupiedSpace" type="number" min="0" max="4" step="0.5" placeholder="1" />
+              </label>
             </div>
+
+            <label class="quantity-field">
+              <span>Cantidad</span>
+              <input v-model="customQuantity" type="number" min="1" step="1" />
+            </label>
 
             <label>
               <span>Nota especial</span>
@@ -962,10 +1320,10 @@ onMounted(refresh);
               <textarea v-model="customDescription" rows="3"></textarea>
             </label>
 
-              <label>
-                <span>Notas personalizadas</span>
-                <textarea v-model="customNotes" rows="3" placeholder="Opcional"></textarea>
-              </label>
+            <label>
+              <span>Notas personalizadas</span>
+              <textarea v-model="customNotes" rows="3" placeholder="Opcional"></textarea>
+            </label>
 
             <div class="modal-actions">
               <button class="secondary-button" type="button" @click="closeCustomModal">Cancelar</button>
@@ -990,6 +1348,12 @@ onMounted(refresh);
               <h2>{{ selectedBeast.name }}</h2>
             </div>
             <div class="modal-header-actions">
+              <button class="secondary-button" type="button" :disabled="loading || submitting" @click="deleteSelectedBeast">
+                <span class="button-with-spinner">
+                  <span v-if="isPending('delete-beast')" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ isPending('delete-beast') ? "Eliminando…" : "Eliminar bestia" }}</span>
+                </span>
+              </button>
               <button class="ghost-button" type="button" @click="closeBeastDetails">Cerrar</button>
             </div>
           </div>
@@ -1009,6 +1373,8 @@ onMounted(refresh);
                 <div><dt>Precio base</dt><dd>{{ beastPriceLabel(selectedBeast.basePrice) }}</dd></div>
                 <div><dt>Adiestrado</dt><dd>{{ beastPriceLabel(selectedBeast.trainedPrice) }}</dd></div>
                 <div><dt>Cuatro patas</dt><dd>{{ selectedBeast.fourLegged ? "Sí" : "No" }}</dd></div>
+                <div><dt>Consumo</dt><dd>{{ selectedBeast.consumption }}</dd></div>
+                <div><dt>Espacio ocupado</dt><dd>{{ selectedBeast.occupiedSpace }}</dd></div>
               </dl>
             </section>
 
@@ -1017,6 +1383,11 @@ onMounted(refresh);
               <p><strong>Asignación:</strong> {{ currentAssignmentLabel(selectedBeast) }}</p>
               <p v-if="selectedBeast.assignedWagonName">
                 <strong>Carro:</strong> {{ selectedBeast.assignedWagonName }}
+              </p>
+              <p v-if="selectedBeast.availableRoleCodes?.length && selectedBeast.activeRoleCode">
+                <strong>Roles:</strong>
+                {{ selectedBeast.availableRoleCodes.map((roleCode) => roleName(roleCode)).join(", ") }}
+                · activo: {{ roleName(selectedBeast.activeRoleCode) }}
               </p>
               <p v-if="selectedBeast.customNotes">
                 <strong>Notas:</strong> {{ selectedBeast.customNotes }}
@@ -1028,6 +1399,42 @@ onMounted(refresh);
               </p>
             </section>
           </div>
+
+          <section v-if="selectedBeast.sourceType === 'CUSTOM'" class="info-block">
+            <div class="section-header">
+              <div>
+                <h3>Editar bestia personalizada</h3>
+                <p class="muted">Puedes modificar el consumo y el espacio ocupado sin cambiar el resto de datos.</p>
+              </div>
+            </div>
+
+            <div class="two-columns">
+              <label>
+                <span>Consumo</span>
+                <input v-model="customEditConsumption" type="number" min="0" step="1" />
+              </label>
+
+              <label>
+                <span>Espacio ocupado</span>
+                <input v-model="customEditOccupiedSpace" type="number" min="0" max="4" step="0.5" />
+              </label>
+            </div>
+
+            <div class="inline-actions">
+              <button
+                class="primary-button"
+                type="button"
+                :disabled="loading || submitting"
+                :aria-busy="isPending('save-custom-beast')"
+                @click="saveCustomBeastEconomy"
+              >
+                <span class="button-with-spinner">
+                  <span v-if="isPending('save-custom-beast')" class="button-spinner" aria-hidden="true"></span>
+                  <span>{{ isPending('save-custom-beast') ? "Guardando…" : "Guardar cambios" }}</span>
+                </span>
+              </button>
+            </div>
+          </section>
 
           <section class="info-block">
             <div class="section-header">
@@ -1120,6 +1527,52 @@ onMounted(refresh);
                 </div>
               </div>
 
+              <div v-if="selectedBeastRequiresTravelerRoles" class="info-block traveler-role-panel">
+                <div class="section-header">
+                  <div>
+                    <h3>Roles de viajero</h3>
+                    <p class="muted">Selecciona los roles disponibles y marca un único rol activo.</p>
+                  </div>
+                </div>
+
+                <div class="role-toggle-grid">
+                  <button
+                    v-for="role in roleCatalog"
+                    :key="role.code"
+                    type="button"
+                    class="role-toggle"
+                    :class="{ 'is-active': selectedTravelerAvailableRoleCodes.includes(role.code), 'is-primary': role.code === selectedTravelerActiveRoleCode }"
+                    :aria-pressed="selectedTravelerAvailableRoleCodes.includes(role.code)"
+                    :disabled="loading || submitting || role.code === passengerRoleCode"
+                    @click="toggleTravelerAvailableRole(role.code)"
+                  >
+                    <span class="role-toggle-name">{{ role.name }}</span>
+                    <span class="role-toggle-state">
+                      {{ selectedTravelerAvailableRoleCodes.includes(role.code) ? "Disponible" : "No disponible" }}
+                    </span>
+                    <small>{{ role.requirements }}</small>
+                  </button>
+                </div>
+
+                <label class="role-active-select">
+                  <span>Rol activo</span>
+                  <select v-model="selectedTravelerActiveRoleCode" :disabled="loading || submitting || selectedTravelerAvailableRoleCodes.length === 0" @change="selectedBeastError = null">
+                    <option value="">Selecciona un rol activo</option>
+                    <option v-for="role in selectedTravelerActiveRoleOptions" :key="role.code" :value="role.code">
+                      {{ role.name }}
+                    </option>
+                  </select>
+                </label>
+
+                <p class="muted">
+                  {{ selectedTravelerAvailableRoleCodes.length === 0
+                    ? "Debes seleccionar al menos un rol disponible."
+                    : selectedTravelerActiveRoleCode
+                      ? `Rol activo: ${roleName(selectedTravelerActiveRoleCode)}.`
+                      : "Selecciona un rol activo entre los disponibles." }}
+                </p>
+              </div>
+
               <div class="inline-actions assignment-actions">
                 <button class="secondary-button" type="button" :disabled="loading || submitting || selectedBeast.assignmentType === 'NONE'" @click="clearAssignment">
                   <span class="button-with-spinner">
@@ -1127,7 +1580,7 @@ onMounted(refresh);
                     <span>{{ isPending('clear-assignment') ? "Quitando…" : "Quitar asignación" }}</span>
                   </span>
                 </button>
-                <button class="primary-button" type="button" :disabled="loading || submitting || !activeAssignmentWagonId || activeAssignmentWagons.length === 0" :aria-busy="submitting" @click="assignAsTraveler">
+                <button class="primary-button" type="button" :disabled="loading || submitting || !activeAssignmentWagonId || activeAssignmentWagons.length === 0 || !selectedTravelerRoleSelectionReady" :aria-busy="submitting" @click="assignAsTraveler">
                   <span class="button-with-spinner">
                     <span v-if="isPending('assign-traveler')" class="button-spinner" aria-hidden="true"></span>
                     <span>{{ isPending('assign-traveler') ? "Asignando…" : "Asignar como viajero" }}</span>
@@ -1278,6 +1731,21 @@ p {
 
 .warning-banner p {
   color: inherit;
+}
+
+.warning-actions {
+  margin-top: 0.5rem;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.warning-button {
+  border-color: #f59e0b;
+  color: #92400e;
+}
+
+.warning-button:hover {
+  background: #fffbeb;
 }
 
 .filters label,
@@ -1488,6 +1956,10 @@ dd {
   padding-top: 1.35rem;
 }
 
+.quantity-field {
+  max-width: 12rem;
+}
+
 .draft-summary {
   display: grid;
   gap: 0.35rem;
@@ -1512,6 +1984,77 @@ dd {
   gap: 0.9rem;
 }
 
+.traveler-role-panel {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.role-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.role-toggle {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.85rem 0.9rem;
+  text-align: left;
+  border-radius: 0.85rem;
+  border: 1px solid #d1d5db;
+  background: white;
+  cursor: pointer;
+}
+
+.role-toggle:hover {
+  border-color: #b6c8ff;
+  box-shadow: 0 8px 18px rgba(29, 78, 216, 0.08);
+}
+
+.role-toggle.is-active {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+.role-toggle.is-primary {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 1px;
+}
+
+.role-toggle-name {
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.role-toggle-state {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.role-toggle small {
+  color: #6b7280;
+  line-height: 1.3;
+}
+
+.role-active-select {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.role-active-select span {
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.role-active-select select {
+  width: 100%;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.8rem;
+  border: 1px solid #d1d5db;
+  font: inherit;
+  background: white;
+}
+
 .assignment-actions {
   justify-content: space-between;
 }
@@ -1527,7 +2070,8 @@ dd {
   .detail-grid,
   .catalog-grid,
   .stats,
-  .two-columns {
+  .two-columns,
+  .role-toggle-grid {
     grid-template-columns: 1fr;
   }
 

@@ -31,3 +31,9 @@ export function updateCaravanFeat(caravanId: string, featId: string, payload: Up
     body: JSON.stringify(payload),
   });
 }
+
+export function deleteCaravanFeat(caravanId: string, featId: string) {
+  return fetchJson<void>(`/caravans/${caravanId}/feats/${featId}`, {
+    method: "DELETE",
+  });
+}

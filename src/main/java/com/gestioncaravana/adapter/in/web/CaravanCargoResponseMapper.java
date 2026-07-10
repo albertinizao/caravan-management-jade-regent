@@ -44,6 +44,8 @@ final class CaravanCargoResponseMapper {
         view.specificCommodity(),
         view.deity(),
         view.notes(),
+        view.currentProvisions(),
+        view.dayPassed(),
         view.priceExpression(),
         view.createdAt(),
         view.updatedAt());

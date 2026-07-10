@@ -8,6 +8,8 @@
 
 The application must resolve caravan feat automation deterministically in the backend so that passive, triggered, time-gated, selection-based, and manually asserted feat effects are applied consistently across all UI screens and all day-cycle resolutions.
 
+This specification also defines how shared-job productivity bonuses are represented for feats such as **Trabajo En Equipo**, including the exact persistence model needed to keep fractional productivity from being lost on low-output jobs.
+
 This specification defines:
 
 - the automation contract for feat metadata,
@@ -41,6 +43,7 @@ Without a formal automation contract:
 6. Support manual applicability for feats that depend on external judgment or a sub-system not modeled here.
 7. Keep automation testable with deterministic fixtures.
 8. Preserve repeatable selection counts and selection-specific metadata.
+9. Resolve shared-job productivity bonuses deterministically, including carry-over for fractional productivity when a job produces less than a full unit per resolution.
 
 ## 4. Non-Goals
 
@@ -110,6 +113,7 @@ The application must expose or reuse these deterministic events:
 4. Selection-based feats must persist their own stack count and selected options.
 5. Manual feats must preserve the user-asserted applicability flag.
 6. Blocking reasons must be explicit and stable so the UI can explain why a feat is unavailable or inactive.
+7. Shared-job productivity bonuses must be derived from the current assignment graph and persisted when the resolved output can produce fractional carry-over.
 
 ### 5.5 Existing metadata contract
 
@@ -123,6 +127,7 @@ The current data model already exposes these fields for feat types and owned fea
 - `selectionIndex`
 - `active`
 - `blockedReason`
+- `sharedJobProductivityState`
 
 This specification requires those fields to remain compatible and to be populated meaningfully.
 
@@ -213,15 +218,14 @@ Automation requirements:
 
 ### 6.6 Caravana Mejorada
 
-Category: Selection-based / Passive
+Category: Passive / repeatable bonus
 
 Automation requirements:
 
-1. Each selection must choose exactly two main stats.
-2. Each chosen stat increases by 1.
-3. The global maximum per stat is 10.
-4. The chosen pair must be stored per selection.
-5. The caravan statistics must be recalculated after every selection.
+1. Each active instance grants 2 free main-stat points.
+2. The bonus is added to the caravan's unassigned main-stat points.
+3. The bonus stacks once per active instance.
+4. The caravan statistics must be recalculated after every feat change.
 
 ### 6.7 Caravana De Renombre
 
@@ -477,9 +481,12 @@ Category: Passive / Derived aggregation
 
 Automation requirements:
 
-1. For each shared job with multiple travelers, productivity increases by 25% per additional traveler up to the rulebook cap.
-2. The effect must be recomputed from the current assignment graph.
-3. The bonus must not count travelers outside the relevant job bucket.
+1. For each shared job bucket, count the active travelers assigned to that bucket and apply a multiplier of `1.25` for two travelers or `1.50` for three travelers.
+2. The bonus applies to the bucket’s base productivity and to any same-bucket numeric bonus that is emitted as part of that job resolution.
+3. The effect must be recomputed from the current assignment graph only.
+4. The bucket is capped at three travelers and must not count travelers outside the relevant job bucket.
+5. If the resolved output is fractional, preserve the remainder in persistent shared-job state instead of truncating it, so low-output jobs still realize the full percentage bonus over time.
+6. Batidores only count when they are in hunt mode; exploration mode contributes no production and therefore no teamwork bonus.
 
 ### 6.31 Venta De Esclavos
 
@@ -565,6 +572,7 @@ Each owned feat must persist:
 - manual applies flag,
 - manual applies reason,
 - timestamps.
+- derived shared-job productivity state when the feat affects a job bucket with fractional carry-over or other persisted progress.
 
 ### 8.3 cooldown and event tracking
 
@@ -576,6 +584,7 @@ The application must persist enough state to reconstruct:
 - multi-month cooldowns,
 - one-time triggered effects,
 - the last event that consumed the effect.
+- fractional shared-job productivity carry-over and the last resolved traveler set for each shared job bucket when a feat depends on persisted productivity progress.
 
 ## 9. API Requirements
 
@@ -629,7 +638,7 @@ The following matrix is the authoritative implementation contract for every feat
 | Rituales De Fortuna | triggered | `lastGrantedFromLuckyCaravanEventId`, `moralGrantedByRerollEventIds[]` | When a failure is avoided by `Caravana Afortunada`, grant `+1` Moral exactly once per avoided failure event. The bonus must only be granted when the reroll changes the outcome from failure to success. If the reroll does not change the result, no moral is granted. |
 | Rutas Conocidas | passive and trigger | `exploredRegionBonusActive:boolean`, `lastRouteRerollEncounterId`, `knownRegionCodes[]` | While traveling through previously explored regions, grant `+2` Security. If an unwanted encounter would occur, allow or resolve one reroll. The effect must be derived from the route/exploration state and the reroll must be consumed exactly once per encounter opportunity. |
 | Tripulación Valerosa | selection-based passive | `selectionCount:int` | Grant `+2` Determination against fear and flee effects per selection, up to the repeatable limit. The bonus must be visible in the Determination summary and in checks against fear sources. |
-| Trabajo En Equipo | passive derived aggregation | `sharedJobAssignments[]`, `sharedJobBonusByJobCode` | For each job with multiple travelers, increase productivity by `25%` per additional traveler up to two additional travelers. Recompute from current role assignments only. The bonus must be derived from the current assignment graph and must not count travelers outside the shared cargo. |
+| Trabajo En Equipo | passive derived aggregation | `sharedJobAssignments[]`, `sharedJobBonusByJobCode`, `sharedJobProductivityStateByJobCode`, `fractionalCarryoverByJobCode` | For each shared job bucket, count the active travelers assigned to that bucket and apply a multiplier of `1.25` for two travelers or `1.50` for three travelers. The bonus applies to the bucket’s base productivity and to any same-bucket numeric bonus that is emitted as part of that job resolution. Recompute from the current assignment graph only. The bucket is capped at three travelers. If the resolved output is fractional, preserve the remainder in persistent shared-job state instead of truncating it, so low-output jobs still realize the full percentage bonus over time. Batidores only count when they are in hunt mode; exploration mode contributes no production and therefore no teamwork bonus. |
 | Venta De Esclavos | settlement daily action | `actionsUsedToday:int`, `settlementId`, `slaveMarketActionLog[]`, `actionsUsedByTravelerId[]` | In a settlement, each traveler with the `esclavista` job may contribute up to `5` buy/sell actions per day. Buying costs `75%` of price; selling in the same settlement pays `200%` of price. Track action count per day and settlement. The settlement scope must reset when the caravan changes settlement, and the per-day cap must be enforced before the transaction is committed. |
 | Veloz | selection-based passive | `selectionCount:int`, `travelSpeedBonus:int` | Increase travel speed by `4` miles/day per selection, stacked up to the repeatable limit. The updated speed must be reflected in travel previews and route ETA calculations. |
 | Viajeros Expertos | selection-based passive | `selectionCount:int`, `maxTravelerJobBonusIncrease:int` | Increase the maximum bonus that traveler jobs can provide by `+1` per selection, stacked up to the repeatable limit. The adjusted cap must be used in all job-derived calculations, including preview and final resolution. |
@@ -644,6 +653,7 @@ The frontend feat screen must:
 4. display manual applicability and its reason,
 5. display owned count and selection limit for repeatable feats,
 6. expose any user-action controls needed to toggle manual application or trigger time-gated actions.
+7. display shared-job productivity bonus, team size, and any carried fractional progress for **Trabajo En Equipo** in the relevant caravan and day-cycle summaries.
 
 ## 12. Persistence and Reload Requirements
 
@@ -651,6 +661,7 @@ The frontend feat screen must:
 2. Recomputable bonuses must be recalculated from stored state.
 3. Time-gated and triggered effects must resume from persisted counters or event records.
 4. No automation effect may rely on ephemeral frontend memory.
+5. Shared-job productivity carry-over must survive save/load cycles and continue from the persisted fractional remainder.
 
 ## 13. Testing Requirements
 
@@ -698,6 +709,7 @@ The frontend must typecheck and must have at least smoke coverage for the feat m
 6. Triggered effects are applied exactly once per matching event.
 7. The frontend can display automation metadata without duplicating business logic.
 8. Tests exist for the core automation behaviors and remain deterministic.
+9. Shared-job productivity bonuses for **Trabajo En Equipo** are visible in both the caravan summary and the day-cycle resolution, including persisted carry-over where applicable.
 
 ## 15. Implementation Notes
 

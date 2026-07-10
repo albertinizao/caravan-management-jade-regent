@@ -1,5 +1,6 @@
 package com.gestioncaravana.domain;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -12,7 +13,7 @@ public record CaravanCargo(
     String category,
     int quantity,
     int cargoUnits,
-    Integer currentProvisions,
+    BigDecimal currentProvisions,
     Boolean dayPassed,
     UUID wagonId,
     String origin,
@@ -41,10 +42,10 @@ public record CaravanCargo(
     if (quantity < 1) {
       throw new IllegalArgumentException("quantity must be greater than or equal to 1");
     }
-    if (cargoUnits < 1) {
-      throw new IllegalArgumentException("cargoUnits must be greater than or equal to 1");
+    if (cargoUnits < 0) {
+      throw new IllegalArgumentException("cargoUnits must be greater than or equal to 0");
     }
-    if (currentProvisions != null && currentProvisions < 0) {
+    if (currentProvisions != null && currentProvisions.compareTo(BigDecimal.ZERO) < 0) {
       throw new IllegalArgumentException("currentProvisions must be greater than or equal to 0");
     }
     if (dayPassed == null) {
@@ -141,7 +142,7 @@ public record CaravanCargo(
         now);
   }
 
-  public CaravanCargo withCurrentProvisions(Integer currentProvisions, Boolean dayPassed, Instant now) {
+  public CaravanCargo withCurrentProvisions(BigDecimal currentProvisions, Boolean dayPassed, Instant now) {
     return new CaravanCargo(
         id,
         caravanId,
@@ -183,9 +184,9 @@ public record CaravanCargo(
         now);
   }
 
-  private static Integer initialProvisionsFor(String catalogCode, int quantity, int cargoUnits) {
+  private static BigDecimal initialProvisionsFor(String catalogCode, int quantity, int cargoUnits) {
     if ("suministros".equals(catalogCode) || "suministros-perecederos".equals(catalogCode)) {
-      return quantity * 10;
+      return BigDecimal.valueOf(quantity).multiply(BigDecimal.TEN);
     }
     return null;
   }

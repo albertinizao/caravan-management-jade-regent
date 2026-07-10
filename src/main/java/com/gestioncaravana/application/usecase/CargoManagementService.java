@@ -13,6 +13,8 @@ import com.gestioncaravana.application.port.in.UpdateCaravanCargoUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanCargoWagonUseCase;
 import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanFeatRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
 import com.gestioncaravana.domain.CargoCatalog;
@@ -54,6 +56,8 @@ public class CargoManagementService
   private final CaravanCargoRepositoryPort cargoRepository;
   private final CaravanWagonRepositoryPort wagonRepository;
   private final CaravanWagonImprovementRepositoryPort improvementRepository;
+  private final CaravanTravelerRepositoryPort travelerRepository;
+  private final CaravanFeatRepositoryPort featRepository;
   private final Clock clock;
 
   public CargoManagementService(
@@ -61,11 +65,15 @@ public class CargoManagementService
       CaravanCargoRepositoryPort cargoRepository,
       CaravanWagonRepositoryPort wagonRepository,
       CaravanWagonImprovementRepositoryPort improvementRepository,
+      CaravanTravelerRepositoryPort travelerRepository,
+      CaravanFeatRepositoryPort featRepository,
       Clock clock) {
     this.caravanRepository = caravanRepository;
     this.cargoRepository = cargoRepository;
     this.wagonRepository = wagonRepository;
     this.improvementRepository = improvementRepository;
+    this.travelerRepository = travelerRepository;
+    this.featRepository = featRepository;
     this.clock = clock;
   }
 
@@ -204,6 +212,7 @@ public class CargoManagementService
         command.deity() != null ? command.deity() : cargo.deity());
     var quantity = command.quantity() == null ? cargo.quantity() : command.quantity();
     var cargoUnits = command.cargoUnits() == null ? cargo.cargoUnits() : command.cargoUnits();
+    validateCargoUnits(cargo.sourceType(), catalogItem, cargoUnits);
 
     validateCargoCapacity(
         caravanId,
@@ -315,6 +324,8 @@ public class CargoManagementService
         cargo.specificCommodity(),
         cargo.deity(),
         cargo.notes(),
+        cargo.currentProvisions(),
+        cargo.dayPassed(),
         catalogItem == null ? null : catalogItem.priceExpression(),
         cargo.createdAt(),
         cargo.updatedAt());
@@ -324,7 +335,7 @@ public class CargoManagementService
     var wagonType = requireWagonType(wagon);
     var filtered = cargo.stream().filter(entry -> wagon.id().equals(entry.wagonId())).toList();
     var used = filtered.stream().mapToInt(entry -> entry.quantity() * entry.cargoUnits()).sum();
-    var capacity = deriveCargoCapacity(wagonType, improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagon.id()));
+    var capacity = deriveCargoCapacity(caravanId, wagonType, improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagon.id()));
     var wagonName = wagon.displayNameOr(wagonType.name());
     return new CaravanCargoSummaryView(
         wagon.id(),
@@ -398,7 +409,7 @@ public class CargoManagementService
         .filter(entry -> wagon.id().equals(entry.wagonId()))
         .mapToInt(entry -> entry.quantity() * entry.cargoUnits())
         .sum();
-    var capacity = deriveCargoCapacity(requireWagonType(wagon), improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagon.id()));
+    var capacity = deriveCargoCapacity(caravanId, requireWagonType(wagon), improvementRepository.findAllByCaravanIdAndWagonId(caravanId, wagon.id()));
     var totalCargoUnits = quantity * cargoUnits;
     if (currentUsed + totalCargoUnits > capacity) {
       throw new IllegalArgumentException("Wagon cargo capacity reached");
@@ -430,19 +441,36 @@ public class CargoManagementService
 
   private int resolveCargoUnits(CargoCatalogItem catalogItem, Integer cargoUnits) {
     if (catalogItem == null) {
-      return cargoUnits == null ? 1 : cargoUnits;
+      var resolvedCargoUnits = cargoUnits == null ? 1 : cargoUnits;
+      validateCargoUnits(CaravanCargoSourceType.CUSTOM, null, resolvedCargoUnits);
+      return resolvedCargoUnits;
     }
     if (!catalogItem.cargoUnitsEditable()) {
       var defaultCargoUnits = catalogItem.resolvedDefaultCargoUnits();
       if (cargoUnits != null && cargoUnits != defaultCargoUnits) {
         throw new IllegalArgumentException("cargoUnits are not editable for " + catalogItem.name());
       }
+      validateCargoUnits(CaravanCargoSourceType.CATALOG, catalogItem, defaultCargoUnits);
       return defaultCargoUnits;
     }
-    return cargoUnits == null ? catalogItem.resolvedDefaultCargoUnits() : cargoUnits;
+    var resolvedCargoUnits = cargoUnits == null ? catalogItem.resolvedDefaultCargoUnits() : cargoUnits;
+    validateCargoUnits(CaravanCargoSourceType.CATALOG, catalogItem, resolvedCargoUnits);
+    return resolvedCargoUnits;
   }
 
-  private int deriveCargoCapacity(WagonType wagonType, List<CaravanWagonImprovement> improvements) {
+  private void validateCargoUnits(CaravanCargoSourceType sourceType, CargoCatalogItem catalogItem, int cargoUnits) {
+    if (cargoUnits < 0) {
+      throw new IllegalArgumentException("cargoUnits must be greater than or equal to 0");
+    }
+    if (sourceType == CaravanCargoSourceType.CUSTOM && cargoUnits < 0) {
+      throw new IllegalArgumentException("cargoUnits must be greater than or equal to 0");
+    }
+    if (catalogItem != null && catalogItem.defaultCargoUnits() != null && catalogItem.defaultCargoUnits() == 0 && cargoUnits != 0) {
+      throw new IllegalArgumentException("cargoUnits must be 0 for " + catalogItem.name());
+    }
+  }
+
+  private int deriveCargoCapacity(UUID caravanId, WagonType wagonType, List<CaravanWagonImprovement> improvements) {
     var currentCargoCapacity = wagonType.cargoCapacity();
     for (var improvement : improvements) {
       var type = WagonImprovementCatalog.findByCode(improvement.improvementTypeCode())
@@ -456,7 +484,13 @@ public class CargoManagementService
         currentCargoCapacity += type.cargoCapacityBonus();
       }
     }
-    return Math.max(0, currentCargoCapacity);
+    var cargoManagers = (int) travelerRepository.findAllByCaravanId(caravanId).stream()
+        .filter(traveler -> traveler.hasActiveRole("encargado-de-suministros"))
+        .count();
+    var organizationFeatCount = (int) featRepository.findAllByCaravanId(caravanId).stream()
+        .filter(feat -> feat.active() && "organizacion-impecable".equals(feat.featTypeCode()))
+        .count();
+    return CaravanCargoCapacityCalculator.calculate(currentCargoCapacity, cargoManagers, organizationFeatCount);
   }
 
   private String requireText(String value, String fieldName) {

@@ -50,6 +50,11 @@ public class CaravanBeastRepositoryAdapter implements CaravanBeastRepositoryPort
   }
 
   @Override
+  public void deleteByCaravanIdAndId(UUID caravanId, UUID beastId) {
+    repository.deleteByCaravanIdAndId(caravanId.toString(), beastId.toString());
+  }
+
+  @Override
   public void deleteByCaravanId(UUID caravanId) {
     repository.deleteAll(repository.findAllByCaravanId(caravanId.toString()));
   }
@@ -71,6 +76,9 @@ public class CaravanBeastRepositoryAdapter implements CaravanBeastRepositoryPort
     entity.setSpecialNote(beast.specialNote());
     entity.setDescription(beast.description());
     entity.setCustomNotes(beast.customNotes());
+    entity.setConsumption(beast.consumption());
+    entity.setAvailableRoleCodesCsv(beast.availableRoleCodes() == null ? null : String.join(",", beast.availableRoleCodes()));
+    entity.setActiveRoleCode(beast.activeRoleCode());
     entity.setAssignmentType(beast.assignmentType().name());
     entity.setAssignedWagonId(beast.assignedWagonId() == null ? null : beast.assignedWagonId().toString());
     entity.setCreatedAt(beast.createdAt());
@@ -96,10 +104,24 @@ public class CaravanBeastRepositoryAdapter implements CaravanBeastRepositoryPort
         entity.getSpecialNote(),
         entity.getDescription(),
         entity.getCustomNotes(),
+        entity.getConsumption() == null ? 1 : entity.getConsumption(),
+        split(entity.getAvailableRoleCodesCsv()),
+        entity.getActiveRoleCode(),
         CaravanBeastAssignmentType.valueOf(entity.getAssignmentType()),
         entity.getAssignedWagonId() == null ? null : UUID.fromString(entity.getAssignedWagonId()),
         entity.getCreatedAt(),
         entity.getUpdatedAt(),
         entity.getOccupiedSpace() == null ? BigDecimal.ONE : entity.getOccupiedSpace());
+  }
+
+  private java.util.List<String> split(String csv) {
+    if (csv == null || csv.isBlank()) {
+      return java.util.List.of();
+    }
+    return java.util.Arrays.stream(csv.split(","))
+        .map(String::trim)
+        .filter(code -> !code.isBlank())
+        .distinct()
+        .toList();
   }
 }

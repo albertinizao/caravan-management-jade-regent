@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { RouterLink } from "vue-router";
 
+import CaravanSummaryHero from "@/components/caravan/CaravanSummaryHero.vue";
 import { useToast } from "@/composables/useToast";
 import { getActiveCaravan, listCaravans } from "@/services/caravans";
 import { listCaravanWagons } from "@/services/wagons";
@@ -26,6 +26,10 @@ interface GroupedCargoRow {
   quantity: number;
   totalCargoLoad: number;
 }
+
+const SUPPLY_CATALOG_CODES = new Set(["suministros", "suministros-perecederos"]);
+const STANDARD_SUPPLY_VALUE = 10;
+const MERCHANDISE_CATEGORY = "Artículos de mercancía";
 
 const activeCaravan = ref<Caravan | null>(null);
 const cargo = ref<CaravanCargo[]>([]);
@@ -155,15 +159,47 @@ const visibleCargo = computed<GroupedCargoRow[]>(() => {
   return Array.from(groups.values());
 });
 
+const visibleSupplies = computed(() =>
+  visibleCargo.value.filter((entry) => isSupplyCargo(entry.representative)),
+);
+const completedSupplies = computed(() =>
+  visibleSupplies.value.filter((entry) => !isOpenedSupplyCargo(entry.representative)),
+);
+const openedSupplies = computed(() =>
+  visibleSupplies.value.filter((entry) => isOpenedSupplyCargo(entry.representative)),
+);
+const otherCargo = computed(() =>
+  visibleCargo.value.filter((entry) => !isSupplyCargo(entry.representative)),
+);
+const totalTransportedCargoUnits = computed(() =>
+  cargoSummary.value.reduce((total, summary) => total + summary.usedCargoUnits, 0),
+);
+const totalCargoCapacity = computed(() =>
+  cargoSummary.value.reduce((total, summary) => total + summary.cargoCapacity, 0),
+);
+const transportedSupplyUnits = computed(() =>
+  cargo.value
+    .filter((entry) => isSupplyCargo(entry))
+    .reduce((total, entry) => total + entry.quantity, 0),
+);
+const transportedMerchandiseUnits = computed(() =>
+  cargo.value
+    .filter((entry) => isMerchandiseCargo(entry))
+    .reduce((total, entry) => total + entry.quantity, 0),
+);
+
 const categories = computed(() =>
   Array.from(new Set([...catalog.value.map((item) => item.category), ...cargo.value.map((item) => item.category)]))
     .sort(),
 );
 
 const catalogQuantityValue = computed(() => parsePositiveInteger(catalogQuantity.value, selectedCatalogItem.value?.defaultQuantity ?? 1));
-const catalogCargoUnitsValue = computed(() => parsePositiveInteger(catalogCargoUnits.value, selectedCatalogItem.value?.defaultCargoUnits ?? 1));
+const catalogCargoUnitsValue = computed(() => {
+  const fallback = selectedCatalogItem.value?.defaultCargoUnits ?? 1;
+  return fallback === 0 ? parseNonNegativeInteger(catalogCargoUnits.value, fallback) : parsePositiveInteger(catalogCargoUnits.value, fallback);
+});
 const customQuantityValue = computed(() => parsePositiveInteger(customQuantity.value, 1));
-const customCargoUnitsValue = computed(() => parsePositiveInteger(customCargoUnits.value, 1));
+const customCargoUnitsValue = computed(() => parseNonNegativeInteger(customCargoUnits.value, 1));
 const selectedCargoLoad = computed(() => (selectedCargo.value ? totalCargoUnits(selectedCargo.value.quantity, selectedCargo.value.cargoUnits) : 0));
 const catalogAvailableWagons = computed(() =>
   filterWagonsForCatalog(
@@ -180,6 +216,7 @@ const customSelectedWagon = computed(() =>
 const selectedCargoAvailableWagons = computed(() => (selectedCargo.value ? filterWagonsForCargo(selectedCargo.value) : []));
 const catalogQuantityMax = computed(() => maxQuantityForWagon(catalogWagonId.value, catalogCargoUnitsValue.value));
 const customQuantityMax = computed(() => maxQuantityForWagon(customWagonId.value, customCargoUnitsValue.value));
+const catalogCargoUnitsMin = computed(() => (selectedCatalogItem.value?.defaultCargoUnits === 0 ? 0 : 1));
 const selectedCargoGroup = computed<GroupedCargoRow | null>(() => {
   const cargoId = selectedCargo.value?.id;
   if (!cargoId) {
@@ -304,6 +341,15 @@ function parsePositiveInteger(value: string, fallback: number) {
   return Math.floor(parsed);
 }
 
+function parseNonNegativeInteger(value: string, fallback: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+
+  return Math.floor(parsed);
+}
+
 function totalCargoUnits(quantity: number, cargoUnits: number) {
   return quantity * cargoUnits;
 }
@@ -313,6 +359,8 @@ function cargoGroupKey(item: CaravanCargo) {
     item.wagonId ?? "",
     item.sourceType,
     item.catalogCode ?? "",
+    item.dayPassed ? "opened" : "closed",
+    item.currentProvisions ?? "",
     item.displayName,
     item.category,
     item.origin ?? "",
@@ -323,8 +371,72 @@ function cargoGroupKey(item: CaravanCargo) {
   ].join("\u0001");
 }
 
+function isSupplyCargo(entry: CaravanCargo | null) {
+  return !!entry && entry.catalogCode !== null && SUPPLY_CATALOG_CODES.has(entry.catalogCode);
+}
+
+function isOpenedSupplyCargo(entry: CaravanCargo | null) {
+  return !!entry && isSupplyCargo(entry) && entry.dayPassed;
+}
+
+function isMerchandiseCargo(entry: CaravanCargo | null) {
+  return !!entry && !isSupplyCargo(entry) && entry.category === MERCHANDISE_CATEGORY;
+}
+
+function supplyRemainingFood(entry: CaravanCargo | null) {
+  return entry?.currentProvisions ?? STANDARD_SUPPLY_VALUE;
+}
+
+function supplyStatusLabel(entry: CaravanCargo | null) {
+  if (!isSupplyCargo(entry)) {
+    return null;
+  }
+
+  const quantity = entry?.quantity ?? 1;
+  const remaining = supplyRemainingFood(entry);
+  const stateLabel = entry?.dayPassed
+    ? quantity === 1
+      ? "Abierto"
+      : "Abiertos"
+    : quantity === 1
+      ? "Completo"
+      : "Completos";
+
+  return entry?.dayPassed
+    ? `${stateLabel} · ${remaining} de comida restante por unidad`
+    : `${stateLabel} · ${remaining} de comida por unidad`;
+}
+
+function supplyListNote(entry: CaravanCargo | null) {
+  if (!isSupplyCargo(entry)) {
+    return null;
+  }
+
+  const quantity = entry?.quantity ?? 1;
+  const remaining = supplyRemainingFood(entry);
+  const stateLabel = entry?.dayPassed
+    ? quantity === 1
+      ? "Abierto"
+      : "Abiertos"
+    : quantity === 1
+      ? "Completo"
+      : "Completos";
+
+  return entry?.dayPassed
+    ? `${stateLabel} · ${remaining} de comida restante por unidad`
+    : `${stateLabel} · ${remaining} de comida por unidad`;
+}
+
 function getWagonRemainingCargoUnits(wagonId: string) {
   return cargoSummary.value.find((summary) => summary.wagonId === wagonId)?.remainingCargoUnits ?? 0;
+}
+
+function cargoUsagePercentage() {
+  if (totalCargoCapacity.value === 0) {
+    return 0;
+  }
+
+  return Math.min(100, (totalTransportedCargoUnits.value / totalCargoCapacity.value) * 100);
 }
 
 function isWagonCompatibleWithCatalogItem(
@@ -369,7 +481,15 @@ function canFitCargoLoad(wagon: CaravanWagon, requiredCargoUnits: number, curren
 }
 
 function maxQuantityForWagon(wagonId: string, cargoUnits: number) {
-  if (!wagonId || cargoUnits < 1) {
+  if (!wagonId) {
+    return 1;
+  }
+
+  if (cargoUnits === 0) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  if (cargoUnits < 1) {
     return 1;
   }
 
@@ -570,8 +690,8 @@ async function handleAddCustomCargo() {
     customModalError.value = "La cantidad debe ser un número mayor o igual a 1";
     return;
   }
-  if (Number.isNaN(parsedCargoUnits) || parsedCargoUnits < 1) {
-    customModalError.value = "Las unidades de carga deben ser un número mayor o igual a 1";
+  if (Number.isNaN(parsedCargoUnits) || parsedCargoUnits < 0) {
+    customModalError.value = "Las unidades de carga deben ser un número mayor o igual a 0";
     return;
   }
   if (!selectedWagon) {
@@ -755,6 +875,10 @@ function sourceLabel(sourceType: string) {
   return sourceType === "CATALOG" ? "Catálogo" : "Personalizada";
 }
 
+function cargoBaseNote(entry: CaravanCargo | null) {
+  return entry?.notes ?? entry?.origin ?? entry?.specificCommodity ?? entry?.deity ?? "—";
+}
+
 function formatCargoLoad(quantity: number, cargoUnits: number) {
   const total = totalCargoUnits(quantity, cargoUnits);
   return cargoUnits === 1 ? `${total} u.c.` : `${total} u.c. (${quantity} × ${cargoUnits})`;
@@ -823,17 +947,47 @@ onMounted(refresh);
         </div>
 
         <div class="hero-actions">
-          <RouterLink class="secondary-button" to="/wagons">Carros</RouterLink>
-          <button class="primary-button" type="button" :disabled="loading || submitting" @click="openCatalogModal">
-            Añadir carga
-          </button>
-          <button class="secondary-button" type="button" :disabled="loading || submitting" @click="openCustomModal">
-            Carga personalizada
+          <button class="ghost-button" type="button" :disabled="loading || submitting" @click="refresh">
+            <span class="button-with-spinner">
+              <span v-if="isPending('refresh')" class="button-spinner" aria-hidden="true"></span>
+              <span>{{ isPending('refresh') ? "Refrescando…" : "Refrescar" }}</span>
+            </span>
           </button>
         </div>
       </header>
 
       <div v-if="error" class="error">{{ error }}</div>
+
+      <CaravanSummaryHero
+        v-if="activeCaravan"
+        eyebrow="Vástagos de Amatatsu"
+        :title="activeCaravan.name"
+        description="Resumen rápido del cargamento transportado por la caravana."
+        :stats="[
+          { label: 'Carga', value: `${totalTransportedCargoUnits} / ${totalCargoCapacity}` },
+          { label: 'Suministros', value: transportedSupplyUnits },
+          { label: 'Mercancías + locales', value: transportedMerchandiseUnits },
+        ]"
+        :meter="{
+          ariaLabel: `Carga transportada ${totalTransportedCargoUnits} de ${totalCargoCapacity}`,
+          title: `Carga transportada ${totalTransportedCargoUnits} de ${totalCargoCapacity}`,
+          currentValue: totalTransportedCargoUnits,
+          currentLabel: 'actual',
+          maxValue: totalCargoCapacity,
+          maxLabel: 'máximo',
+          segmentWidth: `${cargoUsagePercentage()}%`,
+          segmentClass: 'meter-segment--cargo',
+        }"
+      >
+        <template #action>
+          <button class="primary-button" type="button" :disabled="loading || submitting" @click="openCatalogModal">
+            Añadir
+          </button>
+          <button class="secondary-button" type="button" :disabled="loading || submitting" @click="openCustomModal">
+            Añadir carga personalizada
+          </button>
+        </template>
+      </CaravanSummaryHero>
 
       <section class="card">
         <div class="section-header">
@@ -898,34 +1052,132 @@ onMounted(refresh);
           </label>
         </div>
 
-        <div class="table-wrap">
-          <table class="cargo-table">
-            <thead>
-              <tr>
-                <th>Nombre</th>
-                <th>Origen</th>
-                <th>Categoría</th>
-                <th>Cantidad</th>
-                <th>Carga total</th>
-                <th>Carro</th>
-                <th>Notas</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="entry in visibleCargo" :key="entry.key" @click="openCargoDetails(entry.representative)">
-                <td>
-                  <strong>{{ entry.representative.displayName }}</strong>
-                  <div class="muted">{{ entry.representative.catalogName ?? entry.representative.displayName }}</div>
-                </td>
-                <td>{{ sourceLabel(entry.representative.sourceType) }}</td>
-                <td>{{ entry.representative.category }}</td>
-                <td>{{ entry.quantity }}</td>
-                <td>{{ formatGroupedCargoLoad(entry.totalCargoLoad) }}</td>
-                <td>{{ entry.representative.wagonName ?? "Sin carro" }}</td>
-                <td class="muted">{{ entry.representative.notes ?? entry.representative.origin ?? entry.representative.specificCommodity ?? entry.representative.deity ?? "—" }}</td>
-              </tr>
-            </tbody>
-          </table>
+        <div v-if="visibleCargo.length > 0" class="cargo-groups">
+          <section v-if="completedSupplies.length > 0" class="cargo-group">
+            <div class="section-header cargo-group-header">
+              <div>
+                <h3>Suministros completos</h3>
+                <p class="muted">Unidades sin abrir, listas para usar.</p>
+              </div>
+              <div class="muted">{{ completedSupplies.length }} entradas</div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="cargo-table">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Origen</th>
+                    <th>Categoría</th>
+                    <th>Cantidad</th>
+                    <th>Carga total</th>
+                    <th>Carro</th>
+                    <th>Notas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="entry in completedSupplies" :key="entry.key" @click="openCargoDetails(entry.representative)">
+                    <td>
+                      <strong>{{ entry.representative.displayName }}</strong>
+                      <div class="muted">{{ entry.representative.catalogName ?? entry.representative.displayName }}</div>
+                    </td>
+                    <td>{{ sourceLabel(entry.representative.sourceType) }}</td>
+                    <td>{{ entry.representative.category }}</td>
+                    <td>{{ entry.quantity }}</td>
+                    <td>{{ formatGroupedCargoLoad(entry.totalCargoLoad) }}</td>
+                    <td>{{ entry.representative.wagonName ?? "Sin carro" }}</td>
+                    <td class="cargo-notes-cell">
+                      <span v-if="cargoBaseNote(entry.representative) !== '—'">{{ cargoBaseNote(entry.representative) }}</span>
+                      <small class="muted">{{ supplyListNote(entry.representative) }}</small>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section v-if="openedSupplies.length > 0" class="cargo-group">
+            <div class="section-header cargo-group-header">
+              <div>
+                <h3>Suministros abiertos</h3>
+                <p class="muted">Unidades ya abiertas con comida restante visible.</p>
+              </div>
+              <div class="muted">{{ openedSupplies.length }} entradas</div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="cargo-table">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Origen</th>
+                    <th>Categoría</th>
+                    <th>Cantidad</th>
+                    <th>Carga total</th>
+                    <th>Carro</th>
+                    <th>Notas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="entry in openedSupplies" :key="entry.key" @click="openCargoDetails(entry.representative)">
+                    <td>
+                      <strong>{{ entry.representative.displayName }}</strong>
+                      <div class="muted">{{ entry.representative.catalogName ?? entry.representative.displayName }}</div>
+                    </td>
+                    <td>{{ sourceLabel(entry.representative.sourceType) }}</td>
+                    <td>{{ entry.representative.category }}</td>
+                    <td>{{ entry.quantity }}</td>
+                    <td>{{ formatGroupedCargoLoad(entry.totalCargoLoad) }}</td>
+                    <td>{{ entry.representative.wagonName ?? "Sin carro" }}</td>
+                    <td class="cargo-notes-cell">
+                      <span v-if="cargoBaseNote(entry.representative) !== '—'">{{ cargoBaseNote(entry.representative) }}</span>
+                      <small class="muted">{{ supplyListNote(entry.representative) }}</small>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section v-if="otherCargo.length > 0" class="cargo-group">
+            <div class="section-header cargo-group-header">
+              <div>
+                <h3>Resto de carga</h3>
+                <p class="muted">Mercancías que no son suministros.</p>
+              </div>
+              <div class="muted">{{ otherCargo.length }} entradas</div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="cargo-table">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Origen</th>
+                    <th>Categoría</th>
+                    <th>Cantidad</th>
+                    <th>Carga total</th>
+                    <th>Carro</th>
+                    <th>Notas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="entry in otherCargo" :key="entry.key" @click="openCargoDetails(entry.representative)">
+                    <td>
+                      <strong>{{ entry.representative.displayName }}</strong>
+                      <div class="muted">{{ entry.representative.catalogName ?? entry.representative.displayName }}</div>
+                    </td>
+                    <td>{{ sourceLabel(entry.representative.sourceType) }}</td>
+                    <td>{{ entry.representative.category }}</td>
+                    <td>{{ entry.quantity }}</td>
+                    <td>{{ formatGroupedCargoLoad(entry.totalCargoLoad) }}</td>
+                    <td>{{ entry.representative.wagonName ?? "Sin carro" }}</td>
+                    <td class="muted">{{ cargoBaseNote(entry.representative) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
         </div>
 
         <div v-if="visibleCargo.length === 0" class="empty-state-inline">
@@ -996,7 +1248,7 @@ onMounted(refresh);
                 </label>
                 <label>
                   <span>Unidades de carga</span>
-                  <input v-model="catalogCargoUnits" type="number" min="1" :disabled="!selectedCatalogItem.cargoUnitsEditable" />
+                  <input v-model="catalogCargoUnits" type="number" :min="catalogCargoUnitsMin" :disabled="!selectedCatalogItem.cargoUnitsEditable" />
                 </label>
               </div>
 
@@ -1110,7 +1362,7 @@ onMounted(refresh);
             </label>
             <label>
               <span>Unidades de carga</span>
-              <input v-model="customCargoUnits" type="number" min="1" />
+              <input v-model="customCargoUnits" type="number" min="0" />
             </label>
           </div>
 
@@ -1175,6 +1427,16 @@ onMounted(refresh);
                 <div><dt>Carro</dt><dd>{{ selectedCargo.wagonName ?? "Sin carro" }}</dd></div>
                 <div><dt>Precio</dt><dd>{{ selectedCargo.priceExpression ?? "—" }}</dd></div>
               </dl>
+            </section>
+
+            <section v-if="isSupplyCargo(selectedCargo)" class="info-block">
+              <h3>Suministros</h3>
+              <dl class="stats">
+                <div><dt>Estado</dt><dd>{{ selectedCargo.dayPassed ? "Abiertos" : "Completos" }}</dd></div>
+                <div><dt>Comida restante</dt><dd>{{ supplyRemainingFood(selectedCargo) }} por unidad</dd></div>
+                <div><dt>Unidades agrupadas</dt><dd>{{ selectedCargoGroup?.quantity ?? 1 }}</dd></div>
+              </dl>
+              <p class="muted">{{ supplyStatusLabel(selectedCargo) }}</p>
             </section>
           </div>
 
@@ -1252,6 +1514,7 @@ onMounted(refresh);
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .eyebrow {
@@ -1295,6 +1558,37 @@ p {
   gap: 1rem;
 }
 
+.summary-overview {
+  display: grid;
+  gap: 0.85rem;
+  flex: 1;
+}
+
+.summary-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.summary-stats div {
+  padding: 0.85rem;
+  border-radius: 0.85rem;
+  background: #f8fafc;
+  min-width: 120px;
+}
+
+.summary-stats span {
+  display: block;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.summary-stats strong {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 1.1rem;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1323,6 +1617,49 @@ p {
 .summary-bar-fill {
   height: 100%;
   background: linear-gradient(90deg, #1d4ed8, #60a5fa);
+}
+
+.summary-meter-block {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.summary-meter-block--compact {
+  margin-bottom: 0;
+}
+
+.meter-strip {
+  display: flex;
+  overflow: hidden;
+  min-height: 0.9rem;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.meter-segment {
+  display: block;
+  height: 100%;
+}
+
+.meter-segment--cargo {
+  background: linear-gradient(90deg, #fde68a 0%, #f59e0b 100%);
+}
+
+.meter-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.meter-values strong {
+  color: #111827;
+}
+
+.meter-values--compact {
+  font-size: 0.76rem;
 }
 
 .filters {
@@ -1370,6 +1707,20 @@ p {
   margin-top: 1rem;
 }
 
+.cargo-groups {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.cargo-group {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.cargo-group-header {
+  margin-top: 0.25rem;
+}
+
 .cargo-table {
   width: 100%;
   border-collapse: collapse;
@@ -1389,6 +1740,11 @@ p {
 
 .cargo-table tbody tr:hover {
   background: #f8fafc;
+}
+
+.cargo-notes-cell {
+  display: grid;
+  gap: 0.2rem;
 }
 
 .empty-state-inline {
@@ -1571,6 +1927,7 @@ dd {
 }
 
 @media (max-width: 1100px) {
+  .summary-stats,
   .summary-grid,
   .filters,
   .catalog-layout,
@@ -1593,7 +1950,6 @@ dd {
     padding: 1rem;
   }
 
-  .hero-actions,
   .modal-actions {
     width: 100%;
     flex-direction: column;

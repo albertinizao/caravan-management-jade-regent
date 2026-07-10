@@ -3,1011 +3,706 @@ package com.gestioncaravana.application.usecase;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.gestioncaravana.application.port.in.AdvanceCaravanDayCycleUseCase;
+import com.gestioncaravana.application.model.CaravanCargoSummaryView;
+import com.gestioncaravana.application.model.CaravanDerivedStatsView;
+import com.gestioncaravana.application.model.CaravanMainStatsView;
+import com.gestioncaravana.application.model.CaravanMultiDayCyclePreviewView;
+import com.gestioncaravana.application.model.CaravanOtherStatsView;
+import com.gestioncaravana.application.model.CaravanStatisticsView;
+import com.gestioncaravana.application.port.in.ConfirmCaravanDayCycleUseCase.ConfirmCaravanDayCycleCommand;
+import com.gestioncaravana.application.port.in.ConfirmCaravanMultiDayCycleUseCase.ConfirmCaravanMultiDayCycleCommand;
 import com.gestioncaravana.application.port.in.GetCaravanStatisticsUseCase;
-import com.gestioncaravana.application.port.in.PreviewCaravanDayCycleUseCase;
-import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
-import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
+import com.gestioncaravana.application.port.in.ListCaravanCargoSummaryUseCase;
+import com.gestioncaravana.application.port.in.PreviewCaravanMultiDayCycleUseCase.PreviewCaravanMultiDayCycleCommand;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
-import com.gestioncaravana.application.port.out.CaravanDayResolutionRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanDayCycleResultRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanFeatRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
-import com.gestioncaravana.domain.CaravanBeast;
-import com.gestioncaravana.domain.CaravanBeastAssignmentType;
 import com.gestioncaravana.domain.CaravanCampaign;
 import com.gestioncaravana.domain.CaravanCargo;
-import com.gestioncaravana.domain.CaravanCargoSourceType;
-import com.gestioncaravana.domain.CaravanDayResolution;
+import com.gestioncaravana.domain.CaravanDayCycleResult;
 import com.gestioncaravana.domain.CaravanFeat;
 import com.gestioncaravana.domain.CaravanFeatAcquisitionSourceType;
 import com.gestioncaravana.domain.CaravanSupplyState;
 import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
+import com.gestioncaravana.domain.CargoCatalog;
 import com.gestioncaravana.domain.TravelerRoleData;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
 
 class CaravanDayCycleServiceTest {
 
+  private static final Instant NOW = Instant.parse("2026-01-01T12:00:00Z");
+
   private InMemoryCaravanRepository caravanRepository;
-  private InMemoryWagonRepository wagonRepository;
   private InMemoryTravelerRepository travelerRepository;
-  private InMemoryBeastRepository beastRepository;
+  private InMemoryWagonRepository wagonRepository;
   private InMemoryCargoRepository cargoRepository;
   private InMemoryFeatRepository featRepository;
   private InMemorySupplyStateRepository supplyStateRepository;
-  private InMemoryResolutionRepository resolutionRepository;
+  private InMemoryDayCycleResultRepository dayCycleResultRepository;
+  private ListCaravanCargoSummaryUseCase cargoSummaryUseCase;
+  private GetCaravanStatisticsUseCase statisticsUseCase;
   private CaravanDayCycleService service;
 
   @BeforeEach
   void setUp() {
     caravanRepository = new InMemoryCaravanRepository();
-    wagonRepository = new InMemoryWagonRepository();
     travelerRepository = new InMemoryTravelerRepository();
-    beastRepository = new InMemoryBeastRepository();
+    wagonRepository = new InMemoryWagonRepository();
     cargoRepository = new InMemoryCargoRepository();
     featRepository = new InMemoryFeatRepository();
     supplyStateRepository = new InMemorySupplyStateRepository();
-    resolutionRepository = new InMemoryResolutionRepository();
-    var statisticsUseCase = new CaravanStatisticsService(
-        caravanRepository,
-        wagonRepository,
-        new InMemoryImprovementRepository(),
-        travelerRepository,
-        beastRepository,
-        cargoRepository,
-        featRepository);
+    dayCycleResultRepository = new InMemoryDayCycleResultRepository();
+    cargoSummaryUseCase = caravanId -> List.of();
+    statisticsUseCase = caravanId -> new CaravanStatisticsView(
+        caravanId,
+        1,
+        new CaravanMainStatsView(0, 0, 0, 0, 0),
+        new CaravanDerivedStatsView(0, 0, 0, 0),
+        new CaravanOtherStatsView(0, 10, 10, 0, 10, 0, 0, 0, 0, 1),
+        0,
+        0,
+        List.of(),
+        List.of(),
+        NOW);
     service = new CaravanDayCycleService(
         caravanRepository,
         travelerRepository,
         wagonRepository,
-        new InMemoryImprovementRepository(),
-        featRepository,
         cargoRepository,
+        featRepository,
         supplyStateRepository,
-        resolutionRepository,
+        cargoSummaryUseCase,
         statisticsUseCase,
-        Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
+        dayCycleResultRepository,
+        Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
   @Test
-  void farmersToggleTheirProductionMarkerAndPreferSupplyWagonsWhenGenerating() {
-    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var suppliesWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-suministros", null, Instant.parse("2026-01-01T00:00:00Z")));
+  void previewUsesServantAvailableRoleAndOmitsRedundantNoServantMessage() {
+    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Caravana", null, NOW));
+    var wagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-cubierto", "Carro", NOW));
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
 
     var farmer = travelerRepository.save(CaravanTraveler.create(
         UUID.randomUUID(),
         caravan.id(),
-        "Agricultor",
+        "Ayla",
         null,
         List.of("pasajero", "agricultor"),
         List.of("agricultor"),
         "agricultor",
-        1,
-        TravelerRoleData.empty(),
-        huertoWagon.id(),
-        null,
-        1,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 1, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
-
-    var firstDay = service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
-        "day-1",
-        false,
-        List.of()));
-
-    assertThat(firstDay.totalGeneration()).isEqualTo(0);
-    assertThat(firstDay.endingReserve()).isEqualTo(0);
-    assertThat(travelerRepository.findById(caravan.id(), farmer.id()))
-        .hasValueSatisfying(traveler -> assertThat(traveler.roleSpecificData().generatingFood()).isTrue());
-    assertThat(cargoRepository.findAllByCaravanId(caravan.id())).isEmpty();
-
-    var secondDay = service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
-        "day-2",
-        false,
-        List.of()));
-
-    assertThat(secondDay.totalGeneration()).isEqualTo(0);
-    assertThat(travelerRepository.findById(caravan.id(), farmer.id()))
-        .hasValueSatisfying(traveler -> assertThat(traveler.roleSpecificData().generatingFood()).isFalse());
-    assertThat(cargoRepository.findAllByCaravanId(caravan.id())).singleElement().satisfies(entry -> {
-      assertThat(entry.catalogCode()).isEqualTo("suministros");
-      assertThat(entry.wagonId()).isEqualTo(suppliesWagon.id());
-    });
-  }
-
-  @Test
-  void farmersFallBackToAnyWagonWithFreeSpaceWhenNoSupplyWagonExists() {
-    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var farmer = travelerRepository.save(CaravanTraveler.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        "Agricultor",
-        null,
-        List.of("pasajero", "agricultor"),
-        List.of("agricultor"),
-        "agricultor",
-        1,
-        TravelerRoleData.empty(),
-        huertoWagon.id(),
-        null,
-        1,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 1, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
-
-    service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
-        "day-fallback-1",
-        false,
-        List.of()));
-
-    var secondDay = service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
-        "day-fallback-2",
-        false,
-        List.of()));
-
-    assertThat(secondDay.totalGeneration()).isEqualTo(0);
-    assertThat(travelerRepository.findById(caravan.id(), farmer.id()))
-        .hasValueSatisfying(traveler -> assertThat(traveler.roleSpecificData().generatingFood()).isFalse());
-    assertThat(cargoRepository.findAllByCaravanId(caravan.id())).singleElement().satisfies(entry -> {
-      assertThat(entry.catalogCode()).isEqualTo("suministros");
-      assertThat(entry.wagonId()).isEqualTo(huertoWagon.id());
-    });
-  }
-
-  @Test
-  void farmersWarnWhenTheirGeneratedSupplyCannotFitAnywhere() {
-    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var farmer = travelerRepository.save(CaravanTraveler.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        "Agricultor",
-        null,
-        List.of("pasajero", "agricultor"),
-        List.of("agricultor"),
-        "agricultor",
-        1,
-        TravelerRoleData.empty(),
-        huertoWagon.id(),
-        null,
-        1,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    cargoRepository.save(CaravanCargo.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        CaravanCargoSourceType.CATALOG,
-        "mercancias-locales",
-        "Mercancías Locales",
-        "Artículos de mercancía",
-        1,
-        1,
-        huertoWagon.id(),
-        null,
-        null,
-        null,
-        null,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 1, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
-
-    service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
-        "day-warning-1",
-        false,
-        List.of()));
-
-    var secondDay = service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
-        "day-warning-2",
-        false,
-        List.of()));
-
-    assertThat(secondDay.warnings()).contains("Se pierde 1 unidad de suministros por no tener hueco.");
-    assertThat(secondDay.totalGeneration()).isEqualTo(0);
-    assertThat(travelerRepository.findById(caravan.id(), farmer.id()))
-        .hasValueSatisfying(traveler -> assertThat(traveler.roleSpecificData().generatingFood()).isFalse());
-    assertThat(cargoRepository.findAllByCaravanId(caravan.id())).hasSize(1);
-  }
-
-  @Test
-  void cooksAddFivePerFullTenOfBaseGenerationAndStopAtAvailableBlocks() {
-    var oneCookCaravan = createCookBonusScenario(1);
-    var twoCookCaravan = createCookBonusScenario(2);
-    var threeCookCaravan = createCookBonusScenario(3);
-
-    assertThat(service.preview(oneCookCaravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of())).expectedGeneration())
-        .isEqualTo(27);
-    assertThat(service.preview(twoCookCaravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of())).expectedGeneration())
-        .isEqualTo(32);
-    assertThat(service.preview(threeCookCaravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of())).expectedGeneration())
-        .isEqualTo(32);
-  }
-
-  @Test
-  void servantsIncreaseCookPerformanceByFiftyPercent() {
-    var caravan = createCookBonusScenario(1);
-    var cook = travelerRepository.findAllByCaravanId(caravan.id()).stream()
-        .filter(traveler -> "cocinero".equals(traveler.activeRoleCode()))
-        .findFirst()
-        .orElseThrow();
-
-    travelerRepository.save(CaravanTraveler.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        "Sirviente del cocinero",
-        null,
-        List.of("pasajero", "sirviente"),
-        List.of("sirviente"),
-        "sirviente",
-        1,
-        new TravelerRoleData(cook.id()),
-        null,
-        null,
-        1,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    assertThat(service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of())).expectedGeneration())
-        .isEqualTo(30);
-  }
-
-  @Test
-  void servantsThatCanAlsoCookDoubleTheCookBonus() {
-    var caravan = createCookBonusScenario(1);
-    var cook = travelerRepository.findAllByCaravanId(caravan.id()).stream()
-        .filter(traveler -> "cocinero".equals(traveler.activeRoleCode()))
-        .findFirst()
-        .orElseThrow();
-
-    travelerRepository.save(CaravanTraveler.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        "Sirviente del cocinero",
-        null,
-        List.of("pasajero", "sirviente", "cocinero"),
-        List.of("sirviente"),
-        "sirviente",
-        1,
-        new TravelerRoleData(cook.id()),
-        null,
-        null,
-        1,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    assertThat(service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of())).expectedGeneration())
-        .isEqualTo(32);
-  }
-
-  @Test
-  void cooksAlsoBoostTheStoredSupplyStockThatWillBeSpentThatDay() {
-    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Cargo-Cook", null, Instant.parse("2026-01-01T00:00:00Z")));
-
-    cargoRepository.save(CaravanCargo.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        CaravanCargoSourceType.CATALOG,
-        "suministros",
-        "Suministros",
-        "Artículos de mercancía",
-        1,
-        1,
-        null,
-        null,
-        null,
-        null,
-        null,
-        Instant.parse("2025-12-30T00:00:00Z")).withCurrentProvisions(10, false, Instant.parse("2026-01-01T00:00:00Z")));
-    cargoRepository.save(CaravanCargo.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        CaravanCargoSourceType.CATALOG,
-        "suministros",
-        "Suministros",
-        "Artículos de mercancía",
-        1,
-        1,
-        null,
-        null,
-        null,
-        null,
-        null,
-        Instant.parse("2025-12-30T00:00:00Z")).withCurrentProvisions(10, false, Instant.parse("2026-01-01T00:00:00Z")));
-
-    travelerRepository.save(CaravanTraveler.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        "Cocinero",
-        null,
-        List.of("pasajero", "cocinero"),
-        List.of("cocinero"),
-        "cocinero",
-        1,
-        TravelerRoleData.empty(),
-        null,
-        null,
-        1,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
-
-    var preview = service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of()));
-
-    assertThat(preview.currentReserve()).isEqualTo(20);
-    assertThat(preview.expectedGeneration()).isEqualTo(5);
-    assertThat(preview.expectedReserveAfterResolution()).isEqualTo(24);
-  }
-
-  @Test
-  void servantsGiveFarmersAnExtraSupplyEveryFourDays() {
-    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Farmer-Servant", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var farmer = travelerRepository.save(CaravanTraveler.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        "Agricultor",
-        null,
-        List.of("pasajero", "agricultor"),
-        List.of("agricultor"),
-        "agricultor",
-        1,
-        new TravelerRoleData(null, true, 3),
-        huertoWagon.id(),
-        null,
-        1,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    travelerRepository.save(CaravanTraveler.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        "Sirviente del agricultor",
-        null,
-        List.of("pasajero", "sirviente"),
-        List.of("sirviente"),
-        "sirviente",
-        1,
-        new TravelerRoleData(farmer.id(), false, 3),
-        null,
-        null,
-        1,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    travelerRepository.save(CaravanTraveler.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        "Sirviente del agricultor",
-        null,
-        List.of("pasajero", "sirviente"),
-        List.of("sirviente"),
-        "sirviente",
-        1,
-        new TravelerRoleData(farmer.id(), false, 3),
-        null,
-        null,
-        1,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 1, 0, 0, 3, Instant.parse("2026-01-01T00:00:00Z")));
-
-    var dayFourPreview = service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of()));
-    assertThat(dayFourPreview.contributions())
-        .anySatisfy(contribution -> {
-          assertThat(contribution.sourceName()).isEqualTo("Agricultor");
-          assertThat(contribution.quantity()).isEqualTo(30);
-          assertThat(contribution.reason()).contains("ayuda de sus sirvientes");
-        });
-  }
-
-  @Test
-  void servantsThatCanAlsoFarmTriggerTheBonusEveryTwoDays() {
-    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Farmer-Servant-Compat", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var huertoWagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-huerto", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var farmer = travelerRepository.save(CaravanTraveler.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        "Agricultor",
-        null,
-        List.of("pasajero", "agricultor"),
-        List.of("agricultor"),
-        "agricultor",
-        1,
-        new TravelerRoleData(null, true, 1),
-        huertoWagon.id(),
-        null,
-        1,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    travelerRepository.save(CaravanTraveler.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        "Sirviente del agricultor",
-        null,
-        List.of("pasajero", "sirviente", "agricultor"),
-        List.of("sirviente"),
-        "sirviente",
-        1,
-        new TravelerRoleData(farmer.id(), false, 1),
-        null,
-        null,
-        1,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 1, 0, 0, 1, Instant.parse("2026-01-01T00:00:00Z")));
-
-    var dayTwoPreview = service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(false, List.of()));
-    assertThat(dayTwoPreview.contributions())
-        .anySatisfy(contribution -> {
-          assertThat(contribution.sourceName()).isEqualTo("Agricultor");
-          assertThat(contribution.quantity()).isEqualTo(20);
-          assertThat(contribution.reason()).contains("ayuda de su sirviente");
-        });
-  }
-
-  @Test
-  void rejectsFastingWhenTheCaravanDoesNotHaveTheFeat() {
-    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
-
-    assertThatThrownBy(() -> service.preview(caravan.id(), new PreviewCaravanDayCycleUseCase.PreviewCaravanDayCycleCommand(true, List.of())))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Ayuno Intermitente");
-  }
-
-  @Test
-  void consumesPerishableCargoBeforeStandardCargoAndRemovesConsumedEntries() {
-    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var perishableCargo = cargoRepository.save(CaravanCargo.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        CaravanCargoSourceType.CATALOG,
-        "suministros-perecederos",
-        "Suministros Perecederos",
-        "Artículos de mercancía",
-        1,
-        1,
-        null,
-        null,
-        null,
-        null,
-        null,
-        Instant.parse("2025-12-30T00:00:00Z")));
-    var standardCargo = cargoRepository.save(CaravanCargo.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        CaravanCargoSourceType.CATALOG,
-        "suministros",
-        "Suministros",
-        "Artículos de mercancía",
-        1,
-        1,
-        null,
-        null,
-        null,
-        null,
-        null,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
-
-    service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
-        "day-order",
-        false,
-        List.of()));
-
-    assertThat(cargoRepository.findById(caravan.id(), perishableCargo.id())).hasValueSatisfying(entry -> {
-      assertThat(entry.currentProvisions()).isEqualTo(10);
-      assertThat(entry.dayPassed()).isTrue();
-    });
-    assertThat(cargoRepository.findById(caravan.id(), standardCargo.id())).hasValueSatisfying(entry -> {
-      assertThat(entry.currentProvisions()).isEqualTo(10);
-    });
-    assertThat(supplyStateRepository.findByCaravanId(caravan.id())).hasValueSatisfying(state -> {
-      assertThat(state.provisionReserve()).isEqualTo(0);
-      assertThat(state.perishableReserve()).isEqualTo(0);
-      assertThat(state.standardReserve()).isEqualTo(0);
-      assertThat(state.daysPassed()).isEqualTo(1);
-    });
-  }
-
-  @Test
-  void togglesPerishableDayPassedAndReducesOneProvisionOnTheSecondAcceptedDay() {
-    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var perishableCargo = cargoRepository.save(CaravanCargo.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        CaravanCargoSourceType.CATALOG,
-        "suministros-perecederos",
-        "Suministros Perecederos",
-        "Artículos de mercancía",
-        1,
-        1,
-        null,
-        null,
-        null,
-        null,
-        null,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
-
-    service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
-        "day-decay",
-        false,
-        List.of()));
-
-    assertThat(cargoRepository.findById(caravan.id(), perishableCargo.id())).hasValueSatisfying(entry -> {
-      assertThat(entry.currentProvisions()).isEqualTo(10);
-      assertThat(entry.dayPassed()).isTrue();
-    });
-
-    service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
-        "day-decay-2",
-        false,
-        List.of()));
-
-    assertThat(cargoRepository.findById(caravan.id(), perishableCargo.id())).hasValueSatisfying(entry -> {
-      assertThat(entry.currentProvisions()).isEqualTo(9);
-      assertThat(entry.dayPassed()).isFalse();
-    });
-  }
-
-  @Test
-  void reducesOneProvisionPerPerishableUnitEveryTwoDays() {
-    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var firstUnit = cargoRepository.save(CaravanCargo.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        CaravanCargoSourceType.CATALOG,
-        "suministros-perecederos",
-        "Suministros Perecederos",
-        "Artículos de mercancía",
-        1,
-        1,
-        null,
-        null,
-        null,
-        null,
-        null,
-        Instant.parse("2025-12-30T00:00:00Z")));
-    var secondUnit = cargoRepository.save(CaravanCargo.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        CaravanCargoSourceType.CATALOG,
-        "suministros-perecederos",
-        "Suministros Perecederos",
-        "Artículos de mercancía",
-        1,
-        1,
-        null,
-        null,
-        null,
-        null,
-        null,
-        Instant.parse("2025-12-30T00:00:00Z")));
-
-    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
-
-    service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
-        "day-decay-two-units",
-        false,
-        List.of()));
-
-    assertThat(cargoRepository.findById(caravan.id(), firstUnit.id())).hasValueSatisfying(entry -> {
-      assertThat(entry.quantity()).isEqualTo(1);
-      assertThat(entry.currentProvisions()).isEqualTo(10);
-      assertThat(entry.dayPassed()).isTrue();
-    });
-    assertThat(cargoRepository.findById(caravan.id(), secondUnit.id())).hasValueSatisfying(entry -> {
-      assertThat(entry.quantity()).isEqualTo(1);
-      assertThat(entry.currentProvisions()).isEqualTo(10);
-      assertThat(entry.dayPassed()).isTrue();
-    });
-
-    service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
-        "day-decay-two-units-2",
-        false,
-        List.of()));
-
-    assertThat(cargoRepository.findById(caravan.id(), firstUnit.id())).hasValueSatisfying(entry -> {
-      assertThat(entry.currentProvisions()).isEqualTo(9);
-      assertThat(entry.dayPassed()).isFalse();
-    });
-    assertThat(cargoRepository.findById(caravan.id(), secondUnit.id())).hasValueSatisfying(entry -> {
-      assertThat(entry.currentProvisions()).isEqualTo(9);
-      assertThat(entry.dayPassed()).isFalse();
-    });
-  }
-
-  @Test
-  void deletesConsumedPerishableUnitImmediatelyWhenConsumptionUsesItUp() {
-    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var wagon = wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravan.id(), "carro-de-suministros", null, Instant.parse("2026-01-01T00:00:00Z")));
-
-    travelerRepository.save(CaravanTraveler.create(
-        UUID.randomUUID(),
-        caravan.id(),
-        "Pasajero",
-        null,
-        List.of("pasajero"),
-        List.of("pasajero"),
-        "pasajero",
         1,
         TravelerRoleData.empty(),
         wagon.id(),
         null,
-        2,
-        Instant.parse("2025-12-30T00:00:00Z")));
+        1,
+        NOW));
 
-    var perishableCargo = cargoRepository.save(CaravanCargo.create(
+    travelerRepository.save(CaravanTraveler.create(
         UUID.randomUUID(),
         caravan.id(),
-        CaravanCargoSourceType.CATALOG,
-        "suministros-perecederos",
-        "Suministros Perecederos",
-        "Artículos de mercancía",
+        "Torvald Hagorsson",
+        null,
+        List.of("pasajero", "agricultor", "sirviente", "guarda"),
+        List.of("sirviente"),
+        "sirviente",
         1,
-        1,
+        new TravelerRoleData(farmer.id()),
+        wagon.id(),
         null,
-        null,
-        null,
-        null,
-        null,
-        Instant.parse("2025-12-30T00:00:00Z")).withCurrentProvisions(1, true, Instant.parse("2026-01-01T00:00:00Z")));
+        0,
+        NOW));
 
-    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
+    var preview = service.preview(caravan.id());
 
-    service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
-        "day-consumption-delete",
-        false,
-        List.of()));
-
-    assertThat(cargoRepository.findById(caravan.id(), perishableCargo.id())).isEmpty();
+    assertThat(preview.confirmed()).isFalse();
+    var agriculturistEntry = preview.simulation().stream()
+        .filter(entry -> entry.title().equals("Ayla"))
+        .findFirst()
+        .orElseThrow();
+    assertThat(agriculturistEntry.details())
+        .contains("Sirviente: Torvald Hagorsson (agricultor): +0.5")
+        .doesNotContain("Sin sirviente asignado")
+        .doesNotContain("El sirviente no puede ser agricultor: +0.25");
   }
 
   @Test
-  void deletesPerishableCargoWhenItsProvisionsReachZero() {
-    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign", null, Instant.parse("2026-01-01T00:00:00Z")));
-    var perishableCargo = cargoRepository.save(CaravanCargo.create(
-        UUID.randomUUID(),
+  void teamworkDoesNotApplyWithoutFeat() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id());
+    configureCargoSummary(wagon.id(), 20);
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
+
+    createTraveler(caravan.id(), wagon.id(), "Ayla", List.of("pasajero", "agricultor"), List.of("agricultor"), "agricultor", TravelerRoleData.empty());
+    createTraveler(caravan.id(), wagon.id(), "Bran", List.of("pasajero", "agricultor"), List.of("agricultor"), "agricultor", TravelerRoleData.empty());
+
+    var preview = service.preview(caravan.id());
+
+    assertThat(preview.simulation().stream().flatMap(entry -> entry.details().stream()))
+        .noneMatch(detail -> detail.contains("Trabajo en equipo"));
+  }
+
+  @Test
+  void teamworkSelectsOnlyThreeAgricultorsByPriority() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id());
+    configureCargoSummary(wagon.id(), 20);
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
+    activateTeamworkFeat(caravan.id());
+
+    var alpha = createTraveler(caravan.id(), wagon.id(), "Alpha", List.of("pasajero", "agricultor"), List.of("agricultor"), "agricultor", TravelerRoleData.empty());
+    var bravo = createTraveler(caravan.id(), wagon.id(), "Bravo", List.of("pasajero", "agricultor"), List.of("agricultor"), "agricultor", TravelerRoleData.empty());
+    var charlie = createTraveler(caravan.id(), wagon.id(), "Charlie", List.of("pasajero", "agricultor"), List.of("agricultor"), "agricultor", TravelerRoleData.empty());
+    createTraveler(caravan.id(), wagon.id(), "Delta", List.of("pasajero", "agricultor"), List.of("agricultor"), "agricultor", TravelerRoleData.empty());
+
+    createServant(caravan.id(), wagon.id(), "Servant Alpha", alpha.id(), List.of("pasajero", "sirviente", "agricultor"));
+    createServant(caravan.id(), wagon.id(), "Servant Bravo", bravo.id(), List.of("pasajero", "sirviente", "guarda"));
+
+    var preview = service.preview(caravan.id());
+
+    assertThat(findSimulationEntry(preview, "Alpha").details()).anyMatch(detail -> detail.contains("Trabajo en equipo aplicado."));
+    assertThat(findSimulationEntry(preview, "Bravo").details()).anyMatch(detail -> detail.contains("Trabajo en equipo aplicado."));
+    assertThat(findSimulationEntry(preview, "Charlie").details()).anyMatch(detail -> detail.contains("Trabajo en equipo aplicado."));
+    assertThat(findSimulationEntry(preview, "Delta").details()).noneMatch(detail -> detail.contains("Trabajo en equipo"));
+  }
+
+  @Test
+  void teamworkBoostsBatidoresAndSummarizesRole() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id());
+    configureCargoSummary(wagon.id(), 20);
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
+    activateTeamworkFeat(caravan.id());
+
+    var hunterA = createTraveler(caravan.id(), wagon.id(), "Hunter A", List.of("pasajero", "batidor"), List.of("batidor"), "batidor", TravelerRoleData.empty());
+    createTraveler(caravan.id(), wagon.id(), "Hunter B", List.of("pasajero", "batidor"), List.of("batidor"), "batidor", TravelerRoleData.empty());
+    createServant(caravan.id(), wagon.id(), "Servant Hunter A", hunterA.id(), List.of("pasajero", "sirviente", "guarda"));
+
+    var preview = service.preview(caravan.id());
+
+    assertThat(preview.generatedFood()).isEqualByComparingTo("6.25");
+    assertThat(findSimulationEntry(preview, "Hunter A").details()).contains("Trabajo en equipo aplicado.");
+    assertThat(findSimulationEntry(preview, "Resumen de batidores").details())
+        .contains("Trabajo en equipo en batidores: 2 beneficiados, x1.25");
+  }
+
+  @Test
+  void teamworkAppliesOnlyToFirstThreeCooksAndPreviewMatchesConfirm() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id());
+    configureCargoSummary(wagon.id(), 20);
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
+    activateTeamworkFeat(caravan.id());
+    setConsumption(100);
+
+    createSupply(caravan.id(), wagon.id(), "suministros");
+    createSupply(caravan.id(), wagon.id(), "suministros");
+    createSupply(caravan.id(), wagon.id(), "suministros");
+    createSupply(caravan.id(), wagon.id(), "suministros");
+    createCargo(caravan.id(), wagon.id(), "cocina-portatil");
+    createCargo(caravan.id(), wagon.id(), "cocina-portatil");
+    createCargo(caravan.id(), wagon.id(), "cocina-portatil");
+    createCargo(caravan.id(), wagon.id(), "cocina-portatil");
+
+    createTraveler(caravan.id(), wagon.id(), "Cook A", List.of("pasajero", "cocinero"), List.of("cocinero"), "cocinero", TravelerRoleData.empty());
+    createTraveler(caravan.id(), wagon.id(), "Cook B", List.of("pasajero", "cocinero"), List.of("cocinero"), "cocinero", TravelerRoleData.empty());
+    createTraveler(caravan.id(), wagon.id(), "Cook C", List.of("pasajero", "cocinero"), List.of("cocinero"), "cocinero", TravelerRoleData.empty());
+    createTraveler(caravan.id(), wagon.id(), "Cook D", List.of("pasajero", "cocinero"), List.of("cocinero"), "cocinero", TravelerRoleData.empty());
+
+    var preview = service.preview(caravan.id());
+    var confirmed = service.confirm(caravan.id(), new ConfirmCaravanDayCycleCommand(preview.previewFingerprint()));
+
+    assertThat(findSimulationEntry(preview, "Cook A").foodDelta()).isEqualByComparingTo("45.0");
+    assertThat(findSimulationEntry(preview, "Cook A").details()).contains("Trabajo en equipo aplicado.");
+    assertThat(findSimulationEntry(preview, "Cook B").details()).contains("Trabajo en equipo aplicado.");
+    assertThat(findSimulationEntry(preview, "Cook C").details()).contains("Trabajo en equipo aplicado.");
+    assertThat(preview.simulation().stream().filter(entry -> "cook".equals(entry.section())).map(entry -> entry.title()).toList())
+        .containsExactly("Cook A", "Cook B", "Cook C");
+    assertThat(findSimulationEntry(preview, "Trabajo en equipo en cocineros").details())
+        .contains("Beneficiarios: 3", "Multiplicador aplicado: x2");
+    assertThat(preview.generatedFood()).isEqualByComparingTo("135.0");
+    assertThat(confirmed.generatedFood()).isEqualByComparingTo(preview.generatedFood());
+    assertThat(confirmed.leftoverFood()).isEqualByComparingTo(preview.leftoverFood());
+  }
+
+  @Test
+  void cookAddsServantPortableKitchenAndTeamworkMultipliersBeforeApplyingBaseFood() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id());
+    configureCargoSummary(wagon.id(), 20);
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
+    activateTeamworkFeat(caravan.id());
+    setConsumption(45);
+
+    createSupply(caravan.id(), wagon.id(), "suministros");
+    createCargo(caravan.id(), wagon.id(), "cocina-portatil");
+
+    var cook = createTraveler(
         caravan.id(),
-        CaravanCargoSourceType.CATALOG,
-        "suministros-perecederos",
-        "Suministros Perecederos",
-        "Artículos de mercancía",
+        wagon.id(),
+        "Cook Prime",
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        TravelerRoleData.empty());
+    createTraveler(
+        caravan.id(),
+        wagon.id(),
+        "Cook Support",
+        List.of("pasajero", "cocinero"),
+        List.of("cocinero"),
+        "cocinero",
+        TravelerRoleData.empty());
+    createServant(caravan.id(), wagon.id(), "Cook Servant", cook.id(), List.of("pasajero", "sirviente", "cocinero"));
+
+    var preview = service.preview(caravan.id());
+
+    assertThat(findSimulationEntry(preview, "Cook Prime").foodDelta()).isEqualByComparingTo("52.5");
+    assertThat(findSimulationEntry(preview, "Cook Prime").details())
+        .contains("Sirviente: Cook Servant (cocinero): +0.5")
+        .contains("El sirviente también puede ser cocinero: +0.5 adicional")
+        .contains("Cocina portátil aplicada: +100%")
+        .contains("Trabajo en equipo aplicado.")
+        .contains("Comida obtenida por esta unidad: 52.5");
+  }
+
+  @Test
+  void confirmAdvancesDaysPassed() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id());
+    configureCargoSummary(wagon.id(), 20);
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
+
+    createSupply(caravan.id(), wagon.id(), "suministros");
+
+    var preview = service.preview(caravan.id());
+    service.confirm(caravan.id(), new ConfirmCaravanDayCycleCommand(preview.previewFingerprint()));
+
+    var persistedState = supplyStateRepository.findByCaravanId(caravan.id()).orElseThrow();
+    assertThat(persistedState.daysPassed()).isEqualTo(1);
+  }
+
+  @Test
+  void multiDayPreviewChainsDaysFromPreviousSimulationState() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id());
+    configureCargoSummary(wagon.id(), 20);
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
+    setConsumption(15);
+
+    createSupply(caravan.id(), wagon.id(), "suministros");
+    createSupply(caravan.id(), wagon.id(), "suministros");
+
+    CaravanMultiDayCyclePreviewView preview = service.preview(
+        caravan.id(),
+        new PreviewCaravanMultiDayCycleCommand(2));
+
+    assertThat(preview.requestedDays()).isEqualTo(2);
+    assertThat(preview.dayPreviews()).hasSize(2);
+    assertThat(preview.dayPreviews().get(0).dayIndex()).isEqualTo(1);
+    assertThat(preview.dayPreviews().get(1).dayIndex()).isEqualTo(2);
+    assertThat(preview.dayPreviews().get(0).finalPerishableFood())
+        .isEqualByComparingTo(preview.dayPreviews().get(1).currentPerishableFood());
+    assertThat(preview.finalPerishableFood())
+        .isEqualByComparingTo(preview.dayPreviews().get(1).finalPerishableFood());
+  }
+
+  @Test
+  void multiDayConfirmPersistsEveryDayAndAdvancesSupplyState() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id());
+    configureCargoSummary(wagon.id(), 20);
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
+    setConsumption(15);
+
+    createSupply(caravan.id(), wagon.id(), "suministros");
+    createSupply(caravan.id(), wagon.id(), "suministros");
+
+    var preview = service.preview(caravan.id(), new PreviewCaravanMultiDayCycleCommand(2));
+    var confirmed = service.confirm(
+        caravan.id(),
+        new ConfirmCaravanMultiDayCycleCommand(2, preview.basePreviewFingerprint()));
+
+    assertThat(confirmed.confirmed()).isTrue();
+    assertThat(dayCycleResultRepository.findAllByCaravanId(caravan.id())).hasSize(2);
+    assertThat(supplyStateRepository.findByCaravanId(caravan.id()).orElseThrow().daysPassed()).isEqualTo(2);
+  }
+
+  @Test
+  void multiDayConfirmRejectsStaleBaseFingerprint() {
+    var caravan = createCaravan();
+    var wagon = createWagon(caravan.id());
+    configureCargoSummary(wagon.id(), 20);
+    supplyStateRepository.save(CaravanSupplyState.initial(caravan.id(), NOW));
+
+    var preview = service.preview(caravan.id(), new PreviewCaravanMultiDayCycleCommand(2));
+    createSupply(caravan.id(), wagon.id(), "suministros");
+
+    assertThatThrownBy(() -> service.confirm(
+        caravan.id(),
+        new ConfirmCaravanMultiDayCycleCommand(2, preview.basePreviewFingerprint())))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("stale");
+  }
+
+  private CaravanCampaign createCaravan() {
+    return caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Caravana", null, NOW));
+  }
+
+  private CaravanWagon createWagon(UUID caravanId) {
+    return wagonRepository.save(CaravanWagon.create(UUID.randomUUID(), caravanId, "carro-cubierto", "Carro", NOW));
+  }
+
+  private void configureCargoSummary(UUID wagonId, int remainingCargoUnits) {
+    cargoSummaryUseCase = caravanId -> List.of(new CaravanCargoSummaryView(wagonId, "Carro", 20, 0, remainingCargoUnits, 0));
+    rebuildService();
+  }
+
+  private void setConsumption(int consumption) {
+    statisticsUseCase = caravanId -> new CaravanStatisticsView(
+        caravanId,
+        1,
+        new CaravanMainStatsView(0, 0, 0, 0, 0),
+        new CaravanDerivedStatsView(0, 0, 0, 0),
+        new CaravanOtherStatsView(0, 10, 10, 0, 10, consumption, 0, 0, 0, 1),
+        0,
+        0,
+        List.of(),
+        List.of(),
+        NOW);
+    rebuildService();
+  }
+
+  private void activateTeamworkFeat(UUID caravanId) {
+    featRepository.save(CaravanFeat.create(
+        UUID.randomUUID(),
+        caravanId,
+        "trabajo-en-equipo",
+        CaravanFeatAcquisitionSourceType.OTHER,
+        null,
+        "test",
+        1,
+        NOW));
+  }
+
+  private CaravanTraveler createTraveler(
+      UUID caravanId,
+      UUID wagonId,
+      String name,
+      List<String> availableRoles,
+      List<String> activeRoles,
+      String activeRole,
+      TravelerRoleData roleData) {
+    return travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravanId,
+        name,
+        null,
+        availableRoles,
+        activeRoles,
+        activeRole,
+        1,
+        roleData,
+        wagonId,
+        null,
+        1,
+        NOW));
+  }
+
+  private CaravanTraveler createServant(UUID caravanId, UUID wagonId, String name, UUID servedTravelerId, List<String> availableRoles) {
+    return travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravanId,
+        name,
+        null,
+        availableRoles,
+        List.of("sirviente"),
+        "sirviente",
+        1,
+        new TravelerRoleData(servedTravelerId),
+        wagonId,
+        null,
+        0,
+        NOW));
+  }
+
+  private void createSupply(UUID caravanId, UUID wagonId, String catalogCode) {
+    createCargo(caravanId, wagonId, catalogCode);
+  }
+
+  private void createCargo(UUID caravanId, UUID wagonId, String catalogCode) {
+    var catalogItem = CargoCatalog.findByCode(catalogCode).orElseThrow();
+    cargoRepository.save(CaravanCargo.create(
+        UUID.randomUUID(),
+        caravanId,
+        com.gestioncaravana.domain.CaravanCargoSourceType.CATALOG,
+        catalogCode,
+        catalogItem.name(),
+        catalogItem.category(),
         1,
         1,
+        wagonId,
         null,
         null,
         null,
         null,
-        null,
-        Instant.parse("2025-12-30T00:00:00Z")));
+        NOW));
+  }
 
-    cargoRepository.save(perishableCargo.withCurrentProvisions(1, true, Instant.parse("2026-01-01T00:00:00Z")));
-    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
+  private void rebuildService() {
+    service = new CaravanDayCycleService(
+        caravanRepository,
+        travelerRepository,
+        wagonRepository,
+        cargoRepository,
+        featRepository,
+        supplyStateRepository,
+        cargoSummaryUseCase,
+        statisticsUseCase,
+        dayCycleResultRepository,
+        Clock.fixed(NOW, ZoneOffset.UTC));
+  }
 
-    service.execute(caravan.id(), new AdvanceCaravanDayCycleUseCase.AdvanceCaravanDayCycleCommand(
-        "day-delete-zero",
-        false,
-        List.of()));
-
-    assertThat(cargoRepository.findById(caravan.id(), perishableCargo.id())).isEmpty();
+  private com.gestioncaravana.application.model.CaravanDayCycleLogEntryView findSimulationEntry(
+      com.gestioncaravana.application.model.CaravanDayCyclePreviewView preview,
+      String title) {
+    return preview.simulation().stream().filter(entry -> entry.title().equals(title)).findFirst().orElseThrow();
   }
 
   private static final class InMemoryCaravanRepository implements CaravanCampaignRepositoryPort {
-    private final List<CaravanCampaign> caravans = new ArrayList<>();
+    private final Map<UUID, CaravanCampaign> caravans = new HashMap<>();
 
     @Override
     public CaravanCampaign save(CaravanCampaign caravanCampaign) {
-      caravans.removeIf(existing -> existing.id().equals(caravanCampaign.id()));
-      caravans.add(caravanCampaign);
+      caravans.put(caravanCampaign.id(), caravanCampaign);
       return caravanCampaign;
     }
 
     @Override
-    public void deleteById(UUID id) {}
+    public void deleteById(UUID id) {
+      caravans.remove(id);
+    }
 
     @Override
     public List<CaravanCampaign> findAll() {
-      return List.copyOf(caravans);
+      return new ArrayList<>(caravans.values());
     }
 
     @Override
     public Optional<CaravanCampaign> findById(UUID id) {
-      return caravans.stream().filter(caravan -> caravan.id().equals(id)).findFirst();
-    }
-  }
-
-  private static final class InMemoryWagonRepository implements CaravanWagonRepositoryPort {
-    private final List<CaravanWagon> wagons = new ArrayList<>();
-
-    @Override
-    public CaravanWagon save(CaravanWagon wagon) {
-      wagons.removeIf(existing -> existing.id().equals(wagon.id()));
-      wagons.add(wagon);
-      return wagon;
-    }
-
-    @Override
-    public List<CaravanWagon> findAllByCaravanId(UUID caravanId) {
-      return wagons.stream().filter(wagon -> wagon.caravanId().equals(caravanId)).toList();
-    }
-
-    @Override
-    public Optional<CaravanWagon> findById(UUID caravanId, UUID wagonId) {
-      return wagons.stream().filter(wagon -> wagon.caravanId().equals(caravanId) && wagon.id().equals(wagonId)).findFirst();
-    }
-
-    @Override
-    public void deleteById(UUID caravanId, UUID wagonId) {}
-
-    @Override
-    public long countByCaravanId(UUID caravanId) {
-      return wagons.stream().filter(wagon -> wagon.caravanId().equals(caravanId)).count();
-    }
-
-    @Override
-    public long countByCaravanIdAndWagonTypeCode(UUID caravanId, String wagonTypeCode) {
-      return wagons.stream().filter(wagon -> wagon.caravanId().equals(caravanId) && wagon.wagonTypeCode().equals(wagonTypeCode)).count();
+      return Optional.ofNullable(caravans.get(id));
     }
   }
 
   private static final class InMemoryTravelerRepository implements CaravanTravelerRepositoryPort {
-    private final List<CaravanTraveler> travelers = new ArrayList<>();
+    private final Map<UUID, Map<UUID, CaravanTraveler>> travelersByCaravan = new HashMap<>();
 
     @Override
     public CaravanTraveler save(CaravanTraveler traveler) {
-      for (var i = travelers.size() - 1; i >= 0; i--) {
-        if (java.util.Objects.equals(travelers.get(i).id(), traveler.id())) {
-          travelers.remove(i);
-        }
-      }
-      travelers.add(traveler);
+      travelersByCaravan.computeIfAbsent(traveler.caravanId(), ignored -> new HashMap<>())
+          .put(traveler.id(), traveler);
       return traveler;
     }
 
     @Override
     public List<CaravanTraveler> findAllByCaravanId(UUID caravanId) {
-      return travelers.stream().filter(traveler -> traveler.caravanId().equals(caravanId)).toList();
+      return new ArrayList<>(travelersByCaravan.getOrDefault(caravanId, Map.of()).values());
     }
 
     @Override
     public Optional<CaravanTraveler> findById(UUID caravanId, UUID travelerId) {
-      for (var i = travelers.size() - 1; i >= 0; i--) {
-        var traveler = travelers.get(i);
-        if (traveler.caravanId().equals(caravanId) && java.util.Objects.equals(traveler.id(), travelerId)) {
-          return Optional.of(traveler);
-        }
-      }
-      return Optional.empty();
+      return Optional.ofNullable(travelersByCaravan.getOrDefault(caravanId, Map.of()).get(travelerId));
     }
 
     @Override
     public long countByCaravanIdAndWagonId(UUID caravanId, UUID wagonId) {
-      return travelers.stream().filter(traveler -> traveler.caravanId().equals(caravanId) && wagonId.equals(traveler.wagonId())).count();
+      return findAllByCaravanId(caravanId).stream().filter(traveler -> wagonId.equals(traveler.wagonId())).count();
     }
 
     @Override
-    public void deleteByCaravanIdAndId(UUID caravanId, UUID travelerId) {}
-
-    @Override
-    public void deleteByCaravanId(UUID caravanId) {}
-  }
-
-  private static final class InMemoryBeastRepository implements CaravanBeastRepositoryPort {
-    private final List<CaravanBeast> beasts = new ArrayList<>();
-
-    @Override
-    public CaravanBeast save(CaravanBeast beast) {
-      beasts.removeIf(existing -> existing.id().equals(beast.id()));
-      beasts.add(beast);
-      return beast;
-    }
-
-    @Override
-    public List<CaravanBeast> findAllByCaravanId(UUID caravanId) {
-      return beasts.stream().filter(beast -> beast.caravanId().equals(caravanId)).toList();
-    }
-
-    @Override
-    public List<CaravanBeast> findAllByCaravanIdAndAssignmentType(UUID caravanId, CaravanBeastAssignmentType assignmentType) {
-      return List.of();
-    }
-
-    @Override
-    public List<CaravanBeast> findAllByCaravanIdAndWagonIdAndAssignmentType(UUID caravanId, UUID wagonId, CaravanBeastAssignmentType assignmentType) {
-      return List.of();
-    }
-
-    @Override
-    public Optional<CaravanBeast> findById(UUID caravanId, UUID beastId) {
-      return beasts.stream().filter(beast -> beast.caravanId().equals(caravanId) && beast.id().equals(beastId)).findFirst();
-    }
-
-    @Override
-    public void deleteByCaravanId(UUID caravanId) {}
-  }
-
-  private static final class InMemoryCargoRepository implements CaravanCargoRepositoryPort {
-    private final List<CaravanCargo> cargo = new ArrayList<>();
-
-    @Override
-    public CaravanCargo save(CaravanCargo cargoEntry) {
-      cargo.removeIf(existing -> existing.id().equals(cargoEntry.id()));
-      cargo.add(cargoEntry);
-      return cargoEntry;
-    }
-
-    @Override
-    public List<CaravanCargo> findAllByCaravanId(UUID caravanId) {
-      return cargo.stream().filter(entry -> entry.caravanId().equals(caravanId)).toList();
-    }
-
-    @Override
-    public Optional<CaravanCargo> findById(UUID caravanId, UUID cargoId) {
-      return cargo.stream().filter(entry -> entry.caravanId().equals(caravanId) && entry.id().equals(cargoId)).findFirst();
-    }
-
-    @Override
-    public void deleteById(UUID caravanId, UUID cargoId) {
-      cargo.removeIf(entry -> entry.caravanId().equals(caravanId) && entry.id().equals(cargoId));
+    public void deleteByCaravanIdAndId(UUID caravanId, UUID travelerId) {
+      var travelers = travelersByCaravan.get(caravanId);
+      if (travelers != null) {
+        travelers.remove(travelerId);
+      }
     }
 
     @Override
     public void deleteByCaravanId(UUID caravanId) {
-      cargo.removeIf(entry -> entry.caravanId().equals(caravanId));
+      travelersByCaravan.remove(caravanId);
+    }
+  }
+
+  private static final class InMemoryWagonRepository implements CaravanWagonRepositoryPort {
+    private final Map<UUID, Map<UUID, CaravanWagon>> wagonsByCaravan = new HashMap<>();
+
+    @Override
+    public CaravanWagon save(CaravanWagon wagon) {
+      wagonsByCaravan.computeIfAbsent(wagon.caravanId(), ignored -> new HashMap<>())
+          .put(wagon.id(), wagon);
+      return wagon;
+    }
+
+    @Override
+    public List<CaravanWagon> findAllByCaravanId(UUID caravanId) {
+      return new ArrayList<>(wagonsByCaravan.getOrDefault(caravanId, Map.of()).values());
+    }
+
+    @Override
+    public Optional<CaravanWagon> findById(UUID caravanId, UUID wagonId) {
+      return Optional.ofNullable(wagonsByCaravan.getOrDefault(caravanId, Map.of()).get(wagonId));
+    }
+
+    @Override
+    public void deleteById(UUID caravanId, UUID wagonId) {
+      var wagons = wagonsByCaravan.get(caravanId);
+      if (wagons != null) {
+        wagons.remove(wagonId);
+      }
+    }
+
+    @Override
+    public long countByCaravanId(UUID caravanId) {
+      return wagonsByCaravan.getOrDefault(caravanId, Map.of()).size();
+    }
+
+    @Override
+    public long countByCaravanIdAndWagonTypeCode(UUID caravanId, String wagonTypeCode) {
+      return findAllByCaravanId(caravanId).stream().filter(wagon -> wagon.wagonTypeCode().equals(wagonTypeCode)).count();
+    }
+  }
+
+  private static final class InMemoryCargoRepository implements CaravanCargoRepositoryPort {
+    private final Map<UUID, Map<UUID, CaravanCargo>> cargoByCaravan = new HashMap<>();
+
+    @Override
+    public CaravanCargo save(CaravanCargo cargo) {
+      cargoByCaravan.computeIfAbsent(cargo.caravanId(), ignored -> new HashMap<>())
+          .put(cargo.id(), cargo);
+      return cargo;
+    }
+
+    @Override
+    public List<CaravanCargo> findAllByCaravanId(UUID caravanId) {
+      return new ArrayList<>(cargoByCaravan.getOrDefault(caravanId, Map.of()).values());
+    }
+
+    @Override
+    public Optional<CaravanCargo> findById(UUID caravanId, UUID cargoId) {
+      return Optional.ofNullable(cargoByCaravan.getOrDefault(caravanId, Map.of()).get(cargoId));
+    }
+
+    @Override
+    public void deleteById(UUID caravanId, UUID cargoId) {
+      var cargo = cargoByCaravan.get(caravanId);
+      if (cargo != null) {
+        cargo.remove(cargoId);
+      }
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      cargoByCaravan.remove(caravanId);
     }
 
     @Override
     public long countByCaravanIdAndWagonId(UUID caravanId, UUID wagonId) {
-      return cargo.stream().filter(entry -> entry.caravanId().equals(caravanId) && wagonId.equals(entry.wagonId())).count();
+      return findAllByCaravanId(caravanId).stream().filter(item -> wagonId.equals(item.wagonId())).count();
     }
   }
 
   private static final class InMemoryFeatRepository implements CaravanFeatRepositoryPort {
-    private final List<CaravanFeat> feats = new ArrayList<>();
+    private final Map<UUID, Map<UUID, CaravanFeat>> featsByCaravan = new HashMap<>();
 
     @Override
     public CaravanFeat save(CaravanFeat feat) {
-      feats.removeIf(existing -> existing.id().equals(feat.id()));
-      feats.add(feat);
+      featsByCaravan.computeIfAbsent(feat.caravanId(), ignored -> new HashMap<>()).put(feat.id(), feat);
       return feat;
     }
 
     @Override
     public List<CaravanFeat> findAllByCaravanId(UUID caravanId) {
-      return feats.stream().filter(feat -> feat.caravanId().equals(caravanId)).toList();
+      return new ArrayList<>(featsByCaravan.getOrDefault(caravanId, Map.of()).values());
     }
 
     @Override
     public Optional<CaravanFeat> findById(UUID caravanId, UUID featId) {
-      return feats.stream().filter(feat -> feat.caravanId().equals(caravanId) && feat.id().equals(featId)).findFirst();
+      return Optional.ofNullable(featsByCaravan.getOrDefault(caravanId, Map.of()).get(featId));
     }
 
     @Override
     public long countByCaravanIdAndFeatTypeCode(UUID caravanId, String featTypeCode) {
-      return feats.stream().filter(feat -> feat.caravanId().equals(caravanId) && feat.featTypeCode().equals(featTypeCode)).count();
+      return findAllByCaravanId(caravanId).stream().filter(feat -> feat.featTypeCode().equals(featTypeCode)).count();
     }
 
     @Override
-    public void deleteById(UUID caravanId, UUID featId) {}
+    public void deleteById(UUID caravanId, UUID featId) {
+      var feats = featsByCaravan.get(caravanId);
+      if (feats != null) {
+        feats.remove(featId);
+      }
+    }
 
     @Override
-    public void deleteByCaravanId(UUID caravanId) {}
+    public void deleteByCaravanId(UUID caravanId) {
+      featsByCaravan.remove(caravanId);
+    }
   }
 
   private static final class InMemorySupplyStateRepository implements CaravanSupplyStateRepositoryPort {
-    private final List<CaravanSupplyState> states = new ArrayList<>();
+    private final Map<UUID, CaravanSupplyState> states = new HashMap<>();
 
     @Override
     public CaravanSupplyState save(CaravanSupplyState state) {
-      states.removeIf(existing -> existing.caravanId().equals(state.caravanId()));
-      states.add(state);
+      states.put(state.caravanId(), state);
       return state;
     }
 
     @Override
     public Optional<CaravanSupplyState> findByCaravanId(UUID caravanId) {
-      return states.stream().filter(state -> state.caravanId().equals(caravanId)).findFirst();
+      return Optional.ofNullable(states.get(caravanId));
     }
 
     @Override
-    public void deleteByCaravanId(UUID caravanId) {}
+    public void deleteByCaravanId(UUID caravanId) {
+      states.remove(caravanId);
+    }
   }
 
-  private static final class InMemoryResolutionRepository implements CaravanDayResolutionRepositoryPort {
-    private final List<CaravanDayResolution> resolutions = new ArrayList<>();
+  private static final class InMemoryDayCycleResultRepository implements CaravanDayCycleResultRepositoryPort {
+    private final List<CaravanDayCycleResult> results = new ArrayList<>();
 
     @Override
-    public CaravanDayResolution save(CaravanDayResolution resolution) {
-      resolutions.removeIf(existing -> existing.id().equals(resolution.id()));
-      resolutions.add(resolution);
-      return resolution;
+    public CaravanDayCycleResult save(CaravanDayCycleResult result) {
+      results.add(result);
+      return result;
     }
 
     @Override
-    public Optional<CaravanDayResolution> findByCaravanIdAndIdempotencyKey(UUID caravanId, String idempotencyKey) {
-      return resolutions.stream().filter(resolution -> resolution.caravanId().equals(caravanId) && resolution.idempotencyKey().equals(idempotencyKey)).findFirst();
+    public Optional<CaravanDayCycleResult> findLatestByCaravanId(UUID caravanId) {
+      return results.stream().filter(result -> result.caravanId().equals(caravanId)).reduce((left, right) -> right);
     }
 
     @Override
-    public List<CaravanDayResolution> findAllByCaravanId(UUID caravanId) {
-      return resolutions.stream().filter(resolution -> resolution.caravanId().equals(caravanId)).toList();
+    public List<CaravanDayCycleResult> findAllByCaravanId(UUID caravanId) {
+      return results.stream().filter(result -> result.caravanId().equals(caravanId)).toList();
     }
-
-    @Override
-    public void deleteByCaravanId(UUID caravanId) {}
-  }
-
-  private static final class InMemoryImprovementRepository implements com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort {
-    @Override
-    public com.gestioncaravana.domain.CaravanWagonImprovement save(com.gestioncaravana.domain.CaravanWagonImprovement improvement) {
-      return improvement;
-    }
-
-    @Override
-    public List<com.gestioncaravana.domain.CaravanWagonImprovement> findAllByCaravanIdAndWagonId(UUID caravanId, UUID wagonId) {
-      return List.of();
-    }
-
-    @Override
-    public Optional<com.gestioncaravana.domain.CaravanWagonImprovement> findById(UUID caravanId, UUID wagonId, UUID improvementId) {
-      return Optional.empty();
-    }
-
-    @Override
-    public void deleteById(UUID caravanId, UUID wagonId, UUID improvementId) {}
-  }
-
-  private CaravanCampaign createCookBonusScenario(int cookCount) {
-    var caravan = caravanRepository.save(CaravanCampaign.create(UUID.randomUUID(), "Campaign-" + cookCount, null, Instant.parse("2026-01-01T00:00:00Z")));
-
-    for (var i = 0; i < 11; i++) {
-      travelerRepository.save(CaravanTraveler.create(
-          UUID.randomUUID(),
-          caravan.id(),
-          "Batidor " + i,
-          null,
-          List.of("pasajero", "batidor"),
-          List.of("batidor"),
-          "batidor",
-          1,
-          TravelerRoleData.empty(),
-          null,
-          null,
-          1,
-          Instant.parse("2025-12-30T00:00:00Z")));
-    }
-
-    for (var i = 0; i < cookCount; i++) {
-      travelerRepository.save(CaravanTraveler.create(
-          UUID.randomUUID(),
-          caravan.id(),
-          "Cocinero " + i,
-          null,
-          List.of("pasajero", "cocinero"),
-          List.of("cocinero"),
-          "cocinero",
-          1,
-          TravelerRoleData.empty(),
-          null,
-          null,
-          1,
-          Instant.parse("2025-12-30T00:00:00Z")));
-    }
-
-    supplyStateRepository.save(new CaravanSupplyState(caravan.id(), 0, 0, 0, 0, Instant.parse("2026-01-01T00:00:00Z")));
-    return caravan;
   }
 }
-

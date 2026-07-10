@@ -9,7 +9,8 @@ public record CaravanSupplyState(
     int standardReserve,
     int perishableReserve,
     int daysPassed,
-    Instant updatedAt) {
+    Instant updatedAt,
+    String sharedJobProductivityState) {
 
   public CaravanSupplyState {
     if (caravanId == null) {
@@ -30,10 +31,21 @@ public record CaravanSupplyState(
     if (updatedAt == null) {
       throw new IllegalArgumentException("updatedAt is required");
     }
+    sharedJobProductivityState = normalize(sharedJobProductivityState);
+  }
+
+  public CaravanSupplyState(
+      UUID caravanId,
+      int provisionReserve,
+      int standardReserve,
+      int perishableReserve,
+      int daysPassed,
+      Instant updatedAt) {
+    this(caravanId, provisionReserve, standardReserve, perishableReserve, daysPassed, updatedAt, null);
   }
 
   public static CaravanSupplyState initial(UUID caravanId, Instant now) {
-    return new CaravanSupplyState(caravanId, 0, 0, 0, 0, now);
+    return new CaravanSupplyState(caravanId, 0, 0, 0, 0, now, null);
   }
 
   public CaravanSupplyState advance(int provisionDelta, int standardDelta, int perishableDelta, Instant now) {
@@ -43,6 +55,36 @@ public record CaravanSupplyState(
         Math.max(0, standardReserve + standardDelta),
         Math.max(0, perishableReserve + perishableDelta),
         daysPassed + 1,
-        now);
+        now,
+        sharedJobProductivityState);
+  }
+
+  public CaravanSupplyState withSharedJobProductivityState(String sharedJobProductivityState, Instant now) {
+    return new CaravanSupplyState(
+        caravanId,
+        provisionReserve,
+        standardReserve,
+        perishableReserve,
+        daysPassed,
+        now,
+        sharedJobProductivityState);
+  }
+
+  public CaravanSupplyState advanceDay(Instant now, String sharedJobProductivityState) {
+    return new CaravanSupplyState(
+        caravanId,
+        provisionReserve,
+        standardReserve,
+        perishableReserve,
+        daysPassed + 1,
+        now,
+        sharedJobProductivityState);
+  }
+
+  private static String normalize(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    return value.trim();
   }
 }

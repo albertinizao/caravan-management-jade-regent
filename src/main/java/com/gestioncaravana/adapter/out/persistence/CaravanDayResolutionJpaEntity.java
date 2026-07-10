@@ -45,6 +45,9 @@ public class CaravanDayResolutionJpaEntity {
   private int shortage;
 
   @jakarta.persistence.Lob
+  private String cargoMovementSummary;
+
+  @jakarta.persistence.Lob
   private String choicesSummary;
 
   @jakarta.persistence.Lob
@@ -141,6 +144,14 @@ public class CaravanDayResolutionJpaEntity {
 
   public void setShortage(int shortage) {
     this.shortage = shortage;
+  }
+
+  public String getCargoMovementSummary() {
+    return cargoMovementSummary;
+  }
+
+  public void setCargoMovementSummary(String cargoMovementSummary) {
+    this.cargoMovementSummary = cargoMovementSummary;
   }
 
   public String getChoicesSummary() {

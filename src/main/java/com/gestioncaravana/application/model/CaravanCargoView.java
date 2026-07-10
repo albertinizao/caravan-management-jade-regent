@@ -1,6 +1,7 @@
 package com.gestioncaravana.application.model;
 
 import com.gestioncaravana.domain.CaravanCargoSourceType;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -21,6 +22,8 @@ public record CaravanCargoView(
     String specificCommodity,
     String deity,
     String notes,
+    BigDecimal currentProvisions,
+    Boolean dayPassed,
     String priceExpression,
     Instant createdAt,
     Instant updatedAt) {}

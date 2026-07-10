@@ -91,6 +91,103 @@ class FeatManagementServiceTest {
   }
 
   @Test
+  void grantsAndRemovesTwoFreePointsForEachActiveCaravanaMejoradaInstance() {
+    var caravan = createCaravan(2);
+
+    var created = service.execute(
+        caravan.id(),
+        new com.gestioncaravana.application.port.in.AddCaravanFeatUseCase.AddCaravanFeatCommand(
+            "caravana-mejorada",
+            CaravanFeatAcquisitionSourceType.LEVEL_UP,
+            2,
+            null,
+            true,
+            null,
+            null));
+
+    assertThat(created.active()).isTrue();
+    assertThat(caravanRepository.findById(caravan.id()).orElseThrow().mainStats().unassignedPoints()).isEqualTo(5);
+
+    service.execute(
+        caravan.id(),
+        created.id(),
+        new com.gestioncaravana.application.port.in.UpdateCaravanFeatUseCase.UpdateCaravanFeatCommand(
+            CaravanFeatAcquisitionSourceType.LEVEL_UP,
+            2,
+            null,
+            false,
+            null,
+            null));
+
+    assertThat(caravanRepository.findById(caravan.id()).orElseThrow().mainStats().unassignedPoints()).isEqualTo(3);
+  }
+
+  @Test
+  void deletesActiveCaravanaMejoradaAndRestoresItsBonusPoints() {
+    var caravan = createCaravan(2);
+
+    var created = service.execute(
+        caravan.id(),
+        new com.gestioncaravana.application.port.in.AddCaravanFeatUseCase.AddCaravanFeatCommand(
+            "caravana-mejorada",
+            CaravanFeatAcquisitionSourceType.LEVEL_UP,
+            2,
+            null,
+            true,
+            null,
+            null));
+
+    assertThat(caravanRepository.findById(caravan.id()).orElseThrow().mainStats().unassignedPoints()).isEqualTo(5);
+
+    service.delete(caravan.id(), created.id());
+
+    assertThat(featRepository.findById(caravan.id(), created.id())).isEmpty();
+    assertThat(caravanRepository.findById(caravan.id()).orElseThrow().mainStats().unassignedPoints()).isEqualTo(3);
+  }
+
+  @Test
+  void keepsRepeatableSelectionIndexesMonotonicAfterDeletion() {
+    var caravan = createCaravan(2);
+
+    var first = service.execute(
+        caravan.id(),
+        new com.gestioncaravana.application.port.in.AddCaravanFeatUseCase.AddCaravanFeatCommand(
+            "caravana-santificada",
+            CaravanFeatAcquisitionSourceType.OTHER,
+            null,
+            "ritual",
+            true,
+            true,
+            "primera selección"));
+    var second = service.execute(
+        caravan.id(),
+        new com.gestioncaravana.application.port.in.AddCaravanFeatUseCase.AddCaravanFeatCommand(
+            "caravana-santificada",
+            CaravanFeatAcquisitionSourceType.OTHER,
+            null,
+            "ritual",
+            true,
+            true,
+            "segunda selección"));
+
+    service.delete(caravan.id(), first.id());
+
+    var third = service.execute(
+        caravan.id(),
+        new com.gestioncaravana.application.port.in.AddCaravanFeatUseCase.AddCaravanFeatCommand(
+            "caravana-santificada",
+            CaravanFeatAcquisitionSourceType.OTHER,
+            null,
+            "ritual",
+            true,
+            true,
+            "tercera selección"));
+
+    assertThat(second.selectionIndex()).isEqualTo(2);
+    assertThat(third.selectionIndex()).isEqualTo(3);
+  }
+
+  @Test
   void persistsManualAppliesStateForManualFeats() {
     var caravan = createCaravan(2);
 
@@ -284,15 +381,15 @@ class FeatManagementServiceTest {
             "Caravana Mejorada",
             "La caravana mejora su rendimiento general.",
             List.of("Nivel 2"),
-            "Aumenta en 1 dos de las estadísticas principales hasta una puntuación máxima de +10.",
+            "Cada instancia añade 2 puntos libres a las estadísticas principales de la caravana.",
             "Esta dote puede seleccionarse varias veces.",
             null,
             true,
             999,
             2,
             "selection-based passive",
-            "selectedMainStats[]",
-            "Each selection chooses exactly two main stats. Increment each chosen stat by 1, cap each at +10, persist the chosen pair on the owned feat instance, and recalculate caravan stats after every selection."),
+            "unassignedMainStatPoints",
+            "Each active instance grants 2 free main-stat points, stacks once per active instance, and recalculates caravan stats after every feat change."),
         new CaravanFeatType(
             "caravana-santificada",
             "Caravana Santificada",

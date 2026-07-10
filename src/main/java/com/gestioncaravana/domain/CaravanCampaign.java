@@ -105,6 +105,19 @@ public record CaravanCampaign(
     return new CaravanCampaign(id, name, description, level, updatedMainStats, discontent, status, createdAt, now);
   }
 
+  public CaravanCampaign adjustUnassignedPoints(int delta, Instant now) {
+    return new CaravanCampaign(
+        id,
+        name,
+        description,
+        level,
+        mainStats.adjustUnassignedPoints(delta),
+        discontent,
+        status,
+        createdAt,
+        now);
+  }
+
   private static String normalizeDescription(String description) {
     if (description == null || description.isBlank()) {
       return null;

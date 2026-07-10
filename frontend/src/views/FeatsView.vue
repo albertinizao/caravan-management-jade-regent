@@ -2,8 +2,9 @@
 import { computed, onMounted, ref, watch } from "vue";
 
 import { useToast } from "@/composables/useToast";
+import CaravanSummaryHero from "@/components/caravan/CaravanSummaryHero.vue";
 import { getActiveCaravan, listCaravans } from "@/services/caravans";
-import { addCaravanFeat, listCaravanFeatCatalog, listCaravanFeats, updateCaravanFeat } from "@/services/feats";
+import { addCaravanFeat, deleteCaravanFeat, listCaravanFeatCatalog, listCaravanFeats, updateCaravanFeat } from "@/services/feats";
 import type { Caravan } from "@/types/caravan";
 import type { CaravanFeat, CaravanFeatAcquisitionSourceType, CaravanFeatCatalogItem } from "@/types/feat";
 
@@ -35,6 +36,16 @@ const { showToast } = useToast();
 const selectedCatalogItem = computed(() =>
   catalog.value.find((item) => item.code === selectedFeatTypeCode.value) ?? null,
 );
+
+const levelSelectedFeatCount = computed(() =>
+  feats.value.filter((feat) => feat.acquisitionSourceType === "LEVEL_UP").length,
+);
+
+const otherSelectedFeatCount = computed(() =>
+  feats.value.filter((feat) => feat.acquisitionSourceType === "OTHER").length,
+);
+
+const levelFeatProgress = computed(() => percentageOf(levelSelectedFeatCount.value, activeCaravan.value?.level ?? 0));
 
 const selectedDetailView = computed(() => {
   const detail = selectedDetail.value;
@@ -96,6 +107,14 @@ const selectedDetailView = computed(() => {
 const selectedDetailTitle = computed(() => selectedDetailView.value?.name ?? "");
 
 const catalogByCode = computed(() => Object.fromEntries(catalog.value.map((item) => [item.code, item] as const)));
+
+function percentageOf(value: number, max: number) {
+  if (max <= 0) {
+    return 0;
+  }
+
+  return Math.min(100, Math.max(0, (value / max) * 100));
+}
 
 const visibleFeats = computed(() => {
   const query = search.value.trim().toLowerCase();
@@ -285,42 +304,101 @@ async function submitFeat() {
   }
 }
 
+async function deleteFeat(feat: CaravanFeat) {
+  if (!activeCaravan.value) {
+    return;
+  }
+
+  const confirmed = window.confirm(`¿Seguro que quieres eliminar la dote ${feat.name}? Esta acción no se puede deshacer.`);
+  if (!confirmed) {
+    return;
+  }
+
+  submitting.value = true;
+  pendingAction.value = `delete:${feat.id}`;
+  error.value = null;
+
+  try {
+    await deleteCaravanFeat(activeCaravan.value.id, feat.id);
+    showToast(`Dote eliminada: ${feat.name}.`, "success");
+    await refresh();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Failed to delete feat";
+  } finally {
+    submitting.value = false;
+    pendingAction.value = null;
+  }
+}
+
 onMounted(refresh);
 </script>
 
 <template>
-  <main class="page-shell">
-    <section class="page-header">
-      <div>
-        <p class="eyebrow">Caravana activa</p>
-        <h1>Dotes</h1>
-        <p v-if="activeCaravan">{{ activeCaravan.name }} · Nivel {{ activeCaravan.level }}</p>
-        <p v-else>No hay una caravana activa.</p>
-      </div>
-      <div class="header-actions">
-        <button class="primary-button" type="button" @click="openAddModal" :disabled="!activeCaravan || isPending('add')">
-          Añadir dote
-        </button>
-      </div>
-    </section>
+  <main class="page">
+    <section class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Caravana activa</p>
+          <h1>Dotes de la caravana</h1>
+          <p class="subtitle">Consulta el catálogo completo, añade una dote y revisa sus detalles en una vista dedicada.</p>
+        </div>
 
-    <section v-if="loading" class="empty-state">Cargando dotes…</section>
-    <section v-else-if="error" class="error-banner">{{ error }}</section>
-    <template v-else>
-      <section v-if="!activeCaravan" class="panel empty-state">
-        <h2>No hay una caravana activa</h2>
-        <p class="muted">Debes seleccionar o crear una caravana antes de gestionar dotes.</p>
-        <RouterLink class="primary" to="/">Ir a caravanas</RouterLink>
-      </section>
+        <div class="hero-actions">
+          <button class="ghost-button" type="button" :disabled="loading || submitting" @click="refresh">
+            Refrescar
+          </button>
+        </div>
+      </header>
 
+      <section v-if="loading" class="empty-state">Cargando dotes…</section>
+      <section v-else-if="error" class="error-banner">{{ error }}</section>
       <template v-else>
-        <section class="panel">
-          <div class="panel-header">
-            <h2>Dotes de la caravana</h2>
-            <input v-model="search" type="search" placeholder="Buscar dote o causa…" class="search-input" />
-          </div>
-          <div v-if="visibleFeats.length === 0" class="empty-state">La caravana todavía no tiene dotes que coincidan con el filtro.</div>
-          <table v-else class="data-table">
+        <section v-if="!activeCaravan" class="panel empty-state">
+          <h2>No hay una caravana activa</h2>
+          <p class="muted">Debes seleccionar o crear una caravana antes de gestionar dotes.</p>
+          <RouterLink class="primary" to="/">Ir a caravanas</RouterLink>
+        </section>
+
+        <template v-else>
+          <CaravanSummaryHero
+            eyebrow="Caravana activa"
+            :title="activeCaravan.name"
+            description="Resumen rápido de las dotes seleccionadas por nivel y por otra causa."
+            :stats="[
+              { label: 'Nivel de la caravana', value: activeCaravan.level },
+              { label: 'Dotes por nivel', value: levelSelectedFeatCount },
+              { label: 'Dotes por otra causa', value: otherSelectedFeatCount },
+            ]"
+            :meter="{
+              ariaLabel: `Dotes por nivel ${levelSelectedFeatCount} de ${activeCaravan.level}`,
+              title: `Dotes por nivel ${levelSelectedFeatCount} de ${activeCaravan.level}`,
+              currentValue: levelSelectedFeatCount,
+              currentLabel: 'seleccionadas',
+              maxValue: activeCaravan.level,
+              maxLabel: 'nivel',
+              segmentWidth: `${levelFeatProgress}%`,
+              segmentClass: 'meter-segment--draft',
+            }"
+          >
+            <template #action>
+              <button
+                class="primary-button"
+                type="button"
+                :disabled="submitting"
+                @click="openAddModal"
+              >
+                Añadir
+              </button>
+            </template>
+          </CaravanSummaryHero>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Dotes de la caravana</h2>
+              <input v-model="search" type="search" placeholder="Buscar dote o causa…" class="search-input" />
+            </div>
+            <div v-if="visibleFeats.length === 0" class="empty-state">La caravana todavía no tiene dotes que coincidan con el filtro.</div>
+            <table v-else class="data-table">
             <thead>
               <tr>
                 <th>Dote</th>
@@ -356,52 +434,63 @@ onMounted(refresh);
                 </td>
                 <td class="actions">
                   <button class="ghost-button" type="button" @click="openEditModal(feat)">Editar</button>
+                  <button
+                    class="danger-button"
+                    type="button"
+                    :disabled="submitting"
+                    :aria-busy="isPending(`delete:${feat.id}`)"
+                    @click="deleteFeat(feat)"
+                  >
+                    <span v-if="isPending(`delete:${feat.id}`)" class="button-spinner" aria-hidden="true"></span>
+                    <span>{{ isPending(`delete:${feat.id}`) ? "Eliminando…" : "Borrar" }}</span>
+                  </button>
                 </td>
               </tr>
             </tbody>
           </table>
-        </section>
+          </section>
 
-        <section class="panel">
-          <div class="panel-header">
-            <h2>Catálogo</h2>
-            <p class="muted">{{ visibleCatalog.length }} dotes visibles</p>
-          </div>
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Catálogo</h2>
+              <p class="muted">{{ visibleCatalog.length }} dotes visibles</p>
+            </div>
 
-          <div class="catalog-grid">
-            <button
-              v-for="item in visibleCatalog"
-              :key="item.code"
-              type="button"
-              class="catalog-card catalog-card-button"
-              :class="{ 'catalog-card--blocked': !item.available }"
-              @click="openCatalogDetail(item)"
-            >
-              <div class="catalog-card__top">
-                <strong>{{ item.name }}</strong>
-                <span class="badge" :class="item.available ? 'badge--ok' : 'badge--warn'">
-                  {{ item.available ? "Disponible" : "Bloqueada" }}
-                </span>
-              </div>
-              <p class="card-section-label">Detalle</p>
-              <p>{{ item.description }}</p>
-              <p class="card-section-label">Prerrequisitos</p>
-              <p class="muted">{{ item.prerequisites.join(" · ") || "Sin prerrequisitos declarados" }}</p>
-              <p class="card-section-label">Beneficio</p>
-              <p>{{ item.benefitText }}</p>
-              <p class="card-section-label">Especial</p>
-              <p>{{ item.specialText ?? "Sin especial declarado" }}</p>
-              <p v-if="item.notes" class="muted">{{ item.notes }}</p>
-              <p v-if="item.ownedCount > 0 && item.selectionLimit > 1" class="muted">
-                Seleccionada {{ item.ownedCount }} veces · Límite {{ item.selectionLimit }}
-              </p>
-              <p v-if="item.blockedReason" class="warning-text">{{ item.blockedReason }}</p>
-              <p class="detail-hint">Haz clic para ver la ficha completa</p>
-            </button>
-          </div>
-        </section>
+            <div class="catalog-grid">
+              <button
+                v-for="item in visibleCatalog"
+                :key="item.code"
+                type="button"
+                class="catalog-card catalog-card-button"
+                :class="{ 'catalog-card--blocked': !item.available }"
+                @click="openCatalogDetail(item)"
+              >
+                <div class="catalog-card__top">
+                  <strong>{{ item.name }}</strong>
+                  <span class="badge" :class="item.available ? 'badge--ok' : 'badge--warn'">
+                    {{ item.available ? "Disponible" : "Bloqueada" }}
+                  </span>
+                </div>
+                <p class="card-section-label">Detalle</p>
+                <p>{{ item.description }}</p>
+                <p class="card-section-label">Prerrequisitos</p>
+                <p class="muted">{{ item.prerequisites.join(" · ") || "Sin prerrequisitos declarados" }}</p>
+                <p class="card-section-label">Beneficio</p>
+                <p>{{ item.benefitText }}</p>
+                <p class="card-section-label">Especial</p>
+                <p>{{ item.specialText ?? "Sin especial declarado" }}</p>
+                <p v-if="item.notes" class="muted">{{ item.notes }}</p>
+                <p v-if="item.ownedCount > 0 && item.selectionLimit > 1" class="muted">
+                  Seleccionada {{ item.ownedCount }} veces · Límite {{ item.selectionLimit }}
+                </p>
+                <p v-if="item.blockedReason" class="warning-text">{{ item.blockedReason }}</p>
+                <p class="detail-hint">Haz clic para ver la ficha completa</p>
+              </button>
+            </div>
+          </section>
+        </template>
       </template>
-    </template>
+    </section>
 
     <teleport to="body">
       <div v-if="addModalOpen || editModalOpen" class="modal-backdrop" @click.self="closeModal">
@@ -620,13 +709,18 @@ onMounted(refresh);
 </template>
 
 <style scoped>
-.page-shell {
-  padding: 1.5rem;
-  display: grid;
-  gap: 1rem;
+.page {
+  min-height: 100vh;
+  padding: 2.5rem 2rem 2rem;
 }
 
-.page-header,
+.shell {
+  width: min(1200px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 1.25rem;
+}
+
 .panel,
 .modal {
   background: white;
@@ -635,11 +729,20 @@ onMounted(refresh);
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
 }
 
-.page-header {
-  padding: 1.25rem 1.5rem;
+.hero {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.page :is(h1, h2, h3, p) {
+  margin: 0;
 }
 
 .panel {
@@ -655,16 +758,21 @@ onMounted(refresh);
 }
 
 .eyebrow {
+  margin: 0 0 0.25rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  font-size: 0.72rem;
+  font-size: 0.875rem;
+  font-weight: 700;
   color: #6b7280;
-  margin: 0 0 0.35rem;
 }
 
+.subtitle,
 .muted {
   color: #6b7280;
-  font-size: 0.92rem;
+}
+
+.subtitle {
+  margin: 0;
 }
 
 .warning-text {
@@ -701,7 +809,9 @@ onMounted(refresh);
 }
 
 .actions {
-  text-align: right;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .actions button,
@@ -720,6 +830,11 @@ onMounted(refresh);
   color: inherit;
 }
 
+.ghost-button:not(:disabled):hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
 .primary-button {
   background: #2563eb;
   color: white;
@@ -727,9 +842,16 @@ onMounted(refresh);
 }
 
 .primary-button:disabled,
-.ghost-button:disabled {
+.ghost-button:disabled,
+.danger-button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
+}
+
+.danger-button {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fecaca;
 }
 
 .badge {

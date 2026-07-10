@@ -32,6 +32,10 @@ export interface CaravanBeast {
   specialNote: string;
   description: string;
   customNotes: string | null;
+  consumption: number;
+  occupiedSpace: number;
+  availableRoleCodes: string[] | null;
+  activeRoleCode: string | null;
   assignmentType: BeastAssignmentType;
   assignedWagonId: string | null;
   assignedWagonName: string | null;
@@ -53,9 +57,19 @@ export interface AddCaravanBeastPayload {
   specialNote: string;
   description: string;
   customNotes?: string | null;
+  consumption?: number | null;
+  occupiedSpace?: number | null;
+  quantity?: number | null;
+}
+
+export interface UpdateCaravanBeastPayload {
+  consumption?: number | null;
+  occupiedSpace?: number | null;
 }
 
 export interface UpdateCaravanBeastAssignmentPayload {
   assignmentType: BeastAssignmentType;
   wagonId: string | null;
+  availableRoleCodes?: string[] | null;
+  activeRoleCode?: string | null;
 }

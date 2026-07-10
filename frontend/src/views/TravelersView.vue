@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 
+import CaravanSummaryHero from "@/components/caravan/CaravanSummaryHero.vue";
 import { useToast } from "@/composables/useToast";
 import { getActiveCaravan, listCaravans } from "@/services/caravans";
 import { listCaravanBeasts } from "@/services/beasts";
@@ -32,6 +33,7 @@ const pendingAction = ref<string | null>(null);
 const error = ref<string | null>(null);
 const search = ref("");
 const roleFilter = ref("all");
+const availableRoleFilter = ref("all");
 const wagonFilter = ref("all");
 const selectedTraveler = ref<CaravanTraveler | null>(null);
 const travelerMode = ref<"view" | "edit">("view");
@@ -66,6 +68,10 @@ const { showToast } = useToast();
 const gpFormatter = new Intl.NumberFormat("es-ES", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 2,
+});
+const spaceFormatter = new Intl.NumberFormat("es-ES", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 1,
 });
 
 function isPending(action: string) {
@@ -110,10 +116,26 @@ const visibleTravelers = computed(() => {
     .filter((traveler) =>
       roleFilter.value === "all" || traveler.activeRoleCodes.includes(roleFilter.value) || traveler.activeRoleCode === roleFilter.value,
     )
+    .filter((traveler) =>
+      availableRoleFilter.value === "all" || traveler.availableRoleCodes.includes(availableRoleFilter.value),
+    )
     .filter((traveler) => wagonFilter.value === "all" || traveler.wagonId === wagonFilter.value);
 });
 
 const travelersWithoutWagon = computed(() => travelers.value.filter((traveler) => !traveler.wagonId));
+const totalTravelerOccupiedSpace = computed(() =>
+  travelers.value.reduce((total, traveler) => total + traveler.occupiedSpace, 0),
+);
+const totalTravelerSalary = computed(() =>
+  travelers.value.reduce((total, traveler) => total + (traveler.salary ?? 0), 0),
+);
+const totalTravelerCapacity = computed(() =>
+  wagons.value.reduce((total, wagon) => total + wagon.travelerCapacity, 0),
+);
+const travelersActingAsPassengers = computed(() =>
+  travelers.value.filter((traveler) => traveler.activeRoleCode === passengerRoleCode && traveler.activeRoleCodes.includes(passengerRoleCode))
+    .length,
+);
 
 const createRoleOptions = computed(() =>
   roleCatalog.value.filter((role) => createAvailableRoleCodes.value.includes(role.code)),
@@ -149,8 +171,16 @@ function selectedTravelerWagonCapacity(wagonId: string, excludedTravelerId?: str
   const travelerSpace = travelers.value
     .filter((traveler) => traveler.wagonId === wagonId && traveler.id !== excludedTravelerId)
     .reduce((total, traveler) => total + traveler.occupiedSpace, 0);
-  const beastCount = beasts.value.filter((beast) => beast.assignmentType === "TRAVELER" && beast.assignedWagonId === wagonId).length;
-  return Math.max(0, wagon.travelerCapacity - travelerSpace - beastCount);
+  const travelerBeastSpace = beasts.value
+    .filter((beast) => beast.assignmentType === "TRAVELER" && beast.assignedWagonId === wagonId)
+    .reduce((total, beast) => total + beast.occupiedSpace, 0);
+  return Math.max(0, wagon.travelerCapacity - travelerSpace - travelerBeastSpace);
+}
+
+function parseOccupiedSpaceInput(value: string, fallback: number) {
+  const normalized = String(value).trim().replace(",", ".");
+  const parsed = normalized ? Number(normalized) : fallback;
+  return Number.isNaN(parsed) ? fallback : parsed;
 }
 
 function wagonHasAnotherCarretero(wagonId: string, excludedTravelerId?: string | null) {
@@ -161,9 +191,9 @@ function wagonHasAnotherCarretero(wagonId: string, excludedTravelerId?: string |
   );
 }
 
-function validSleepingWagonOptionsForTraveler(excludedTravelerId?: string | null) {
+function validSleepingWagonOptionsForTraveler(requiredSpace: number, excludedTravelerId?: string | null) {
   return wagons.value.filter((wagon) => {
-    return selectedTravelerWagonCapacity(wagon.id, excludedTravelerId) > 0
+    return selectedTravelerWagonCapacity(wagon.id, excludedTravelerId) >= requiredSpace
       || wagon.id === (excludedTravelerId ? travelers.value.find((traveler) => traveler.id === excludedTravelerId)?.wagonId : null);
   });
 }
@@ -173,7 +203,10 @@ function validDrivingWagonOptionsForTraveler(excludedTravelerId?: string | null)
 }
 
 const selectedWagonOptions = computed(() =>
-  validSleepingWagonOptionsForTraveler(selectedTraveler.value?.id),
+  validSleepingWagonOptionsForTraveler(
+    parseOccupiedSpaceInput(selectedOccupiedSpace.value, selectedTraveler.value?.occupiedSpace ?? 1),
+    selectedTraveler.value?.id,
+  ),
 );
 
 const selectedDrivingWagonOptions = computed(() =>
@@ -183,7 +216,7 @@ const selectedDrivingWagonOptions = computed(() =>
 );
 
 const createWagonOptions = computed(() =>
-  validSleepingWagonOptionsForTraveler(),
+  validSleepingWagonOptionsForTraveler(parseOccupiedSpaceInput(createOccupiedSpace.value, 1)),
 );
 
 const createDrivingWagonOptions = computed(() =>
@@ -215,6 +248,18 @@ const createDrivingWagonHelperText = computed(() =>
 const roleFilterOptions = computed(() => roleCatalog.value);
 
 const passengerRoleCode = "pasajero";
+
+function percentageOf(value: number, max: number) {
+  if (max <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, (value / max) * 100));
+}
+
+function formatSpace(value: number) {
+  return spaceFormatter.format(value);
+}
 
 watch(createAvailableRoleCodes, () => {
   if (!createAvailableRoleCodes.value.includes(passengerRoleCode)) {
@@ -786,8 +831,19 @@ function travelerAssignmentLabel(traveler: CaravanTraveler): string {
   return traveler.wagonName ?? "Sin carro";
 }
 
-function travelerDrivingAssignmentLabel(traveler: CaravanTraveler): string {
-  return traveler.drivingWagonName ?? "Sin carro de conducción";
+function roleTableItems(traveler: CaravanTraveler) {
+  const roleCodes = [...new Set([...traveler.availableRoleCodes, ...traveler.activeRoleCodes])];
+  return roleCodes.map((code) => ({
+    code,
+    name: roleName(code),
+    active: traveler.activeRoleCodes.includes(code),
+  }));
+}
+
+function roleTableSummary(traveler: CaravanTraveler) {
+  const possible = traveler.availableRoleCodes.length ? roleSummary(traveler.availableRoleCodes) : "Sin roles";
+  const active = traveler.activeRoleCodes.length ? `Activos: ${roleSummary(traveler.activeRoleCodes)}` : "Sin roles activos";
+  return `${possible}. ${active}.`;
 }
 
 function roleCountLabel(activeCount: number, maxCount: number) {
@@ -830,9 +886,6 @@ onMounted(refresh);
               <span>{{ isPending('refresh') ? "Refrescando…" : "Refrescar" }}</span>
             </span>
           </button>
-          <button class="primary-button" type="button" :disabled="!activeCaravan || loading || submitting" @click="openCreateModal">
-            Añadir
-          </button>
         </div>
       </header>
 
@@ -845,6 +898,38 @@ onMounted(refresh);
       </section>
 
       <template v-else>
+        <CaravanSummaryHero
+          eyebrow="Vástagos de Amatatsu"
+          :title="activeCaravan.name"
+          description="Resumen rápido de la ocupación y el reparto actual de viajeros."
+          :stats="[
+            { label: 'Espacio', value: `${formatSpace(totalTravelerOccupiedSpace)} / ${formatSpace(totalTravelerCapacity)}` },
+            { label: 'Viajeros', value: travelers.length },
+            { label: 'Sueldo total', value: `${gpFormatter.format(totalTravelerSalary)} gp` },
+          ]"
+        :meter="{
+          ariaLabel: `Espacio ocupado por viajeros ${formatSpace(totalTravelerOccupiedSpace)} de ${formatSpace(totalTravelerCapacity)}`,
+          title: `Espacio ocupado por viajeros ${formatSpace(totalTravelerOccupiedSpace)} de ${formatSpace(totalTravelerCapacity)}`,
+          currentValue: formatSpace(totalTravelerOccupiedSpace),
+            currentLabel: 'actual',
+            maxValue: formatSpace(totalTravelerCapacity),
+            maxLabel: 'máximo',
+          segmentWidth: `${percentageOf(totalTravelerOccupiedSpace, totalTravelerCapacity)}%`,
+          segmentClass: 'meter-segment--travelers',
+        }"
+        >
+          <template #action>
+            <button
+              class="primary-button"
+              type="button"
+              :disabled="!activeCaravan || loading || submitting"
+              @click="openCreateModal"
+            >
+              Añadir
+            </button>
+          </template>
+        </CaravanSummaryHero>
+
         <section class="card">
           <div class="section-header">
             <div>
@@ -877,6 +962,16 @@ onMounted(refresh);
             </label>
 
             <label>
+              <span>Rol disponible</span>
+              <select v-model="availableRoleFilter">
+                <option value="all">Todos</option>
+                <option v-for="role in roleFilterOptions" :key="`available-${role.code}`" :value="role.code">
+                  {{ role.name }}
+                </option>
+              </select>
+            </label>
+
+            <label>
               <span>Carro</span>
               <select v-model="wagonFilter">
                 <option value="all">Todos</option>
@@ -894,12 +989,16 @@ onMounted(refresh);
 
           <div v-else class="table-wrap">
             <table class="travelers-table">
+              <colgroup>
+                <col class="travelers-col-traveler" />
+                <col class="travelers-col-wagon" />
+                <col class="travelers-col-roles" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>Viajero</th>
-                  <th>Rol activo</th>
                   <th>Carro de viaje</th>
-                  <th>Carro que conduce</th>
+                  <th>Roles</th>
                 </tr>
               </thead>
               <tbody>
@@ -916,16 +1015,25 @@ onMounted(refresh);
                     <strong>{{ traveler.fullName }}</strong>
                     <p class="muted">{{ traveler.description ?? "Sin descripción" }}</p>
                   </td>
-                  <td>{{ roleSummary(traveler.activeRoleCodes) }}</td>
                   <td>
                     <span class="assignment-badge" :class="{ 'assignment-badge--warning': !traveler.wagonId }">
                       {{ travelerAssignmentLabel(traveler) }}
                     </span>
                   </td>
                   <td>
-                    <span class="assignment-badge" :class="{ 'assignment-badge--warning': !traveler.drivingWagonId }">
-                      {{ travelerDrivingAssignmentLabel(traveler) }}
-                    </span>
+                    <div class="role-preview" :title="roleTableSummary(traveler)">
+                      <template v-if="roleTableItems(traveler).length > 0">
+                        <span
+                          v-for="role in roleTableItems(traveler)"
+                          :key="role.code"
+                          class="role-pill"
+                          :class="{ 'role-pill--active': role.active }"
+                        >
+                          {{ role.name }}
+                        </span>
+                      </template>
+                      <span v-else class="muted">Sin roles</span>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -1397,9 +1505,87 @@ p {
   gap: 1rem;
 }
 
+.summary {
+  display: grid;
+  gap: 1rem;
+}
+
+.summary-overview {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.summary-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.summary-stats div {
+  padding: 0.85rem;
+  border-radius: 0.85rem;
+  background: #f8fafc;
+  min-width: 120px;
+}
+
+.summary-stats span {
+  display: block;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.summary-stats strong {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 1.1rem;
+}
+
+.summary-meter-block {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.summary-meter-block--compact {
+  margin-bottom: 0;
+}
+
+.meter-strip {
+  display: flex;
+  overflow: hidden;
+  min-height: 0.9rem;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.meter-segment {
+  display: block;
+  height: 100%;
+}
+
+.meter-segment--travelers {
+  background: linear-gradient(90deg, #bfdbfe 0%, #2563eb 100%);
+}
+
+.meter-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.meter-values strong {
+  color: #111827;
+}
+
+.meter-values--compact {
+  font-size: 0.76rem;
+}
+
 .filters {
   display: grid;
-  grid-template-columns: 1.4fr 0.9fr 0.9fr;
+  grid-template-columns: 1.4fr 0.9fr 0.9fr 0.9fr;
   gap: 0.75rem;
   margin: 1rem 0;
 }
@@ -1433,9 +1619,9 @@ p {
 }
 
 .filters span,
-.create-form span,
-.editor-row span,
-.two-columns span {
+.create-form label > span,
+.editor-row label > span,
+.two-columns label > span {
   font-size: 0.85rem;
   color: #6b7280;
 }
@@ -1465,6 +1651,19 @@ p {
 .travelers-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.travelers-col-traveler {
+  width: 45%;
+}
+
+.travelers-col-wagon {
+  width: 15%;
+}
+
+.travelers-col-roles {
+  width: 40%;
 }
 
 .travelers-table th,
@@ -1507,6 +1706,35 @@ p {
   color: #b91c1c;
 }
 
+.role-preview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.travelers-table th:nth-child(2),
+.travelers-table td:nth-child(2) {
+  white-space: nowrap;
+}
+
+.role-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #4b5563;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.role-pill--active {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
 .empty-state,
 .empty-state-inline {
   display: grid;
@@ -1518,6 +1746,7 @@ p {
 .primary-button,
 .ghost-button,
 .secondary-button,
+.danger-button,
 .primary-link {
   display: inline-flex;
   align-items: center;
@@ -1528,16 +1757,20 @@ p {
 
 .primary-button,
 .secondary-button,
-.ghost-button {
+.ghost-button,
+.danger-button {
   padding: 0.8rem 1rem;
   border: 1px solid #cbd5e1;
   cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .primary-button {
   background: #1d4ed8;
   border-color: #1d4ed8;
   color: white;
+  font-weight: 600;
+  box-shadow: 0 10px 24px rgba(29, 78, 216, 0.22);
 }
 
 .ghost-button {
@@ -1547,6 +1780,68 @@ p {
 .secondary-button {
   background: #f8fafc;
   border-color: #d1d5db;
+}
+
+.danger-button {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: #1e40af;
+  border-color: #1e40af;
+}
+
+.ghost-button:hover:not(:disabled),
+.secondary-button:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: #fecaca;
+  border-color: #f87171;
+}
+
+.primary-button:focus-visible,
+.ghost-button:focus-visible,
+.secondary-button:focus-visible,
+.danger-button:focus-visible,
+.primary-link:focus-visible {
+  outline: 3px solid rgba(59, 130, 246, 0.35);
+  outline-offset: 2px;
+}
+
+.primary-button:disabled,
+.ghost-button:disabled,
+.secondary-button:disabled,
+.danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+  box-shadow: none;
+}
+
+.button-with-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: inherit;
+}
+
+.button-with-spinner > span:last-child {
+  color: inherit;
+}
+
+.button-spinner {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: spin 0.7s linear infinite;
 }
 
 .primary-link {
@@ -1800,6 +2095,7 @@ dd {
 }
 
 @media (max-width: 1000px) {
+  .summary-stats,
   .filters,
   .detail-grid,
   .editor-grid,
@@ -1842,10 +2138,15 @@ dd {
     padding: 1rem;
   }
 
-  .hero-actions,
   .modal-actions {
     width: 100%;
     flex-direction: column;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

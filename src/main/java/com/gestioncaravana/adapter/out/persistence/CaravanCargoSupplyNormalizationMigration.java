@@ -1,6 +1,7 @@
 package com.gestioncaravana.adapter.out.persistence;
 
 import com.gestioncaravana.domain.CaravanCargoSourceType;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
@@ -54,18 +55,19 @@ public class CaravanCargoSupplyNormalizationMigration {
 
   private List<CaravanCargoJpaEntity> splitIntoUnits(CaravanCargoJpaEntity entry, java.time.Instant now) {
     var totalProvisions = currentProvisions(entry);
-    if (totalProvisions <= 0) {
+    if (totalProvisions.compareTo(BigDecimal.ZERO) <= 0) {
       return List.of();
     }
 
     var quantity = entry.getQuantity();
-    var base = totalProvisions / quantity;
-    var remainder = totalProvisions % quantity;
+    var base = totalProvisions.divide(BigDecimal.valueOf(quantity), java.math.RoundingMode.DOWN);
+    var distributed = base.multiply(BigDecimal.valueOf(quantity));
+    var remainder = totalProvisions.subtract(distributed);
     var units = new ArrayList<CaravanCargoJpaEntity>();
     var currentUnitId = entry.getId();
     for (var index = 0; index < quantity; index++) {
-      var provisions = base + (index < remainder ? 1 : 0);
-      if (provisions <= 0) {
+      var provisions = base.add(index < remainder.intValueExact() ? BigDecimal.ONE : BigDecimal.ZERO);
+      if (provisions.compareTo(BigDecimal.ZERO) <= 0) {
         continue;
       }
 
@@ -76,17 +78,17 @@ public class CaravanCargoSupplyNormalizationMigration {
     return units;
   }
 
-  private int currentProvisions(CaravanCargoJpaEntity entry) {
+  private BigDecimal currentProvisions(CaravanCargoJpaEntity entry) {
     if (entry.getCurrentProvisions() != null) {
       return entry.getCurrentProvisions();
     }
     if (SUPPLIES_CODE.equals(entry.getCatalogCode()) || PERISHABLE_SUPPLIES_CODE.equals(entry.getCatalogCode())) {
-      return entry.getQuantity() * STANDARD_SUPPLY_VALUE;
+      return BigDecimal.valueOf(entry.getQuantity()).multiply(BigDecimal.valueOf(STANDARD_SUPPLY_VALUE));
     }
-    return 0;
+    return BigDecimal.ZERO;
   }
 
-  private CaravanCargoJpaEntity copy(CaravanCargoJpaEntity source, String id, int provisions, java.time.Instant now) {
+  private CaravanCargoJpaEntity copy(CaravanCargoJpaEntity source, String id, BigDecimal provisions, java.time.Instant now) {
     var entity = new CaravanCargoJpaEntity();
     entity.setId(id);
     entity.setCaravanId(source.getCaravanId());

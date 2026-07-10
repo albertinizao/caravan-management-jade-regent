@@ -7,4 +7,6 @@ public interface SpringDataCaravanBeastRepository extends JpaRepository<CaravanB
   List<CaravanBeastJpaEntity> findAllByCaravanId(String caravanId);
 
   java.util.Optional<CaravanBeastJpaEntity> findByCaravanIdAndId(String caravanId, String id);
+
+  void deleteByCaravanIdAndId(String caravanId, String id);
 }

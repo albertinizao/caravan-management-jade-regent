@@ -21,6 +21,8 @@ import {
 import { useToast } from "@/composables/useToast";
 import type {
   Caravan,
+  CaravanBackupImportResult,
+  CaravanBackupImportSummary,
   CaravanDayCyclePreview,
   CaravanMainStats,
   CaravanMultiDayCyclePreview,
@@ -55,6 +57,7 @@ const caravanStatistics = ref<CaravanStatistics | null>(null);
 const editableMainStats = ref<CaravanMainStats | null>(null);
 const mainStatsSubmitting = ref(false);
 const backupFileInput = ref<HTMLInputElement | null>(null);
+const backupImportResult = ref<CaravanBackupImportResult | null>(null);
 const { showToast } = useToast();
 
 const hiddenContributionStats = new Set([
@@ -754,11 +757,13 @@ function openBackupImportDialog() {
 }
 
 function openBackupModal() {
+  backupImportResult.value = null;
   backupModalOpen.value = true;
 }
 
 function closeBackupModal() {
   backupModalOpen.value = false;
+  backupImportResult.value = null;
 }
 
 function buildBackupFilename(caravanName: string) {
@@ -784,6 +789,24 @@ function downloadBackupFile(fileName: string, payload: unknown) {
   anchor.click();
   anchor.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function formatImportSummary(summary: CaravanBackupImportSummary) {
+  return [
+    `Caravanas: ${summary.caravans}`,
+    `Estados de suministro: ${summary.supplyStates}`,
+    `Carros: ${summary.wagons}`,
+    `Mejoras de carro: ${summary.wagonImprovements}`,
+    `Viajeros: ${summary.travelers}`,
+    `Carga: ${summary.cargo}`,
+    `Bestias: ${summary.beasts}`,
+    `Dotes: ${summary.feats}`,
+    `Resoluciones diarias: ${summary.dayResolutions}`,
+    `Eventos de calendario: ${summary.calendarEvents}`,
+    `Perfiles climáticos: ${summary.weatherProfiles}`,
+    `Estados de previsión: ${summary.weatherForecastStates}`,
+    `Snapshots climáticos: ${summary.weatherSnapshots}`,
+  ];
 }
 
 function openCreateModal() {
@@ -1000,14 +1023,18 @@ async function handleImportBackup(event: Event) {
 
   pendingAction.value = "import-backup";
   error.value = null;
+  backupImportResult.value = null;
 
   try {
     const rawBackup = await file.text();
     const backup = JSON.parse(rawBackup) as Parameters<typeof importCaravanBackup>[0];
     const restored = await importCaravanBackup(backup);
+    backupImportResult.value = restored;
     await refresh();
-    closeBackupModal();
-    showToast(`Backup importado: ${restored.name}.`);
+    showToast(
+      `Backup importado: ${restored.caravan.name}. ${restored.summary.wagons} carros, ${restored.summary.travelers} viajeros, ${restored.summary.calendarEvents} eventos y ${restored.summary.weatherSnapshots} snapshots climáticos.`,
+      "success",
+    );
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "No se pudo importar el backup";
   } finally {
@@ -1868,6 +1895,16 @@ onMounted(refresh);
           <div v-if="!selectedCaravan" class="warning-banner">
             <strong>No hay caravana seleccionada para exportar.</strong>
             <p>Puedes importar un backup igualmente, pero para exportar necesitas seleccionar una instancia primero.</p>
+          </div>
+
+          <div v-if="backupImportResult" class="warning-banner import-summary">
+            <strong>Importación completada: {{ backupImportResult.caravan.name }}</strong>
+            <p>Elementos importados:</p>
+            <ul class="simple-list">
+              <li v-for="line in formatImportSummary(backupImportResult.summary)" :key="line">
+                {{ line }}
+              </li>
+            </ul>
           </div>
 
           <div class="backup-actions">

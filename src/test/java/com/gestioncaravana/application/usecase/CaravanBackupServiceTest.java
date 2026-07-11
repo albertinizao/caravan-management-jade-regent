@@ -3,11 +3,13 @@ package com.gestioncaravana.application.usecase;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.gestioncaravana.application.model.CaravanBackupView;
+import com.gestioncaravana.application.model.CaravanBackupImportResultView;
 import com.gestioncaravana.application.port.in.CreateCaravanUseCase.CreateCaravanCommand;
 import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanCalendarEventRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanDayResolutionRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanFeatCatalogPort;
 import com.gestioncaravana.application.port.out.CaravanFeatRepositoryPort;
@@ -35,10 +37,15 @@ import com.gestioncaravana.domain.CaravanWagonImprovement;
 import com.gestioncaravana.domain.CaravanWeatherForecastState;
 import com.gestioncaravana.domain.CaravanWeatherProfile;
 import com.gestioncaravana.domain.CaravanWeatherSnapshot;
+import com.gestioncaravana.domain.CustomCalendarEvent;
 import com.gestioncaravana.domain.TravelerContract;
 import com.gestioncaravana.domain.TravelerRoleCatalog;
 import com.gestioncaravana.domain.TravelerRoleData;
 import com.gestioncaravana.domain.GolarionDate;
+import com.gestioncaravana.domain.WeatherPeriod;
+import com.gestioncaravana.domain.WeatherSnapshot;
+import com.gestioncaravana.domain.WeatherClimateBaseline;
+import com.gestioncaravana.domain.WeatherElevation;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -61,6 +68,7 @@ class CaravanBackupServiceTest {
   private InMemoryFeatRepository featRepository;
   private InMemorySupplyStateRepository supplyStateRepository;
   private InMemoryDayResolutionRepository dayResolutionRepository;
+  private InMemoryCalendarEventRepository calendarEventRepository;
   private InMemoryActiveSelection activeSelection;
   private InMemoryWeatherProfileRepository weatherProfileRepository;
   private InMemoryWeatherForecastStateRepository weatherForecastStateRepository;
@@ -79,6 +87,7 @@ class CaravanBackupServiceTest {
     featRepository = new InMemoryFeatRepository();
     supplyStateRepository = new InMemorySupplyStateRepository();
     dayResolutionRepository = new InMemoryDayResolutionRepository();
+    calendarEventRepository = new InMemoryCalendarEventRepository();
     activeSelection = new InMemoryActiveSelection();
     weatherProfileRepository = new InMemoryWeatherProfileRepository();
     weatherForecastStateRepository = new InMemoryWeatherForecastStateRepository();
@@ -101,6 +110,7 @@ class CaravanBackupServiceTest {
         featRepository,
         supplyStateRepository,
         dayResolutionRepository,
+        calendarEventRepository,
         weatherService,
         new NoopCaravanFeatCatalogPort(),
         activeSelection,
@@ -115,6 +125,10 @@ class CaravanBackupServiceTest {
         featRepository,
         supplyStateRepository,
         dayResolutionRepository,
+        calendarEventRepository,
+        weatherProfileRepository,
+        weatherForecastStateRepository,
+        weatherSnapshotRepository,
         activeSelection,
         managementService);
   }
@@ -218,6 +232,40 @@ class CaravanBackupServiceTest {
         "choices",
         "contributions",
         "warnings"));
+    calendarEventRepository.save(new CustomCalendarEvent(
+        1L,
+        created.id(),
+        new GolarionDate(4712, 1, 3),
+        "Market Day",
+        "Weekly market",
+        false,
+        Instant.parse("2026-01-01T00:00:00Z")));
+    weatherProfileRepository.save(new CaravanWeatherProfile(
+        created.id(),
+        WeatherClimateBaseline.TEMPERATE,
+        WeatherElevation.SEA_LEVEL,
+        null,
+        Instant.parse("2026-01-01T00:00:00Z")));
+    weatherForecastStateRepository.save(new CaravanWeatherForecastState(
+        created.id(),
+        new GolarionDate(4712, 1, 3),
+        50,
+        2,
+        48,
+        39,
+        null,
+        0,
+        null,
+        Instant.parse("2026-01-01T00:00:00Z")));
+    weatherSnapshotRepository.save(new CaravanWeatherSnapshot(
+        created.id(),
+        new GolarionDate(4712, 1, 3),
+        new WeatherSnapshot(
+            new WeatherPeriod("NONE", "LIGHT", 9, 48),
+            new WeatherPeriod("LIGHT", "LIGHT", 10, 50),
+            new WeatherPeriod("NONE", "MODERATE", 11, 52),
+            new WeatherPeriod("NONE", "LIGHT", 8, 46)),
+        Instant.parse("2026-01-01T00:00:00Z")));
 
     var backup = backupService.export(created.id());
 
@@ -247,17 +295,30 @@ class CaravanBackupServiceTest {
         null,
         Instant.parse("2026-01-02T00:00:00Z")));
 
-    var restored = backupService.execute(backup);
+    CaravanBackupImportResultView restored = backupService.execute(backup);
 
     assertThat(backup.schemaVersion()).isEqualTo(CaravanBackupView.CURRENT_SCHEMA_VERSION);
     assertThat(backup.active()).isTrue();
     assertThat(backup.wagons()).hasSize(1);
-    assertThat(restored.name()).isEqualTo("North Caravan");
+    assertThat(restored.caravan().name()).isEqualTo("North Caravan");
     assertThat(campaignRepository.findById(created.id())).map(CaravanCampaign::name).hasValue("North Caravan");
     assertThat(cargoRepository.findAllByCaravanId(created.id())).hasSize(1);
     assertThat(travelerRepository.findAllByCaravanId(created.id())).hasSize(1);
     assertThat(wagonImprovementRepository.findAllByCaravanIdAndWagonId(created.id(), wagonId)).hasSize(1);
     assertThat(dayResolutionRepository.findAllByCaravanId(created.id())).hasSize(1);
+    assertThat(calendarEventRepository.findByCaravanIdAndDate(created.id(), new GolarionDate(4712, 1, 3))).hasSize(1);
+    assertThat(weatherProfileRepository.findByCaravanId(created.id())).isPresent();
+    assertThat(weatherForecastStateRepository.findByCaravanIdAndDate(created.id(), new GolarionDate(4712, 1, 3))).isPresent();
+    assertThat(weatherSnapshotRepository.findByCaravanIdAndDate(created.id(), new GolarionDate(4712, 1, 3))).isPresent();
+    assertThat(restored.summary().wagons()).isEqualTo(1);
+    assertThat(restored.summary().calendarEvents()).isEqualTo(1);
+    assertThat(restored.summary().weatherProfiles()).isEqualTo(1);
+    assertThat(restored.summary().weatherForecastStates()).isEqualTo(1);
+    assertThat(restored.summary().weatherSnapshots()).isEqualTo(1);
+    assertThat(backup.calendarEvents()).hasSize(1);
+    assertThat(backup.weatherProfile()).isNotNull();
+    assertThat(backup.weatherForecastStates()).hasSize(1);
+    assertThat(backup.weatherSnapshots()).hasSize(1);
     assertThat(activeSelection.getActiveCaravanId()).contains(created.id());
   }
 
@@ -314,11 +375,17 @@ class CaravanBackupServiceTest {
         List.of(),
         List.of(),
         List.of(),
+        List.of(),
+        List.of(),
+        null,
+        List.of(),
         List.of());
 
-    var restored = backupService.execute(backup);
+    CaravanBackupImportResultView restored = backupService.execute(backup);
 
-    assertThat(restored.id()).isEqualTo(caravanId);
+    assertThat(restored.caravan().id()).isEqualTo(caravanId);
+    assertThat(restored.summary().caravans()).isEqualTo(1);
+    assertThat(restored.summary().supplyStates()).isEqualTo(1);
     assertThat(campaignRepository.findById(caravanId)).hasValueSatisfying(campaign -> {
       assertThat(campaign.name()).isEqualTo("Restored Caravan");
       assertThat(campaign.level()).isEqualTo(4);
@@ -646,6 +713,46 @@ class CaravanBackupServiceTest {
     @Override
     public void deleteByCaravanId(UUID caravanId) {
       resolutions.removeIf(resolution -> resolution.caravanId().equals(caravanId));
+    }
+  }
+
+  private static final class InMemoryCalendarEventRepository implements CaravanCalendarEventRepositoryPort {
+    private final List<CustomCalendarEvent> events = new ArrayList<>();
+
+    @Override
+    public CustomCalendarEvent save(CustomCalendarEvent event) {
+      events.removeIf(existing -> existing.id() != null && existing.id().equals(event.id()));
+      events.add(event);
+      return event;
+    }
+
+    @Override
+    public List<CustomCalendarEvent> findByCaravanIdAndDate(UUID caravanId, GolarionDate date) {
+      return events.stream().filter(event -> event.caravanId().equals(caravanId) && event.date().equals(date)).toList();
+    }
+
+    @Override
+    public List<CustomCalendarEvent> findByCaravanIdAndDateBetween(UUID caravanId, GolarionDate startDate, GolarionDate endDate) {
+      return events.stream()
+          .filter(event -> event.caravanId().equals(caravanId)
+              && event.date().compareTo(startDate) >= 0
+              && event.date().compareTo(endDate) <= 0)
+          .toList();
+    }
+
+    @Override
+    public Optional<CustomCalendarEvent> findByCaravanIdAndId(UUID caravanId, Long eventId) {
+      return events.stream().filter(event -> event.caravanId().equals(caravanId) && event.id().equals(eventId)).findFirst();
+    }
+
+    @Override
+    public void deleteByCaravanIdAndId(UUID caravanId, Long eventId) {
+      events.removeIf(event -> event.caravanId().equals(caravanId) && event.id().equals(eventId));
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      events.removeIf(event -> event.caravanId().equals(caravanId));
     }
   }
 

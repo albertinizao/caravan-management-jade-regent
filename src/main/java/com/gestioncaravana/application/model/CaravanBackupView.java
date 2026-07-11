@@ -6,6 +6,10 @@ import com.gestioncaravana.domain.CaravanCampaignStatus;
 import com.gestioncaravana.domain.CaravanCargoSourceType;
 import com.gestioncaravana.domain.CaravanFeatAcquisitionSourceType;
 import com.gestioncaravana.domain.CaravanMainStats;
+import com.gestioncaravana.domain.CaravanWeatherForecastState;
+import com.gestioncaravana.domain.CaravanWeatherProfile;
+import com.gestioncaravana.domain.CaravanWeatherSnapshot;
+import com.gestioncaravana.domain.CustomCalendarEvent;
 import com.gestioncaravana.domain.TravelerContract;
 import com.gestioncaravana.domain.TravelerRoleData;
 import java.math.BigDecimal;
@@ -24,12 +28,16 @@ public record CaravanBackupView(
     List<CargoSnapshot> cargo,
     List<BeastSnapshot> beasts,
     List<FeatSnapshot> feats,
-    List<DayResolutionSnapshot> dayResolutions) {
+    List<DayResolutionSnapshot> dayResolutions,
+    List<CustomCalendarEvent> calendarEvents,
+    CaravanWeatherProfile weatherProfile,
+    List<CaravanWeatherForecastState> weatherForecastStates,
+    List<CaravanWeatherSnapshot> weatherSnapshots) {
 
-  public static final int CURRENT_SCHEMA_VERSION = 3;
+  public static final int CURRENT_SCHEMA_VERSION = 4;
 
   public CaravanBackupView {
-    if (schemaVersion != CURRENT_SCHEMA_VERSION && schemaVersion != 2) {
+    if (schemaVersion != CURRENT_SCHEMA_VERSION && schemaVersion != 3 && schemaVersion != 2) {
       throw new IllegalArgumentException("Unsupported backup schema version: " + schemaVersion);
     }
     if (caravan == null) {
@@ -59,6 +67,9 @@ public record CaravanBackupView(
     if (dayResolutions == null) {
       throw new IllegalArgumentException("dayResolutions is required");
     }
+    if (calendarEvents == null) {
+      calendarEvents = List.of();
+    }
     wagons = List.copyOf(wagons);
     wagonImprovements = List.copyOf(wagonImprovements);
     travelers = List.copyOf(travelers);
@@ -66,6 +77,9 @@ public record CaravanBackupView(
     beasts = List.copyOf(beasts);
     feats = List.copyOf(feats);
     dayResolutions = List.copyOf(dayResolutions);
+    calendarEvents = List.copyOf(calendarEvents);
+    weatherForecastStates = weatherForecastStates == null ? List.of() : List.copyOf(weatherForecastStates);
+    weatherSnapshots = weatherSnapshots == null ? List.of() : List.copyOf(weatherSnapshots);
   }
 
   public record CaravanSnapshot(

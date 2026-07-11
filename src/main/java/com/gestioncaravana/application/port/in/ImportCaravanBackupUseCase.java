@@ -1,9 +1,9 @@
 package com.gestioncaravana.application.port.in;
 
 import com.gestioncaravana.application.model.CaravanBackupView;
-import com.gestioncaravana.application.model.CaravanCampaignView;
+import com.gestioncaravana.application.model.CaravanBackupImportResultView;
 
 public interface ImportCaravanBackupUseCase {
 
-  CaravanCampaignView execute(CaravanBackupView backup);
+  CaravanBackupImportResultView execute(CaravanBackupView backup);
 }

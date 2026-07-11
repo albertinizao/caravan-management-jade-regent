@@ -15,6 +15,7 @@ import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanCalendarEventRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanDayResolutionRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanFeatCatalogPort;
 import com.gestioncaravana.application.port.out.CaravanFeatRepositoryPort;
@@ -57,6 +58,7 @@ public class CaravanManagementService
   private final CaravanFeatRepositoryPort featRepository;
   private final CaravanSupplyStateRepositoryPort supplyStateRepository;
   private final CaravanDayResolutionRepositoryPort dayResolutionRepository;
+  private final CaravanCalendarEventRepositoryPort calendarEventRepository;
   private final CaravanWeatherService weatherService;
   private final CaravanFeatCatalogPort featCatalogPort;
   private final ActiveCaravanSelectionPort activeSelectionPort;
@@ -73,6 +75,7 @@ public class CaravanManagementService
       CaravanFeatRepositoryPort featRepository,
       CaravanSupplyStateRepositoryPort supplyStateRepository,
       CaravanDayResolutionRepositoryPort dayResolutionRepository,
+      CaravanCalendarEventRepositoryPort calendarEventRepository,
       CaravanWeatherService weatherService,
       CaravanFeatCatalogPort featCatalogPort,
       ActiveCaravanSelectionPort activeSelectionPort,
@@ -86,6 +89,7 @@ public class CaravanManagementService
     this.featRepository = featRepository;
     this.supplyStateRepository = supplyStateRepository;
     this.dayResolutionRepository = dayResolutionRepository;
+    this.calendarEventRepository = calendarEventRepository;
     this.weatherService = weatherService;
     this.featCatalogPort = featCatalogPort;
     this.activeSelectionPort = activeSelectionPort;
@@ -102,6 +106,7 @@ public class CaravanManagementService
       CaravanFeatRepositoryPort featRepository,
       CaravanSupplyStateRepositoryPort supplyStateRepository,
       CaravanDayResolutionRepositoryPort dayResolutionRepository,
+      CaravanCalendarEventRepositoryPort calendarEventRepository,
       CaravanWeatherService weatherService,
       ActiveCaravanSelectionPort activeSelectionPort,
       Clock clock) {
@@ -115,6 +120,7 @@ public class CaravanManagementService
         featRepository,
         supplyStateRepository,
         dayResolutionRepository,
+        calendarEventRepository,
         weatherService,
         new NoopCaravanFeatCatalogPort(),
         activeSelectionPort,
@@ -130,6 +136,7 @@ public class CaravanManagementService
       CaravanBeastRepositoryPort beastRepository,
       CaravanSupplyStateRepositoryPort supplyStateRepository,
       CaravanDayResolutionRepositoryPort dayResolutionRepository,
+      CaravanCalendarEventRepositoryPort calendarEventRepository,
       CaravanWeatherService weatherService,
       ActiveCaravanSelectionPort activeSelectionPort,
       Clock clock) {
@@ -143,6 +150,7 @@ public class CaravanManagementService
         new NoopCaravanFeatRepositoryPort(),
         supplyStateRepository,
         dayResolutionRepository,
+        calendarEventRepository,
         weatherService,
         new NoopCaravanFeatCatalogPort(),
         activeSelectionPort,
@@ -295,6 +303,7 @@ public class CaravanManagementService
     featRepository.deleteByCaravanId(caravanId);
     supplyStateRepository.deleteByCaravanId(caravanId);
     dayResolutionRepository.deleteByCaravanId(caravanId);
+    calendarEventRepository.deleteByCaravanId(caravanId);
     weatherService.deleteByCaravanId(caravanId);
 
     for (var wagon : wagonRepository.findAllByCaravanId(caravanId)) {

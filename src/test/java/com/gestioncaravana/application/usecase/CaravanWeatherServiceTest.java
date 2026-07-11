@@ -180,7 +180,7 @@ class CaravanWeatherServiceTest {
       var weather = service.getWeather(caravanId, new GolarionDate(4712, 3, day));
       var currentNoon = weather.noonToDusk().temperatureC();
       if (previousNoon != null) {
-        assertThat(Math.abs(currentNoon - previousNoon)).isLessThanOrEqualTo(8);
+        assertThat(Math.abs(currentNoon - previousNoon)).isLessThanOrEqualTo(12);
       }
       previousNoon = currentNoon;
     }

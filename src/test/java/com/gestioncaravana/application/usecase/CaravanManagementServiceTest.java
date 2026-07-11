@@ -8,6 +8,7 @@ import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanCalendarEventRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanDayResolutionRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanFeatCatalogPort;
 import com.gestioncaravana.application.port.out.CaravanFeatRepositoryPort;
@@ -33,6 +34,7 @@ import com.gestioncaravana.domain.CaravanWagonImprovement;
 import com.gestioncaravana.domain.CaravanWeatherForecastState;
 import com.gestioncaravana.domain.CaravanWeatherProfile;
 import com.gestioncaravana.domain.CaravanWeatherSnapshot;
+import com.gestioncaravana.domain.CustomCalendarEvent;
 import com.gestioncaravana.domain.GolarionDate;
 import java.time.Clock;
 import java.time.Instant;
@@ -52,6 +54,7 @@ class CaravanManagementServiceTest {
   private InMemoryWagonImprovementRepository wagonImprovementRepository;
   private InMemoryCargoRepository cargoRepository;
   private InMemoryFeatRepository featRepository;
+  private InMemoryCalendarEventRepository calendarEventRepository;
   private InMemoryWeatherProfileRepository weatherProfileRepository;
   private InMemoryWeatherForecastStateRepository weatherForecastStateRepository;
   private InMemoryWeatherSnapshotRepository weatherSnapshotRepository;
@@ -65,6 +68,7 @@ class CaravanManagementServiceTest {
     wagonImprovementRepository = new InMemoryWagonImprovementRepository();
     cargoRepository = new InMemoryCargoRepository();
     featRepository = new InMemoryFeatRepository();
+    calendarEventRepository = new InMemoryCalendarEventRepository();
     weatherProfileRepository = new InMemoryWeatherProfileRepository();
     weatherForecastStateRepository = new InMemoryWeatherForecastStateRepository();
     weatherSnapshotRepository = new InMemoryWeatherSnapshotRepository();
@@ -84,6 +88,7 @@ class CaravanManagementServiceTest {
         featRepository,
         new InMemorySupplyStateRepository(),
         new InMemoryDayResolutionRepository(),
+        calendarEventRepository,
         weatherService,
         new InMemoryFeatCatalogPort(),
         activeSelection,
@@ -137,6 +142,14 @@ class CaravanManagementServiceTest {
         null,
         null,
         Instant.parse("2026-01-01T00:00:00Z")));
+    calendarEventRepository.save(new CustomCalendarEvent(
+        1L,
+        created.id(),
+        new GolarionDate(4712, 1, 2),
+        "Festival",
+        "Town celebration",
+        false,
+        Instant.parse("2026-01-01T00:00:00Z")));
     featRepository.save(CaravanFeat.create(
         UUID.randomUUID(),
         created.id(),
@@ -159,6 +172,7 @@ class CaravanManagementServiceTest {
     assertThat(wagonImprovementRepository.findAllByCaravanIdAndWagonId(created.id(), wagonId)).isEmpty();
     assertThat(cargoRepository.findAllByCaravanId(created.id())).isEmpty();
     assertThat(featRepository.findAllByCaravanId(created.id())).isEmpty();
+    assertThat(calendarEventRepository.findByCaravanIdAndDate(created.id(), new GolarionDate(4712, 1, 2))).isEmpty();
   }
 
   @Test
@@ -593,6 +607,46 @@ class CaravanManagementServiceTest {
     @Override
     public void deleteByCaravanId(UUID caravanId) {
       resolutions.removeIf(resolution -> resolution.caravanId().equals(caravanId));
+    }
+  }
+
+  private static final class InMemoryCalendarEventRepository implements CaravanCalendarEventRepositoryPort {
+    private final List<CustomCalendarEvent> events = new ArrayList<>();
+
+    @Override
+    public CustomCalendarEvent save(CustomCalendarEvent event) {
+      events.removeIf(existing -> existing.id() != null && existing.id().equals(event.id()));
+      events.add(event);
+      return event;
+    }
+
+    @Override
+    public List<CustomCalendarEvent> findByCaravanIdAndDate(UUID caravanId, GolarionDate date) {
+      return events.stream().filter(event -> event.caravanId().equals(caravanId) && event.date().equals(date)).toList();
+    }
+
+    @Override
+    public List<CustomCalendarEvent> findByCaravanIdAndDateBetween(UUID caravanId, GolarionDate startDate, GolarionDate endDate) {
+      return events.stream()
+          .filter(event -> event.caravanId().equals(caravanId)
+              && event.date().compareTo(startDate) >= 0
+              && event.date().compareTo(endDate) <= 0)
+          .toList();
+    }
+
+    @Override
+    public Optional<CustomCalendarEvent> findByCaravanIdAndId(UUID caravanId, Long eventId) {
+      return events.stream().filter(event -> event.caravanId().equals(caravanId) && event.id().equals(eventId)).findFirst();
+    }
+
+    @Override
+    public void deleteByCaravanIdAndId(UUID caravanId, Long eventId) {
+      events.removeIf(event -> event.caravanId().equals(caravanId) && event.id().equals(eventId));
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      events.removeIf(event -> event.caravanId().equals(caravanId));
     }
   }
 

@@ -1,3 +1,5 @@
+import type { GolarionDate, WeatherSnapshot } from "./calendar";
+
 export type CaravanStatus = "ACTIVE" | "ARCHIVED";
 
 export interface CaravanMainStats {
@@ -140,6 +142,44 @@ export interface CaravanBackupTravelerRoleData {
   daysServing: number;
 }
 
+export interface CaravanBackupCalendarEvent {
+  id: number | null;
+  caravanId: string;
+  date: GolarionDate;
+  name: string;
+  description: string | null;
+  secret: boolean;
+  createdAt: string;
+}
+
+export interface CaravanBackupWeatherProfile {
+  caravanId: string;
+  climateBaseline: string;
+  elevation: string;
+  crownRegion: string | null;
+  updatedAt: string;
+}
+
+export interface CaravanBackupWeatherForecastState {
+  caravanId: string;
+  date: GolarionDate;
+  targetTemperatureF: number;
+  remainingTargetDays: number;
+  dayBaseTemperatureF: number;
+  nightBaseTemperatureF: number;
+  carryOverPrecipitation: string | null;
+  carryOverRemainingPeriods: number;
+  severeEvent: string | null;
+  generatedAt: string;
+}
+
+export interface CaravanBackupWeatherSnapshot {
+  caravanId: string;
+  date: GolarionDate;
+  weather: WeatherSnapshot;
+  generatedAt: string;
+}
+
 export interface CaravanBackup {
   schemaVersion: number;
   active: boolean;
@@ -275,5 +315,30 @@ export interface CaravanBackup {
     contributionsSummary: string;
     warningsSummary: string;
   }>;
+  calendarEvents: CaravanBackupCalendarEvent[];
+  weatherProfile: CaravanBackupWeatherProfile | null;
+  weatherForecastStates: CaravanBackupWeatherForecastState[];
+  weatherSnapshots: CaravanBackupWeatherSnapshot[];
+}
+
+export interface CaravanBackupImportSummary {
+  caravans: number;
+  supplyStates: number;
+  wagons: number;
+  wagonImprovements: number;
+  travelers: number;
+  cargo: number;
+  beasts: number;
+  feats: number;
+  dayResolutions: number;
+  calendarEvents: number;
+  weatherProfiles: number;
+  weatherForecastStates: number;
+  weatherSnapshots: number;
+}
+
+export interface CaravanBackupImportResult {
+  caravan: Caravan;
+  summary: CaravanBackupImportSummary;
 }
 

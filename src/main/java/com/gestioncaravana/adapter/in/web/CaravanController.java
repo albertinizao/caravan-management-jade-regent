@@ -52,6 +52,7 @@ import com.gestioncaravana.application.port.in.ConfirmCaravanDayCycleUseCase;
 import com.gestioncaravana.application.port.in.PreviewCaravanMultiDayCycleUseCase;
 import com.gestioncaravana.application.port.in.ConfirmCaravanMultiDayCycleUseCase;
 import com.gestioncaravana.application.model.CaravanBackupView;
+import com.gestioncaravana.application.model.CaravanBackupImportResultView;
 import com.gestioncaravana.application.model.CaravanDayCyclePreviewView;
 import com.gestioncaravana.application.model.CaravanMultiDayCyclePreviewView;
 import jakarta.validation.Valid;
@@ -320,8 +321,8 @@ public class CaravanController {
   }
 
   @PostMapping("/caravans/backup")
-  CaravanResponse importBackup(@Valid @RequestBody CaravanBackupView backup) {
-    return CaravanResponseMapper.toResponse(importCaravanBackupUseCase.execute(backup));
+  CaravanBackupImportResultView importBackup(@Valid @RequestBody CaravanBackupView backup) {
+    return importCaravanBackupUseCase.execute(backup);
   }
 
   @PostMapping("/caravans/{caravanId}/day-cycle/preview")

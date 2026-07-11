@@ -1,6 +1,7 @@
 import { fetchJson } from "@/services/http";
 import type {
   CaravanBackup,
+  CaravanBackupImportResult,
   Caravan,
   CaravanDayCyclePreview,
   CaravanMultiDayCyclePreview,
@@ -63,7 +64,7 @@ export function exportCaravanBackup(id: string) {
 }
 
 export function importCaravanBackup(payload: CaravanBackup) {
-  return fetchJson<Caravan>("/caravans/backup", {
+  return fetchJson<CaravanBackupImportResult>("/caravans/backup", {
     method: "POST",
     body: JSON.stringify(payload),
   });

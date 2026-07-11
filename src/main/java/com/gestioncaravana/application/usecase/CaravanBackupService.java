@@ -1,6 +1,8 @@
 package com.gestioncaravana.application.usecase;
 
 import com.gestioncaravana.application.model.CaravanBackupView;
+import com.gestioncaravana.application.model.CaravanBackupImportResultView;
+import com.gestioncaravana.application.model.CaravanBackupImportSummaryView;
 import com.gestioncaravana.application.model.CaravanBackupView.BeastSnapshot;
 import com.gestioncaravana.application.model.CaravanBackupView.CargoSnapshot;
 import com.gestioncaravana.application.model.CaravanBackupView.CaravanSnapshot;
@@ -16,6 +18,7 @@ import com.gestioncaravana.application.port.in.DeleteCaravanUseCase;
 import com.gestioncaravana.application.port.in.ExportCaravanBackupUseCase;
 import com.gestioncaravana.application.port.in.ImportCaravanBackupUseCase;
 import com.gestioncaravana.application.port.out.ActiveCaravanSelectionPort;
+import com.gestioncaravana.application.port.out.CaravanCalendarEventRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanBeastRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCargoRepositoryPort;
@@ -25,6 +28,9 @@ import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanWeatherForecastStateRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanWeatherProfileRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanWeatherSnapshotRepositoryPort;
 import com.gestioncaravana.domain.CaravanBeast;
 import com.gestioncaravana.domain.CaravanCargo;
 import com.gestioncaravana.domain.CaravanDayResolution;
@@ -33,6 +39,9 @@ import com.gestioncaravana.domain.CaravanSupplyState;
 import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
 import com.gestioncaravana.domain.CaravanWagonImprovement;
+import com.gestioncaravana.domain.CaravanWeatherForecastState;
+import com.gestioncaravana.domain.CaravanWeatherSnapshot;
+import com.gestioncaravana.domain.GolarionCalendar;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -51,6 +60,10 @@ public class CaravanBackupService implements ExportCaravanBackupUseCase, ImportC
   private final CaravanFeatRepositoryPort featRepository;
   private final CaravanSupplyStateRepositoryPort supplyStateRepository;
   private final CaravanDayResolutionRepositoryPort dayResolutionRepository;
+  private final CaravanCalendarEventRepositoryPort calendarEventRepository;
+  private final CaravanWeatherProfileRepositoryPort weatherProfileRepository;
+  private final CaravanWeatherForecastStateRepositoryPort weatherForecastStateRepository;
+  private final CaravanWeatherSnapshotRepositoryPort weatherSnapshotRepository;
   private final ActiveCaravanSelectionPort activeSelectionPort;
   private final DeleteCaravanUseCase deleteCaravanUseCase;
 
@@ -64,6 +77,10 @@ public class CaravanBackupService implements ExportCaravanBackupUseCase, ImportC
       CaravanFeatRepositoryPort featRepository,
       CaravanSupplyStateRepositoryPort supplyStateRepository,
       CaravanDayResolutionRepositoryPort dayResolutionRepository,
+      CaravanCalendarEventRepositoryPort calendarEventRepository,
+      CaravanWeatherProfileRepositoryPort weatherProfileRepository,
+      CaravanWeatherForecastStateRepositoryPort weatherForecastStateRepository,
+      CaravanWeatherSnapshotRepositoryPort weatherSnapshotRepository,
       ActiveCaravanSelectionPort activeSelectionPort,
       DeleteCaravanUseCase deleteCaravanUseCase) {
     this.campaignRepository = campaignRepository;
@@ -75,6 +92,10 @@ public class CaravanBackupService implements ExportCaravanBackupUseCase, ImportC
     this.featRepository = featRepository;
     this.supplyStateRepository = supplyStateRepository;
     this.dayResolutionRepository = dayResolutionRepository;
+    this.calendarEventRepository = calendarEventRepository;
+    this.weatherProfileRepository = weatherProfileRepository;
+    this.weatherForecastStateRepository = weatherForecastStateRepository;
+    this.weatherSnapshotRepository = weatherSnapshotRepository;
     this.activeSelectionPort = activeSelectionPort;
     this.deleteCaravanUseCase = deleteCaravanUseCase;
   }
@@ -102,11 +123,18 @@ public class CaravanBackupService implements ExportCaravanBackupUseCase, ImportC
         cargoRepository.findAllByCaravanId(caravanId).stream().map(CaravanBackupService::toCargoSnapshot).toList(),
         beastRepository.findAllByCaravanId(caravanId).stream().map(CaravanBackupService::toBeastSnapshot).toList(),
         featRepository.findAllByCaravanId(caravanId).stream().map(CaravanBackupService::toFeatSnapshot).toList(),
-        dayResolutionRepository.findAllByCaravanId(caravanId).stream().map(CaravanBackupService::toDayResolutionSnapshot).toList());
+        dayResolutionRepository.findAllByCaravanId(caravanId).stream().map(CaravanBackupService::toDayResolutionSnapshot).toList(),
+        calendarEventRepository.findByCaravanIdAndDateBetween(
+            caravanId,
+            GolarionCalendar.MIN_SUPPORTED_DATE,
+            GolarionCalendar.MAX_SUPPORTED_DATE),
+        weatherProfileRepository.findByCaravanId(caravanId).orElse(null),
+        findAllWeatherForecastStates(caravanId),
+        findAllWeatherSnapshots(caravanId));
   }
 
   @Override
-  public CaravanCampaignView execute(CaravanBackupView backup) {
+  public CaravanBackupImportResultView execute(CaravanBackupView backup) {
     var caravanId = backup.caravan().id();
     campaignRepository.findById(caravanId).ifPresent(existing -> deleteCaravanUseCase.delete(existing.id()));
 
@@ -134,12 +162,24 @@ public class CaravanBackupService implements ExportCaravanBackupUseCase, ImportC
     for (var dayResolutionSnapshot : backup.dayResolutions()) {
       dayResolutionRepository.save(toDayResolution(dayResolutionSnapshot));
     }
+    for (var calendarEvent : backup.calendarEvents()) {
+      calendarEventRepository.save(calendarEvent);
+    }
+    if (backup.weatherProfile() != null) {
+      weatherProfileRepository.save(backup.weatherProfile());
+    }
+    for (var forecastState : backup.weatherForecastStates()) {
+      weatherForecastStateRepository.save(forecastState);
+    }
+    for (var weatherSnapshot : backup.weatherSnapshots()) {
+      weatherSnapshotRepository.save(weatherSnapshot);
+    }
 
     if (backup.active()) {
       activeSelectionPort.setActiveCaravanId(caravanId);
     }
 
-    return new CaravanCampaignView(
+    var result = new CaravanCampaignView(
         savedCampaign.id(),
         savedCampaign.name(),
         savedCampaign.description(),
@@ -159,6 +199,7 @@ public class CaravanBackupService implements ExportCaravanBackupUseCase, ImportC
         travelerRepository.findAllByCaravanId(caravanId).stream().map(traveler -> traveler.fullName() + " · " + traveler.activeRoleCode()).toList(),
         beastRepository.findAllByCaravanId(caravanId).stream().map(CaravanBeast::name).toList(),
         featRepository.findAllByCaravanId(caravanId).stream().map(CaravanFeat::featTypeCode).toList());
+    return new CaravanBackupImportResultView(result, toSummary(backup));
   }
 
   private static CaravanSnapshot toCampaignSnapshot(com.gestioncaravana.domain.CaravanCampaign campaign) {
@@ -452,5 +493,48 @@ public class CaravanBackupService implements ExportCaravanBackupUseCase, ImportC
         snapshot.choicesSummary(),
         snapshot.contributionsSummary(),
         snapshot.warningsSummary());
+  }
+
+  private List<CaravanWeatherForecastState> findAllWeatherForecastStates(UUID caravanId) {
+    var states = new java.util.ArrayList<CaravanWeatherForecastState>();
+    var currentDate = GolarionCalendar.MIN_SUPPORTED_DATE;
+    while (true) {
+      weatherForecastStateRepository.findByCaravanIdAndDate(caravanId, currentDate).ifPresent(states::add);
+      if (currentDate.equals(GolarionCalendar.MAX_SUPPORTED_DATE)) {
+        break;
+      }
+      currentDate = GolarionCalendar.addDays(currentDate, 1);
+    }
+    return List.copyOf(states);
+  }
+
+  private List<CaravanWeatherSnapshot> findAllWeatherSnapshots(UUID caravanId) {
+    var snapshots = new java.util.ArrayList<CaravanWeatherSnapshot>();
+    var currentDate = GolarionCalendar.MIN_SUPPORTED_DATE;
+    while (true) {
+      weatherSnapshotRepository.findByCaravanIdAndDate(caravanId, currentDate).ifPresent(snapshots::add);
+      if (currentDate.equals(GolarionCalendar.MAX_SUPPORTED_DATE)) {
+        break;
+      }
+      currentDate = GolarionCalendar.addDays(currentDate, 1);
+    }
+    return List.copyOf(snapshots);
+  }
+
+  private static CaravanBackupImportSummaryView toSummary(CaravanBackupView backup) {
+    return new CaravanBackupImportSummaryView(
+        1,
+        1,
+        backup.wagons().size(),
+        backup.wagonImprovements().size(),
+        backup.travelers().size(),
+        backup.cargo().size(),
+        backup.beasts().size(),
+        backup.feats().size(),
+        backup.dayResolutions().size(),
+        backup.calendarEvents().size(),
+        backup.weatherProfile() == null ? 0 : 1,
+        backup.weatherForecastStates().size(),
+        backup.weatherSnapshots().size());
   }
 }

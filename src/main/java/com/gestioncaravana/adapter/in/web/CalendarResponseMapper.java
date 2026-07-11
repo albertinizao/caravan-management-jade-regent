@@ -43,7 +43,8 @@ final class CalendarResponseMapper {
   }
 
   private static CalendarEventResponse toResponse(CalendarEventView view) {
-    return new CalendarEventResponse(view.name(), view.scope(), view.description(), view.category());
+    return new CalendarEventResponse(
+        view.id(), view.name(), view.scope(), view.description(), view.category(), view.secret());
   }
 
   private static WeatherSnapshotResponse toResponse(WeatherSnapshotView view) {

@@ -51,13 +51,13 @@ public class JsonGolarionCalendarEventCatalogAdapter implements GolarionCalendar
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)
-  private record EventPayload(
+    private record EventPayload(
       String name,
       String scope,
       String description,
       String category) {
     CalendarEventView toView() {
-      return new CalendarEventView(name, scope, description, category);
+      return new CalendarEventView(null, name, scope, description, category, false);
     }
   }
 }

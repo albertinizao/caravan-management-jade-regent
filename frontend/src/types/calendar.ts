@@ -1,4 +1,4 @@
-export type CalendarEventCategory = "CANONICAL" | "BIRTHDAY" | "ASTRONOMICAL";
+export type CalendarEventCategory = "CANONICAL" | "BIRTHDAY" | "ASTRONOMICAL" | "CUSTOM";
 
 export interface GolarionDate {
   year: number;
@@ -10,10 +10,12 @@ export interface GolarionDate {
 }
 
 export interface CalendarEvent {
+  id: number | null;
   name: string;
   scope: string | null;
   description: string | null;
   category: CalendarEventCategory | string;
+  secret: boolean;
 }
 
 export interface WeatherPeriod {

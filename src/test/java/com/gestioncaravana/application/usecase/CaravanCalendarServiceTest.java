@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.gestioncaravana.application.model.CalendarEventView;
 import com.gestioncaravana.application.port.in.AdvanceCaravanCalendarUseCase.AdvanceCaravanCalendarCommand;
+import com.gestioncaravana.application.port.in.CreateCaravanCalendarEventUseCase.CreateCaravanCalendarEventCommand;
 import com.gestioncaravana.application.port.in.SetCaravanCalendarCurrentDateUseCase.SetCaravanCalendarCurrentDateCommand;
+import com.gestioncaravana.application.port.out.CaravanCalendarEventRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort;
 import com.gestioncaravana.application.port.out.GolarionCalendarEventCatalogPort;
@@ -15,6 +17,7 @@ import com.gestioncaravana.domain.CaravanCampaign;
 import com.gestioncaravana.domain.CaravanSupplyState;
 import com.gestioncaravana.domain.CaravanWeatherProfile;
 import com.gestioncaravana.domain.CaravanWeatherSnapshot;
+import com.gestioncaravana.domain.CustomCalendarEvent;
 import com.gestioncaravana.domain.GolarionDate;
 import java.time.Clock;
 import java.time.Instant;
@@ -31,6 +34,7 @@ class CaravanCalendarServiceTest {
 
   private InMemoryCaravanRepository campaignRepository;
   private InMemorySupplyStateRepository supplyStateRepository;
+  private InMemoryCalendarEventRepository calendarEventRepository;
   private InMemoryWeatherProfileRepository weatherProfileRepository;
   private InMemoryWeatherSnapshotRepository weatherSnapshotRepository;
   private CaravanCalendarService service;
@@ -40,6 +44,7 @@ class CaravanCalendarServiceTest {
   void setUp() {
     campaignRepository = new InMemoryCaravanRepository();
     supplyStateRepository = new InMemorySupplyStateRepository();
+    calendarEventRepository = new InMemoryCalendarEventRepository();
     weatherProfileRepository = new InMemoryWeatherProfileRepository();
     weatherSnapshotRepository = new InMemoryWeatherSnapshotRepository();
     var weatherService = new CaravanWeatherService(
@@ -50,12 +55,13 @@ class CaravanCalendarServiceTest {
     service = new CaravanCalendarService(
         campaignRepository,
         supplyStateRepository,
+        calendarEventRepository,
         date -> {
           if (date.equals(new GolarionDate(4712, 1, 1))) {
-            return List.of(new CalendarEventView("New Year", "todo Golarion", "Inicio del año civil.", "CANONICAL"));
+            return List.of(new CalendarEventView(null, "New Year", "todo Golarion", "Inicio del año civil.", "CANONICAL", false));
           }
           if (date.equals(new GolarionDate(4712, 3, 20))) {
-            return List.of(new CalendarEventView("Equinoccio de primavera", null, "20 Farasto", "ASTRONOMICAL"));
+            return List.of(new CalendarEventView(null, "Equinoccio de primavera", null, "20 Farasto", "ASTRONOMICAL", false));
           }
           return List.of();
         },
@@ -91,6 +97,54 @@ class CaravanCalendarServiceTest {
         .contains("Equinoccio de primavera");
     assertThat(day.weather()).isNotNull();
     assertThat(day.weather().dawnToNoon()).isNotNull();
+  }
+
+  @Test
+  void createsCustomEventsAndReturnsThemInDayDetails() {
+    var updated = service.create(
+        caravanId,
+        new CreateCaravanCalendarEventCommand(4712, 3, 20, "Reunión secreta", "Solo para la caravana", true));
+
+    assertThat(updated.customEvents()).singleElement()
+        .satisfies(event -> {
+          assertThat(event.id()).isNotNull();
+          assertThat(event.name()).isEqualTo("Reunión secreta");
+          assertThat(event.description()).isEqualTo("Solo para la caravana");
+          assertThat(event.secret()).isTrue();
+          assertThat(event.category()).isEqualTo("CUSTOM");
+        });
+  }
+
+  @Test
+  void deletesCustomEventsAndReturnsUpdatedDay() {
+    var created = service.create(
+        caravanId,
+        new CreateCaravanCalendarEventCommand(4712, 3, 20, "Reunión secreta", "Solo para la caravana", true));
+    var customEventId = created.customEvents().getFirst().id();
+
+    var updated = service.delete(caravanId, customEventId);
+
+    assertThat(updated.customEvents()).isEmpty();
+    assertThat(calendarEventRepository.findByCaravanIdAndId(caravanId, customEventId)).isEmpty();
+  }
+
+  @Test
+  void returnsCustomEventsInMonthGridAcrossAdjacentDays() {
+    calendarEventRepository.save(new CustomCalendarEvent(
+        null,
+        caravanId,
+        new GolarionDate(4712, 3, 1),
+        "Evento de marzo",
+        null,
+        false,
+        Instant.parse("2026-01-01T00:00:00Z")));
+
+    var month = service.getMonth(caravanId, 4712, 2);
+
+    assertThat(month.days())
+        .filteredOn(day -> day.date().year() == 4712 && day.date().month() == 3 && day.date().day() == 1)
+        .singleElement()
+        .satisfies(day -> assertThat(day.customEvents()).extracting(CalendarEventView::name).contains("Evento de marzo"));
   }
 
   @Test
@@ -170,6 +224,57 @@ class CaravanCalendarServiceTest {
     }
   }
 
+  private static final class InMemoryCalendarEventRepository implements CaravanCalendarEventRepositoryPort {
+    private final java.util.List<CustomCalendarEvent> events = new java.util.ArrayList<>();
+
+    @Override
+    public CustomCalendarEvent save(CustomCalendarEvent event) {
+      var saved = new CustomCalendarEvent(
+          event.id() == null ? (long) events.size() + 1 : event.id(),
+          event.caravanId(),
+          event.date(),
+          event.name(),
+          event.description(),
+          event.secret(),
+          event.createdAt());
+      events.add(saved);
+      return saved;
+    }
+
+    @Override
+    public java.util.List<CustomCalendarEvent> findByCaravanIdAndDate(UUID caravanId, GolarionDate date) {
+      return events.stream()
+          .filter(event -> event.caravanId().equals(caravanId) && event.date().equals(date))
+          .toList();
+    }
+
+    @Override
+    public java.util.List<CustomCalendarEvent> findByCaravanIdAndDateBetween(
+        UUID caravanId, GolarionDate startDate, GolarionDate endDate) {
+      return events.stream()
+          .filter(event -> event.caravanId().equals(caravanId))
+          .filter(event -> event.date().compareTo(startDate) >= 0 && event.date().compareTo(endDate) <= 0)
+          .toList();
+    }
+
+    @Override
+    public Optional<CustomCalendarEvent> findByCaravanIdAndId(UUID caravanId, Long eventId) {
+      return events.stream()
+          .filter(event -> event.caravanId().equals(caravanId) && event.id().equals(eventId))
+          .findFirst();
+    }
+
+    @Override
+    public void deleteByCaravanIdAndId(UUID caravanId, Long eventId) {
+      events.removeIf(event -> event.caravanId().equals(caravanId) && event.id().equals(eventId));
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      events.removeIf(event -> event.caravanId().equals(caravanId));
+    }
+  }
+
   private static final class InMemoryWeatherProfileRepository implements CaravanWeatherProfileRepositoryPort {
     private final Map<UUID, CaravanWeatherProfile> profiles = new java.util.HashMap<>();
 
@@ -205,12 +310,23 @@ class CaravanCalendarServiceTest {
     }
 
     @Override
+    public void deleteFromDate(UUID caravanId, GolarionDate fromDate) {
+      snapshots.entrySet().removeIf(entry -> entry.getKey().startsWith(caravanId + ":")
+          && toDate(entry.getKey()).compareTo(fromDate) >= 0);
+    }
+
+    @Override
     public void deleteByCaravanId(UUID caravanId) {
       snapshots.entrySet().removeIf(entry -> entry.getKey().startsWith(caravanId + ":"));
     }
 
     private String key(UUID caravanId, GolarionDate date) {
       return caravanId + ":" + date.year() + ":" + date.month() + ":" + date.day();
+    }
+
+    private GolarionDate toDate(String key) {
+      var parts = key.split(":");
+      return new GolarionDate(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
     }
   }
 }

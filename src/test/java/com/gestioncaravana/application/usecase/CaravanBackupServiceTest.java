@@ -679,12 +679,23 @@ class CaravanBackupServiceTest {
     }
 
     @Override
+    public void deleteFromDate(UUID caravanId, GolarionDate fromDate) {
+      snapshots.entrySet().removeIf(entry -> entry.getKey().startsWith(caravanId + ":")
+          && toDate(entry.getKey()).compareTo(fromDate) >= 0);
+    }
+
+    @Override
     public void deleteByCaravanId(UUID caravanId) {
       snapshots.entrySet().removeIf(entry -> entry.getKey().startsWith(caravanId + ":"));
     }
 
     private String key(UUID caravanId, GolarionDate date) {
       return caravanId + ":" + date.year() + ":" + date.month() + ":" + date.day();
+    }
+
+    private GolarionDate toDate(String key) {
+      var parts = key.split(":");
+      return new GolarionDate(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
     }
   }
 

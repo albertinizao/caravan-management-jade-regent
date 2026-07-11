@@ -1,6 +1,15 @@
 import { fetchJson } from "@/services/http";
 import type { CalendarDay, CalendarMonth } from "@/types/calendar";
 
+export interface CreateCalendarEventRequest {
+  year: number;
+  month: number;
+  day: number;
+  name: string;
+  description: string | null;
+  secret: boolean;
+}
+
 export function getCalendarMonth(caravanId: string, year: number, month: number) {
   return fetchJson<CalendarMonth>(`/caravans/${caravanId}/calendar?year=${year}&month=${month}`);
 }
@@ -20,5 +29,18 @@ export function advanceCalendarDays(caravanId: string, days: number) {
   return fetchJson<CalendarDay>(`/caravans/${caravanId}/calendar/advance`, {
     method: "POST",
     body: JSON.stringify({ days }),
+  });
+}
+
+export function createCalendarEvent(caravanId: string, request: CreateCalendarEventRequest) {
+  return fetchJson<CalendarDay>(`/caravans/${caravanId}/calendar/events`, {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function deleteCalendarEvent(caravanId: string, eventId: number) {
+  return fetchJson<CalendarDay>(`/caravans/${caravanId}/calendar/events/${eventId}`, {
+    method: "DELETE",
   });
 }

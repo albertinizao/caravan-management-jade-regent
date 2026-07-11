@@ -1,6 +1,7 @@
 package com.gestioncaravana.adapter.in.web;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -76,11 +77,36 @@ class CaravanCalendarControllerTest {
 
     mockMvc.perform(post("/api/caravans/{caravanId}/calendar/advance", caravanId)
             .contentType(MediaType.APPLICATION_JSON)
-            .content(objectMapper.writeValueAsString(Map.of("days", 5))))
+        .content(objectMapper.writeValueAsString(Map.of("days", 5))))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.date.year").value(4712))
         .andExpect(jsonPath("$.date.month").value(3))
         .andExpect(jsonPath("$.date.day").value(25));
+  }
+
+  @Test
+  void createsCustomCalendarEvents() throws Exception {
+    var response = mockMvc.perform(post("/api/caravans/{caravanId}/calendar/events", caravanId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of(
+                "year", 4712,
+                "month", 3,
+                "day", 20,
+                "name", "Consejo reservado",
+                "description", "Solo para miembros",
+                "secret", true))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.customEvents.length()").value(1))
+        .andExpect(jsonPath("$.customEvents[0].name").value("Consejo reservado"))
+        .andExpect(jsonPath("$.customEvents[0].secret").value(true))
+        .andExpect(jsonPath("$.customEvents[0].id").isNumber())
+        .andReturn();
+
+    var createdId = objectMapper.readTree(response.getResponse().getContentAsString()).path("customEvents").get(0).path("id").asLong();
+
+    mockMvc.perform(delete("/api/caravans/{caravanId}/calendar/events/{eventId}", caravanId, createdId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.customEvents.length()").value(0));
   }
 
   @Test

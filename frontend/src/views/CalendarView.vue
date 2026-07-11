@@ -9,11 +9,11 @@ import {
   previewCaravanDayCycle,
   previewCaravanMultiDayCycle,
 } from "@/services/caravans";
-import { getCalendarDay, getCalendarMonth, setCalendarCurrentDate } from "@/services/calendar";
+import { createCalendarEvent, deleteCalendarEvent, getCalendarDay, getCalendarMonth, setCalendarCurrentDate } from "@/services/calendar";
 import { getCaravanWeatherProfile, updateCaravanWeatherProfile } from "@/services/weather";
 import type { Caravan } from "@/types/caravan";
 import type { CaravanDayCyclePreview, CaravanMultiDayCyclePreview } from "@/types/caravan";
-import type { CalendarDay, CalendarMonth, GolarionDate, WeatherSnapshot } from "@/types/calendar";
+import type { CalendarDay, CalendarEvent, CalendarMonth, GolarionDate, WeatherSnapshot } from "@/types/calendar";
 import type { CaravanWeatherProfile } from "@/types/weather";
 import {
   getWeatherPrecipitationIcon,
@@ -53,6 +53,16 @@ const weatherCrownOfWorld = ref(false);
 const weatherEffectiveFromYear = ref(4712);
 const weatherEffectiveFromMonth = ref(1);
 const weatherEffectiveFromDay = ref(1);
+const showSecretEvents = ref(false);
+const customEventModalOpen = ref(false);
+const customEventSaving = ref(false);
+const customEventDeletingId = ref<number | null>(null);
+const customEventYear = ref(4712);
+const customEventMonth = ref(1);
+const customEventDay = ref(1);
+const customEventName = ref("");
+const customEventDescription = ref("");
+const customEventSecret = ref(false);
 const { showToast } = useToast();
 
 const supportedYears = Array.from({ length: 11 }, (_, index) => 4712 + index);
@@ -179,6 +189,7 @@ function dayOptionsFor(year: number, month: number, selectedDay?: typeof manualD
 }
 
 const manualDayOptions = computed(() => dayOptionsFor(manualYear.value, manualMonth.value, manualDay));
+const customEventDayOptions = computed(() => dayOptionsFor(customEventYear.value, customEventMonth.value, customEventDay));
 
 const weatherEffectiveFromDayOptions = computed(() =>
   dayOptionsFor(weatherEffectiveFromYear.value, weatherEffectiveFromMonth.value, weatherEffectiveFromDay),
@@ -222,6 +233,66 @@ function formatWeatherToken(value: string | null | undefined) {
 
 function formatCalendarEventName(name: string) {
   return calendarEventNameTranslations[name] ?? name;
+}
+
+function calendarEventKey(event: CalendarEvent) {
+  return event.id !== null
+    ? `${event.category}-${event.id}`
+    : `${event.category}-${event.name}-${event.scope ?? "global"}-${event.secret ? "secret" : "public"}`;
+}
+
+function isVisibleCustomEvent(event: { secret: boolean }) {
+  return showSecretEvents.value || !event.secret;
+}
+
+function visibleCalendarEvents(day: CalendarDay) {
+  return [...day.canonicalEvents, ...day.customEvents].filter(isVisibleCustomEvent);
+}
+
+function visibleCustomEvents(day: CalendarDay) {
+  return day.customEvents.filter(isVisibleCustomEvent);
+}
+
+function hiddenCustomEventsCount(day: CalendarDay) {
+  return day.customEvents.filter((event) => event.secret && !showSecretEvents.value).length;
+}
+
+function syncCustomEventForm(date: GolarionDate) {
+  customEventYear.value = date.year;
+  customEventMonth.value = date.month;
+  customEventDay.value = date.day;
+}
+
+function resetCustomEventForm() {
+  customEventName.value = "";
+  customEventDescription.value = "";
+  customEventSecret.value = false;
+}
+
+function openCustomEventModal() {
+  if (!activeCaravan.value || !monthView.value) {
+    return;
+  }
+
+  syncCustomEventForm(selectedDay.value?.date ?? monthView.value.currentDate);
+  resetCustomEventForm();
+  customEventModalOpen.value = true;
+}
+
+function closeCustomEventModal() {
+  if (customEventSaving.value) {
+    return;
+  }
+
+  customEventModalOpen.value = false;
+}
+
+function toggleSecretEvents() {
+  showSecretEvents.value = !showSecretEvents.value;
+}
+
+function canDeleteCustomEvent(event: { id: number | null }) {
+  return event.id !== null;
 }
 
 function weatherPrecipitationIcon(value: string | null | undefined) {
@@ -318,6 +389,67 @@ async function saveWeatherProfile() {
     showToast(caughtError instanceof Error ? caughtError.message : "No se pudo guardar el clima.", "error");
   } finally {
     weatherProfileSaving.value = false;
+    pendingAction.value = null;
+  }
+}
+
+async function saveCustomEvent() {
+  if (!activeCaravan.value) {
+    return;
+  }
+
+  const name = customEventName.value.trim();
+  if (!name) {
+    showToast("El nombre del evento es obligatorio.", "error");
+    return;
+  }
+
+  customEventSaving.value = true;
+  pendingAction.value = "custom-event";
+  try {
+    const updated = await createCalendarEvent(activeCaravan.value.id, {
+      year: customEventYear.value,
+      month: customEventMonth.value,
+      day: customEventDay.value,
+      name,
+      description: customEventDescription.value.trim() || null,
+      secret: customEventSecret.value,
+    });
+    selectedDay.value = updated;
+    await loadCalendarMonth(updated.date.year, updated.date.month, updated.date);
+    closeCustomEventModal();
+    showToast("El evento personalizado se ha creado.", "success");
+  } catch (caughtError) {
+    showToast(caughtError instanceof Error ? caughtError.message : "No se pudo crear el evento.", "error");
+  } finally {
+    customEventSaving.value = false;
+    pendingAction.value = null;
+  }
+}
+
+async function deleteCustomEvent(event: CalendarEvent) {
+  if (!activeCaravan.value || event.id === null) {
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `¿Eliminar "${formatCalendarEventName(event.name)}"? Esta acción no se puede deshacer.`,
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  customEventDeletingId.value = event.id;
+  pendingAction.value = "custom-event-delete";
+  try {
+    const updated = await deleteCalendarEvent(activeCaravan.value.id, event.id);
+    selectedDay.value = updated;
+    await loadCalendarMonth(updated.date.year, updated.date.month, updated.date);
+    showToast(`Evento eliminado: ${formatCalendarEventName(event.name)}.`, "success");
+  } catch (caughtError) {
+    showToast(caughtError instanceof Error ? caughtError.message : "No se pudo borrar el evento.", "error");
+  } finally {
+    customEventDeletingId.value = null;
     pendingAction.value = null;
   }
 }
@@ -657,9 +789,27 @@ onMounted(loadActiveCaravan);
                 <p class="eyebrow">Vista mensual</p>
                 <h2>{{ visibleMonthLabel }}</h2>
               </div>
-              <button class="ghost-button" type="button" @click="changeVisibleMonth(1)" :disabled="calendarLoading || monthView?.displayYear === 4722 && monthView.displayMonth === 12">
-                →
-              </button>
+              <div class="calendar-toolbar__actions">
+                <button
+                  class="switch-button"
+                  type="button"
+                  role="switch"
+                  :aria-checked="showSecretEvents"
+                  aria-label="Mostrar secretos"
+                  @click="toggleSecretEvents"
+                >
+                  <span class="switch-button__track" :class="{ 'switch-button__track--on': showSecretEvents }">
+                    <span class="switch-button__thumb" />
+                  </span>
+                  <span class="switch-button__label">{{ showSecretEvents ? "Secretos visibles" : "Secretos ocultos" }}</span>
+                </button>
+                <button class="secondary-button" type="button" :disabled="calendarLoading" @click="openCustomEventModal">
+                  Crear evento
+                </button>
+                <button class="ghost-button" type="button" @click="changeVisibleMonth(1)" :disabled="calendarLoading || monthView?.displayYear === 4722 && monthView.displayMonth === 12">
+                  →
+                </button>
+              </div>
             </div>
 
             <div v-if="calendarLoading" class="calendar-loading">
@@ -686,10 +836,10 @@ onMounted(loadActiveCaravan);
                   <small>{{ day.date.dayOfWeekAbbreviation }}</small>
                 </div>
                 <ul class="day-cell__events">
-                  <li v-for="event in day.canonicalEvents.slice(0, 3)" :key="event.name">
+                  <li v-for="event in visibleCalendarEvents(day).slice(0, 3)" :key="calendarEventKey(event)">
                     {{ formatCalendarEventName(event.name) }}
                   </li>
-                  <li v-if="day.canonicalEvents.length > 3" class="day-cell__more">+{{ day.canonicalEvents.length - 3 }} más</li>
+                  <li v-if="visibleCalendarEvents(day).length > 3" class="day-cell__more">+{{ visibleCalendarEvents(day).length - 3 }} más</li>
                 </ul>
               </button>
             </div>
@@ -769,7 +919,31 @@ onMounted(loadActiveCaravan);
 
                 <section class="detail-section placeholder-block">
                   <h3>Eventos personalizados</h3>
-                  <p class="muted">Sin eventos personalizados. La estructura ya queda reservada para incorporarlos después.</p>
+                  <ul v-if="visibleCustomEvents(selectedDay).length > 0" class="event-list">
+                    <li v-for="event in visibleCustomEvents(selectedDay)" :key="calendarEventKey(event)" class="event-item">
+                      <div class="event-item__title">
+                        <strong>{{ formatCalendarEventName(event.name) }}</strong>
+                        <div class="event-item__actions">
+                          <span v-if="event.secret" class="pill pill--secret">Secreto</span>
+                          <span v-else class="pill pill--custom">Personalizado</span>
+                          <button
+                            v-if="canDeleteCustomEvent(event)"
+                            class="ghost-button event-delete-button"
+                            type="button"
+                            :disabled="customEventDeletingId === event.id"
+                            @click.stop="deleteCustomEvent(event)"
+                          >
+                            {{ customEventDeletingId === event.id ? "Borrando…" : "Borrar" }}
+                          </button>
+                        </div>
+                      </div>
+                      <p v-if="event.description">{{ event.description }}</p>
+                    </li>
+                  </ul>
+                  <p v-if="hiddenCustomEventsCount(selectedDay) > 0" class="muted">
+                    Hay {{ hiddenCustomEventsCount(selectedDay) }} evento{{ hiddenCustomEventsCount(selectedDay) === 1 ? "" : "s" }} secreto{{ hiddenCustomEventsCount(selectedDay) === 1 ? "" : "s" }} oculto{{ hiddenCustomEventsCount(selectedDay) === 1 ? "" : "s" }}.
+                  </p>
+                  <p v-else-if="visibleCustomEvents(selectedDay).length === 0" class="muted">Sin eventos personalizados.</p>
                 </section>
               </template>
 
@@ -777,6 +951,79 @@ onMounted(loadActiveCaravan);
             </article>
         </section>
       </template>
+
+      <div v-if="customEventModalOpen" class="modal-backdrop" @click.self="closeCustomEventModal">
+        <div class="modal modal-cycle">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">Calendario</p>
+              <h2>Crear evento personalizado</h2>
+            </div>
+            <button class="ghost-button" type="button" :disabled="customEventSaving" @click="closeCustomEventModal">
+              Cerrar
+            </button>
+          </div>
+
+          <section class="modal-section">
+            <div class="weather-effective-date-grid">
+              <label>
+                <span>Año</span>
+                <select v-model.number="customEventYear">
+                  <option v-for="year in supportedYears" :key="year" :value="year">{{ year }} AR</option>
+                </select>
+              </label>
+              <label>
+                <span>Mes</span>
+                <select v-model.number="customEventMonth">
+                  <option v-for="monthOption in supportedMonths" :key="monthOption.value" :value="monthOption.value">
+                    {{ monthOption.label }}
+                  </option>
+                </select>
+              </label>
+              <label>
+                <span>Día</span>
+                <select v-model.number="customEventDay">
+                  <option v-for="day in customEventDayOptions" :key="day" :value="day">
+                    {{ day }}
+                  </option>
+                </select>
+              </label>
+            </div>
+
+            <div class="modal-form-grid">
+              <label>
+                <span>Nombre</span>
+                <input v-model="customEventName" type="text" maxlength="200" placeholder="Ej. Reunión de la caravana" />
+              </label>
+              <label>
+                <span>Descripción</span>
+                <textarea
+                  v-model="customEventDescription"
+                  rows="4"
+                  maxlength="1000"
+                  placeholder="Detalles del evento"
+                ></textarea>
+              </label>
+              <label class="checkbox-field">
+                <input v-model="customEventSecret" type="checkbox" />
+                <span>Secreto</span>
+              </label>
+            </div>
+          </section>
+
+          <div class="modal-actions">
+            <button class="secondary-button" type="button" :disabled="customEventSaving" @click="closeCustomEventModal">
+              Cancelar
+            </button>
+            <button class="primary-button" type="button" :disabled="customEventSaving" @click="saveCustomEvent">
+              <span class="button-with-spinner">
+                <span v-if="customEventSaving" class="button-spinner" aria-hidden="true"></span>
+                <span>{{ customEventSaving ? "Creando…" : "Crear evento" }}</span>
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div v-if="manualDateModalOpen" class="modal-backdrop" @click.self="closeManualDateModal">
         <div class="modal modal-cycle">
@@ -1290,6 +1537,15 @@ p {
   gap: 1.25rem;
   align-items: start;
 }
+
+.calendar-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .detail-card {
   display: grid;
   gap: 1rem;
@@ -1307,12 +1563,14 @@ label {
 }
 
 select,
-input {
+input,
+textarea {
   width: 100%;
   padding: 0.8rem 0.9rem;
   border: 1px solid #d1d5db;
   border-radius: 0.75rem;
   font: inherit;
+  resize: vertical;
 }
 
 .calendar-card {
@@ -1433,6 +1691,21 @@ input {
   align-items: center;
 }
 
+.event-item__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.event-delete-button {
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: #475569;
+}
+
 .pill {
   padding: 0.25rem 0.6rem;
   border-radius: 999px;
@@ -1440,6 +1713,78 @@ input {
   color: #1d4ed8;
   font-size: 0.8rem;
   font-weight: 700;
+}
+
+.pill--custom {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.pill--secret {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.switch-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.35rem 0.25rem;
+  border: 0;
+  background: transparent;
+  color: #334155;
+  cursor: pointer;
+  font: inherit;
+}
+
+.switch-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.switch-button:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  outline-offset: 4px;
+  border-radius: 999px;
+}
+
+.switch-button__track {
+  width: 3.1rem;
+  height: 1.8rem;
+  padding: 0.2rem;
+  border-radius: 999px;
+  background: #cbd5e1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.06);
+}
+
+.switch-button__track--on {
+  background: #1d4ed8;
+}
+
+.switch-button__thumb {
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  background: white;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.28);
+  transform: translateX(0);
+  transition: transform 0.15s ease;
+}
+
+.switch-button__track--on .switch-button__thumb {
+  transform: translateX(1.3rem);
+}
+
+.switch-button__label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #475569;
 }
 
 .placeholder-block {
@@ -1458,6 +1803,11 @@ input {
 .weather-config-card {
   display: grid;
   gap: 1rem;
+}
+
+.modal-form-grid {
+  display: grid;
+  gap: 0.85rem;
 }
 
 .weather-config-grid {
@@ -1825,6 +2175,10 @@ input {
   .detail-card {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .calendar-toolbar__actions {
+    justify-content: flex-start;
   }
 
   .control-grid {

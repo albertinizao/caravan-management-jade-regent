@@ -1,12 +1,15 @@
 package com.gestioncaravana.adapter.in.web;
 
 import com.gestioncaravana.application.port.in.AdvanceCaravanCalendarUseCase;
+import com.gestioncaravana.application.port.in.CreateCaravanCalendarEventUseCase;
+import com.gestioncaravana.application.port.in.DeleteCaravanCalendarEventUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanCalendarDayUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanCalendarMonthUseCase;
 import com.gestioncaravana.application.port.in.SetCaravanCalendarCurrentDateUseCase;
 import jakarta.validation.Valid;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -21,16 +24,22 @@ public class CaravanCalendarController {
 
   private final GetCaravanCalendarMonthUseCase getCaravanCalendarMonthUseCase;
   private final GetCaravanCalendarDayUseCase getCaravanCalendarDayUseCase;
+  private final CreateCaravanCalendarEventUseCase createCaravanCalendarEventUseCase;
+  private final DeleteCaravanCalendarEventUseCase deleteCaravanCalendarEventUseCase;
   private final SetCaravanCalendarCurrentDateUseCase setCaravanCalendarCurrentDateUseCase;
   private final AdvanceCaravanCalendarUseCase advanceCaravanCalendarUseCase;
 
   public CaravanCalendarController(
       GetCaravanCalendarMonthUseCase getCaravanCalendarMonthUseCase,
       GetCaravanCalendarDayUseCase getCaravanCalendarDayUseCase,
+      CreateCaravanCalendarEventUseCase createCaravanCalendarEventUseCase,
+      DeleteCaravanCalendarEventUseCase deleteCaravanCalendarEventUseCase,
       SetCaravanCalendarCurrentDateUseCase setCaravanCalendarCurrentDateUseCase,
       AdvanceCaravanCalendarUseCase advanceCaravanCalendarUseCase) {
     this.getCaravanCalendarMonthUseCase = getCaravanCalendarMonthUseCase;
     this.getCaravanCalendarDayUseCase = getCaravanCalendarDayUseCase;
+    this.createCaravanCalendarEventUseCase = createCaravanCalendarEventUseCase;
+    this.deleteCaravanCalendarEventUseCase = deleteCaravanCalendarEventUseCase;
     this.setCaravanCalendarCurrentDateUseCase = setCaravanCalendarCurrentDateUseCase;
     this.advanceCaravanCalendarUseCase = advanceCaravanCalendarUseCase;
   }
@@ -52,6 +61,30 @@ public class CaravanCalendarController {
       @RequestParam int day) {
     return CalendarResponseMapper.toResponse(
         getCaravanCalendarDayUseCase.getDay(caravanId, year, month, day));
+  }
+
+  @PostMapping("/events")
+  CalendarDayResponse createEvent(
+      @PathVariable UUID caravanId,
+      @Valid @RequestBody CreateCaravanCalendarEventRequest request) {
+    return CalendarResponseMapper.toResponse(
+        createCaravanCalendarEventUseCase.create(
+            caravanId,
+            new CreateCaravanCalendarEventUseCase.CreateCaravanCalendarEventCommand(
+                request.year(),
+                request.month(),
+                request.day(),
+                request.name(),
+                request.description(),
+                request.secret())));
+  }
+
+  @DeleteMapping("/events/{eventId}")
+  CalendarDayResponse deleteEvent(
+      @PathVariable UUID caravanId,
+      @PathVariable Long eventId) {
+    return CalendarResponseMapper.toResponse(
+        deleteCaravanCalendarEventUseCase.delete(caravanId, eventId));
   }
 
   @PutMapping("/current-date")

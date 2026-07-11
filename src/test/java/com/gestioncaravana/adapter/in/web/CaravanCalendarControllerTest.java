@@ -89,9 +89,9 @@ class CaravanCalendarControllerTest {
     mockMvc.perform(put("/api/caravans/{caravanId}/weather/profile", caravanId)
             .contentType(MediaType.APPLICATION_JSON)
             .content(objectMapper.writeValueAsString(Map.of(
-                "climateBaseline", "COLD",
+                "climateBaseline", "CROWN_OF_THE_WORLD",
+                "crownRegion", "HIGH_ICE",
                 "elevation", "HIGHLAND",
-                "crownOfWorld", true,
                 "effectiveFromYear", 4712,
                 "effectiveFromMonth", 1,
                 "effectiveFromDay", 1))))

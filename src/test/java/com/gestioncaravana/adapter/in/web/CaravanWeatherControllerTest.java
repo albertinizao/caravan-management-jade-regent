@@ -49,20 +49,35 @@ class CaravanWeatherControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.climateBaseline").value("TEMPERATE"))
         .andExpect(jsonPath("$.elevation").value("SEA_LEVEL"))
-        .andExpect(jsonPath("$.crownOfWorld").value(false));
+        .andExpect(jsonPath("$.crownRegion").isEmpty());
 
     mockMvc.perform(put("/api/caravans/{caravanId}/weather/profile", caravanId)
             .contentType(MediaType.APPLICATION_JSON)
             .content(objectMapper.writeValueAsString(Map.of(
-                "climateBaseline", "COLD",
+                "climateBaseline", "CROWN_OF_THE_WORLD",
+                "crownRegion", "BOREAL_EXPANSE",
                 "elevation", "PEAK",
-                "crownOfWorld", true,
                 "effectiveFromYear", 4712,
                 "effectiveFromMonth", 1,
                 "effectiveFromDay", 10))))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.climateBaseline").value("COLD"))
+        .andExpect(jsonPath("$.climateBaseline").value("CROWN_OF_THE_WORLD"))
+        .andExpect(jsonPath("$.crownRegion").value("BOREAL_EXPANSE"))
         .andExpect(jsonPath("$.elevation").value("PEAK"))
-        .andExpect(jsonPath("$.crownOfWorld").value(true));
+        .andExpect(jsonPath("$.updatedAt").exists());
+  }
+
+  @Test
+  void rejectsInvalidCrownRegionElevationCombination() throws Exception {
+    mockMvc.perform(put("/api/caravans/{caravanId}/weather/profile", caravanId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of(
+                "climateBaseline", "CROWN_OF_THE_WORLD",
+                "crownRegion", "OUTER_RIM",
+                "elevation", "PEAK",
+                "effectiveFromYear", 4712,
+                "effectiveFromMonth", 1,
+                "effectiveFromDay", 10))))
+        .andExpect(status().isBadRequest());
   }
 }

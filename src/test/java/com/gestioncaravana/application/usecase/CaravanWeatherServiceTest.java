@@ -11,6 +11,7 @@ import com.gestioncaravana.domain.CaravanMainStats;
 import com.gestioncaravana.domain.CaravanWeatherForecastState;
 import com.gestioncaravana.domain.CaravanWeatherProfile;
 import com.gestioncaravana.domain.CaravanWeatherSnapshot;
+import com.gestioncaravana.domain.CrownWeatherRegion;
 import com.gestioncaravana.domain.GolarionDate;
 import java.time.Clock;
 import java.time.Instant;
@@ -81,12 +82,13 @@ class CaravanWeatherServiceTest {
     var updated = service.updateProfile(
         caravanId,
         new com.gestioncaravana.application.port.in.UpdateCaravanWeatherProfileUseCase.UpdateCaravanWeatherProfileCommand(
-            com.gestioncaravana.domain.WeatherClimateBaseline.COLD,
+            com.gestioncaravana.domain.WeatherClimateBaseline.CROWN_OF_THE_WORLD,
             com.gestioncaravana.domain.WeatherElevation.PEAK,
-            true,
+            com.gestioncaravana.domain.CrownWeatherRegion.BOREAL_EXPANSE,
             effectiveFrom));
 
-    assertThat(updated.climateBaseline()).isEqualTo(com.gestioncaravana.domain.WeatherClimateBaseline.COLD);
+    assertThat(updated.climateBaseline()).isEqualTo(com.gestioncaravana.domain.WeatherClimateBaseline.CROWN_OF_THE_WORLD);
+    assertThat(updated.crownRegion()).isEqualTo(com.gestioncaravana.domain.CrownWeatherRegion.BOREAL_EXPANSE);
     assertThat(weatherSnapshotRepository.findByCaravanIdAndDate(caravanId, earlierDate)).isPresent();
     assertThat(weatherSnapshotRepository.findByCaravanIdAndDate(caravanId, laterDate)).isEmpty();
     assertThat(weatherForecastStateRepository.findByCaravanIdAndDate(caravanId, earlierDate)).isPresent();
@@ -141,7 +143,7 @@ class CaravanWeatherServiceTest {
         caravanId,
         com.gestioncaravana.domain.WeatherClimateBaseline.TROPICAL,
         com.gestioncaravana.domain.WeatherElevation.SEA_LEVEL,
-        false,
+        null,
         Instant.parse("2026-07-10T12:00:00Z")));
 
     for (int day = 1; day <= 31; day++) {
@@ -170,7 +172,7 @@ class CaravanWeatherServiceTest {
         caravanId,
         com.gestioncaravana.domain.WeatherClimateBaseline.TEMPERATE,
         com.gestioncaravana.domain.WeatherElevation.LOWLAND,
-        false,
+        null,
         Instant.parse("2026-07-10T12:00:00Z")));
 
     Integer previousNoon = null;
@@ -185,12 +187,12 @@ class CaravanWeatherServiceTest {
   }
 
   @Test
-  void crownOfWorldHighlandAbadioUsesPolarTwilight() {
+  void crownOfWorldHighIceAbadioUsesPolarTwilight() {
     weatherProfileRepository.save(new CaravanWeatherProfile(
         caravanId,
-        com.gestioncaravana.domain.WeatherClimateBaseline.COLD,
+        com.gestioncaravana.domain.WeatherClimateBaseline.CROWN_OF_THE_WORLD,
         com.gestioncaravana.domain.WeatherElevation.HIGHLAND,
-        true,
+        CrownWeatherRegion.HIGH_ICE,
         Instant.parse("2026-07-10T12:00:00Z")));
 
     var weather = service.getWeather(caravanId, new GolarionDate(4712, 1, 12));
@@ -199,12 +201,12 @@ class CaravanWeatherServiceTest {
   }
 
   @Test
-  void crownOfWorldPeakAbadioKeepsIntradayTemperaturesNearlyFlatDuringPolarNight() {
+  void crownOfWorldBorealExpanseAbadioKeepsIntradayTemperaturesNearlyFlatDuringPolarNight() {
     weatherProfileRepository.save(new CaravanWeatherProfile(
         caravanId,
-        com.gestioncaravana.domain.WeatherClimateBaseline.COLD,
-        com.gestioncaravana.domain.WeatherElevation.PEAK,
-        true,
+        com.gestioncaravana.domain.WeatherClimateBaseline.CROWN_OF_THE_WORLD,
+        com.gestioncaravana.domain.WeatherElevation.HIGHLAND,
+        CrownWeatherRegion.BOREAL_EXPANSE,
         Instant.parse("2026-07-10T12:00:00Z")));
 
     var weather = service.getWeather(caravanId, new GolarionDate(4712, 1, 12));
@@ -218,6 +220,30 @@ class CaravanWeatherServiceTest {
 
     assertThat(weather.crownLightCondition()).isEqualTo("POLAR_NIGHT");
     assertThat(max - min).isLessThanOrEqualTo(3);
+  }
+
+  @Test
+  void rejectsOuterRimWithPeakElevation() {
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> new CaravanWeatherProfile(
+        caravanId,
+        com.gestioncaravana.domain.WeatherClimateBaseline.CROWN_OF_THE_WORLD,
+        com.gestioncaravana.domain.WeatherElevation.PEAK,
+        CrownWeatherRegion.OUTER_RIM,
+        Instant.parse("2026-07-10T12:00:00Z")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("elevation");
+  }
+
+  @Test
+  void rejectsNonCrownBaselineWithCrownRegion() {
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> new CaravanWeatherProfile(
+        caravanId,
+        com.gestioncaravana.domain.WeatherClimateBaseline.COLD,
+        com.gestioncaravana.domain.WeatherElevation.HIGHLAND,
+        CrownWeatherRegion.HIGH_ICE,
+        Instant.parse("2026-07-10T12:00:00Z")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("crownRegion");
   }
 
   private void assertFogHasLightWind(String precipitation, String windStrength) {

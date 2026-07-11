@@ -1968,4 +1968,19 @@ dd {
     min-width: 780px;
   }
 }
+
+@media (max-width: 480px) {
+  .cargo-table {
+    min-width: 680px;
+  }
+
+  .cargo-table th,
+  .cargo-table td {
+    padding: 0.65rem;
+  }
+
+  .table-wrap {
+    margin-top: 0.85rem;
+  }
+}
 </style>

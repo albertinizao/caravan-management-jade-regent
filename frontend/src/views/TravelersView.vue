@@ -2157,6 +2157,21 @@ dd {
   }
 }
 
+@media (max-width: 480px) {
+  .travelers-table {
+    min-width: 620px;
+  }
+
+  .travelers-table th,
+  .travelers-table td {
+    padding: 0.65rem;
+  }
+
+  .table-wrap {
+    margin-top: 0.85rem;
+  }
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

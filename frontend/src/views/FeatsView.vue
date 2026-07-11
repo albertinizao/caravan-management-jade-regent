@@ -1080,6 +1080,21 @@ input[type="checkbox"] {
   }
 }
 
+@media (max-width: 480px) {
+  .data-table {
+    min-width: 620px;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 0.65rem;
+  }
+
+  .table-wrap {
+    margin-top: 0.85rem;
+  }
+}
+
 .modal__body span {
   font-weight: 600;
 }

@@ -2109,4 +2109,19 @@ dd {
     min-width: 700px;
   }
 }
+
+@media (max-width: 480px) {
+  .beast-table {
+    min-width: 620px;
+  }
+
+  .beast-table th,
+  .beast-table td {
+    padding: 0.65rem;
+  }
+
+  .table-wrap {
+    margin-top: 0.85rem;
+  }
+}
 </style>

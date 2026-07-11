@@ -146,10 +146,14 @@ watch(
   color: #1d4ed8;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .topbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .brand {
+    flex: 0 1 auto;
   }
 
   .nav-toggle {
@@ -175,6 +179,21 @@ watch(
   }
 }
 
+@media (max-width: 480px) {
+  .topbar {
+    padding-block: 0.85rem;
+  }
+
+  .nav-toggle {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .nav a {
+    justify-content: center;
+  }
+}
+
 .global-toast {
   position: fixed;
   right: 1.25rem;
@@ -188,13 +207,21 @@ watch(
   font-weight: 600;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .global-toast {
     left: 50%;
     right: auto;
     transform: translateX(-50%);
     bottom: max(1rem, env(safe-area-inset-bottom));
     max-width: min(420px, calc(100vw - 1.5rem));
+  }
+}
+
+@media (max-width: 480px) {
+  .global-toast {
+    width: min(100%, calc(100vw - 1rem));
+    max-width: calc(100vw - 1rem);
+    padding: 0.85rem 0.9rem;
   }
 }
 

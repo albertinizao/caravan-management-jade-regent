@@ -5013,4 +5013,19 @@ dd {
     min-width: 900px;
   }
 }
+
+@media (max-width: 480px) {
+  .wagon-table {
+    min-width: 760px;
+  }
+
+  .wagon-table th,
+  .wagon-table td {
+    padding: 0.65rem;
+  }
+
+  .table-wrap {
+    margin-top: 0.85rem;
+  }
+}
 </style>

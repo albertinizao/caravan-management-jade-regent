@@ -66,6 +66,25 @@ class CaravanCalendarControllerTest {
   }
 
   @Test
+  void hidesFutureWeatherUnlessSecretsAreVisible() throws Exception {
+    mockMvc.perform(get("/api/caravans/{caravanId}/calendar/day", caravanId)
+            .param("year", "4712")
+            .param("month", "1")
+            .param("day", "2"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.weather").value(org.hamcrest.Matchers.nullValue()));
+
+    mockMvc.perform(get("/api/caravans/{caravanId}/calendar/day", caravanId)
+            .param("year", "4712")
+            .param("month", "1")
+            .param("day", "2")
+            .param("showSecrets", "true"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.weather").exists())
+        .andExpect(jsonPath("$.weather.midnightToDawn").exists());
+  }
+
+  @Test
   void updatesCurrentDateAndAdvancesDays() throws Exception {
     mockMvc.perform(put("/api/caravans/{caravanId}/calendar/current-date", caravanId)
             .contentType(MediaType.APPLICATION_JSON)

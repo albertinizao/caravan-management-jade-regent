@@ -9,16 +9,19 @@ import com.gestioncaravana.application.port.in.CreateCaravanCalendarEventUseCase
 import com.gestioncaravana.application.port.in.SetCaravanCalendarCurrentDateUseCase.SetCaravanCalendarCurrentDateCommand;
 import com.gestioncaravana.application.port.out.CaravanCalendarEventRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort;
 import com.gestioncaravana.application.port.out.GolarionCalendarEventCatalogPort;
 import com.gestioncaravana.application.port.out.CaravanWeatherProfileRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWeatherSnapshotRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
 import com.gestioncaravana.domain.CaravanSupplyState;
+import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWeatherProfile;
 import com.gestioncaravana.domain.CaravanWeatherSnapshot;
 import com.gestioncaravana.domain.CustomCalendarEvent;
 import com.gestioncaravana.domain.GolarionDate;
+import com.gestioncaravana.domain.TravelerRoleData;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -35,6 +38,7 @@ class CaravanCalendarServiceTest {
   private InMemoryCaravanRepository campaignRepository;
   private InMemorySupplyStateRepository supplyStateRepository;
   private InMemoryCalendarEventRepository calendarEventRepository;
+  private InMemoryTravelerRepository travelerRepository;
   private InMemoryWeatherProfileRepository weatherProfileRepository;
   private InMemoryWeatherSnapshotRepository weatherSnapshotRepository;
   private CaravanCalendarService service;
@@ -45,6 +49,7 @@ class CaravanCalendarServiceTest {
     campaignRepository = new InMemoryCaravanRepository();
     supplyStateRepository = new InMemorySupplyStateRepository();
     calendarEventRepository = new InMemoryCalendarEventRepository();
+    travelerRepository = new InMemoryTravelerRepository();
     weatherProfileRepository = new InMemoryWeatherProfileRepository();
     weatherSnapshotRepository = new InMemoryWeatherSnapshotRepository();
     var weatherService = new CaravanWeatherService(
@@ -56,6 +61,7 @@ class CaravanCalendarServiceTest {
         campaignRepository,
         supplyStateRepository,
         calendarEventRepository,
+        travelerRepository,
         date -> {
           if (date.equals(new GolarionDate(4712, 1, 1))) {
             return List.of(new CalendarEventView(null, "New Year", "todo Golarion", "Inicio del año civil.", "CANONICAL", false));
@@ -75,7 +81,7 @@ class CaravanCalendarServiceTest {
 
   @Test
   void returnsCurrentMonthAndMarksCurrentDay() {
-    var month = service.getMonth(caravanId, 4712, 1);
+    var month = service.getMonth(caravanId, 4712, 1, false);
 
     assertThat(month.currentDate().year()).isEqualTo(4712);
     assertThat(month.currentDate().month()).isEqualTo(1);
@@ -91,7 +97,9 @@ class CaravanCalendarServiceTest {
 
   @Test
   void returnsResolvedEventsForADay() {
-    var day = service.getDay(caravanId, 4712, 3, 20);
+    service.setCurrentDate(caravanId, new SetCaravanCalendarCurrentDateCommand(4712, 3, 20));
+
+    var day = service.getDay(caravanId, 4712, 3, 20, false);
 
     assertThat(day.canonicalEvents()).extracting(CalendarEventView::name)
         .contains("Equinoccio de primavera");
@@ -139,7 +147,7 @@ class CaravanCalendarServiceTest {
         false,
         Instant.parse("2026-01-01T00:00:00Z")));
 
-    var month = service.getMonth(caravanId, 4712, 2);
+    var month = service.getMonth(caravanId, 4712, 2, false);
 
     assertThat(month.days())
         .filteredOn(day -> day.date().year() == 4712 && day.date().month() == 3 && day.date().day() == 1)
@@ -224,6 +232,39 @@ class CaravanCalendarServiceTest {
     }
   }
 
+  @Test
+  void hidesFutureWeatherUnlessSecretsAreVisibleOrMeteorologistIsPresent() {
+    service.setCurrentDate(caravanId, new SetCaravanCalendarCurrentDateCommand(4712, 3, 20));
+
+    var hiddenTomorrow = service.getDay(caravanId, 4712, 3, 21, false);
+    assertThat(hiddenTomorrow.weather()).isNull();
+
+    travelerRepository.save(CaravanTraveler.create(
+        UUID.randomUUID(),
+        caravanId,
+        "Lina",
+        null,
+        List.of("meteorologo"),
+        List.of("meteorologo"),
+        "meteorologo",
+        1,
+        TravelerRoleData.empty(),
+        null,
+        null,
+        null,
+        1,
+        Instant.parse("2026-01-01T00:00:00Z")));
+
+    var revealedTomorrow = service.getDay(caravanId, 4712, 3, 21, false);
+    assertThat(revealedTomorrow.weather()).isNotNull();
+
+    var farFuture = service.getDay(caravanId, 4712, 3, 23, false);
+    assertThat(farFuture.weather()).isNull();
+
+    var secretsVisible = service.getDay(caravanId, 4712, 3, 23, true);
+    assertThat(secretsVisible.weather()).isNotNull();
+  }
+
   private static final class InMemoryCalendarEventRepository implements CaravanCalendarEventRepositoryPort {
     private final java.util.List<CustomCalendarEvent> events = new java.util.ArrayList<>();
 
@@ -272,6 +313,44 @@ class CaravanCalendarServiceTest {
     @Override
     public void deleteByCaravanId(UUID caravanId) {
       events.removeIf(event -> event.caravanId().equals(caravanId));
+    }
+  }
+
+  private static final class InMemoryTravelerRepository implements CaravanTravelerRepositoryPort {
+    private final Map<UUID, CaravanTraveler> travelers = new java.util.HashMap<>();
+
+    @Override
+    public CaravanTraveler save(CaravanTraveler traveler) {
+      travelers.put(traveler.id(), traveler);
+      return traveler;
+    }
+
+    @Override
+    public List<CaravanTraveler> findAllByCaravanId(UUID caravanId) {
+      return travelers.values().stream()
+          .filter(traveler -> traveler.caravanId().equals(caravanId))
+          .toList();
+    }
+
+    @Override
+    public Optional<CaravanTraveler> findById(UUID caravanId, UUID travelerId) {
+      return Optional.ofNullable(travelers.get(travelerId))
+          .filter(traveler -> traveler.caravanId().equals(caravanId));
+    }
+
+    @Override
+    public long countByCaravanIdAndWagonId(UUID caravanId, UUID wagonId) {
+      return 0;
+    }
+
+    @Override
+    public void deleteByCaravanIdAndId(UUID caravanId, UUID travelerId) {
+      travelers.remove(travelerId);
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      travelers.values().removeIf(traveler -> traveler.caravanId().equals(caravanId));
     }
   }
 

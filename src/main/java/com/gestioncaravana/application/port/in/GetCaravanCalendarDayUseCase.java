@@ -5,5 +5,5 @@ import java.util.UUID;
 
 public interface GetCaravanCalendarDayUseCase {
 
-  CalendarDayView getDay(UUID caravanId, int year, int month, int day);
+  CalendarDayView getDay(UUID caravanId, int year, int month, int day, boolean showSecretsVisible);
 }

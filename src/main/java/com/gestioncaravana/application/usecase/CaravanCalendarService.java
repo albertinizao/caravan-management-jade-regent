@@ -13,9 +13,11 @@ import com.gestioncaravana.application.port.in.GetCaravanWeatherSnapshotUseCase;
 import com.gestioncaravana.application.port.in.SetCaravanCalendarCurrentDateUseCase;
 import com.gestioncaravana.application.port.out.CaravanCalendarEventRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort;
 import com.gestioncaravana.application.port.out.GolarionCalendarEventCatalogPort;
 import com.gestioncaravana.domain.CaravanSupplyState;
+import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CustomCalendarEvent;
 import com.gestioncaravana.domain.GolarionCalendar;
 import com.gestioncaravana.domain.GolarionDate;
@@ -39,10 +41,12 @@ public class CaravanCalendarService
 
   private static final List<String> WEEK_HEADERS = List.of("Lun", "Tra", "For", "Jur", "Fue", "Est", "Sol");
   private static final List<CalendarEventView> NO_CUSTOM_EVENTS = List.of();
+  private static final String METEOROLOGIST_ROLE_CODE = "meteorologo";
 
   private final CaravanCampaignRepositoryPort campaignRepository;
   private final CaravanSupplyStateRepositoryPort supplyStateRepository;
   private final CaravanCalendarEventRepositoryPort calendarEventRepository;
+  private final CaravanTravelerRepositoryPort travelerRepository;
   private final GolarionCalendarEventCatalogPort eventCatalogPort;
   private final GetCaravanWeatherSnapshotUseCase weatherSnapshotUseCase;
   private final Clock clock;
@@ -51,20 +55,25 @@ public class CaravanCalendarService
       CaravanCampaignRepositoryPort campaignRepository,
       CaravanSupplyStateRepositoryPort supplyStateRepository,
       CaravanCalendarEventRepositoryPort calendarEventRepository,
+      CaravanTravelerRepositoryPort travelerRepository,
       GolarionCalendarEventCatalogPort eventCatalogPort,
       GetCaravanWeatherSnapshotUseCase weatherSnapshotUseCase,
       Clock clock) {
     this.campaignRepository = campaignRepository;
     this.supplyStateRepository = supplyStateRepository;
     this.calendarEventRepository = calendarEventRepository;
+    this.travelerRepository = travelerRepository;
     this.eventCatalogPort = eventCatalogPort;
     this.weatherSnapshotUseCase = weatherSnapshotUseCase;
     this.clock = clock;
   }
 
-  @Override
-  @Transactional(readOnly = true)
   public CalendarMonthView getMonth(UUID caravanId, int year, int month) {
+    return getMonth(caravanId, year, month, false);
+  }
+
+  @Override
+  public CalendarMonthView getMonth(UUID caravanId, int year, int month, boolean showSecretsVisible) {
     requireCaravan(caravanId);
     var currentDate = currentDate(caravanId);
     var displayMonthAnchor = new GolarionDate(year, month, 1);
@@ -79,7 +88,13 @@ public class CaravanCalendarService
     var cells = java.util.stream.IntStream.range(0, 42)
         .mapToObj(index -> {
           var date = GolarionCalendar.addDays(gridStart, index);
-          return toDayView(caravanId, date, currentDate, month, customEventsByDate.getOrDefault(date, NO_CUSTOM_EVENTS));
+          return toDayView(
+              caravanId,
+              date,
+              currentDate,
+              month,
+              showSecretsVisible,
+              customEventsByDate.getOrDefault(date, NO_CUSTOM_EVENTS));
         })
         .toList();
 
@@ -93,9 +108,12 @@ public class CaravanCalendarService
         cells);
   }
 
-  @Override
-  @Transactional(readOnly = true)
   public CalendarDayView getDay(UUID caravanId, int year, int month, int day) {
+    return getDay(caravanId, year, month, day, false);
+  }
+
+  @Override
+  public CalendarDayView getDay(UUID caravanId, int year, int month, int day, boolean showSecretsVisible) {
     requireCaravan(caravanId);
     var currentDate = currentDate(caravanId);
     var requestedDate = new GolarionDate(year, month, day);
@@ -105,6 +123,7 @@ public class CaravanCalendarService
         requestedDate,
         currentDate,
         month,
+        showSecretsVisible,
         calendarEventRepository.findByCaravanIdAndDate(caravanId, requestedDate).stream()
             .map(this::toView)
             .toList());
@@ -139,6 +158,7 @@ public class CaravanCalendarService
         requestedDate,
         currentDate,
         requestedDate.month(),
+        false,
         calendarEventRepository.findByCaravanIdAndDate(caravanId, requestedDate).stream()
             .map(this::toView)
             .toList());
@@ -161,6 +181,7 @@ public class CaravanCalendarService
         event.date(),
         currentDate,
         event.date().month(),
+        false,
         calendarEventRepository.findByCaravanIdAndDate(caravanId, event.date()).stream()
             .map(this::toView)
             .toList());
@@ -190,6 +211,7 @@ public class CaravanCalendarService
         requestedDate,
         requestedDate,
         requestedDate.month(),
+        false,
         calendarEventRepository.findByCaravanIdAndDate(caravanId, requestedDate).stream()
             .map(this::toView)
             .toList());
@@ -220,6 +242,7 @@ public class CaravanCalendarService
         nextDate,
         nextDate,
         nextDate.month(),
+        false,
         calendarEventRepository.findByCaravanIdAndDate(caravanId, nextDate).stream()
             .map(this::toView)
             .toList());
@@ -230,15 +253,19 @@ public class CaravanCalendarService
       GolarionDate date,
       GolarionDate currentDate,
       int requestedMonth,
+      boolean showSecretsVisible,
       List<CalendarEventView> customEvents) {
     var canonicalEvents = List.copyOf(eventCatalogPort.findEventsByDate(date));
+    var weather = canSeeWeather(caravanId, date, currentDate, showSecretsVisible)
+        ? weatherSnapshotUseCase.getWeather(caravanId, date)
+        : null;
     return new CalendarDayView(
         toView(date),
         date.compareTo(currentDate) == 0,
         date.month() == requestedMonth,
         canonicalEvents,
         List.copyOf(customEvents),
-        weatherSnapshotUseCase.getWeather(caravanId, date));
+        weather);
   }
 
   private GolarionDateView toView(GolarionDate date) {
@@ -274,6 +301,22 @@ public class CaravanCalendarService
 
   private GolarionDate currentDate(UUID caravanId) {
     return GolarionCalendar.fromOffset(requireSupplyState(caravanId).daysPassed());
+  }
+
+  private boolean canSeeWeather(UUID caravanId, GolarionDate date, GolarionDate currentDate, boolean showSecretsVisible) {
+    if (showSecretsVisible) {
+      return true;
+    }
+    if (date.compareTo(currentDate) <= 0) {
+      return true;
+    }
+    if (!date.equals(GolarionCalendar.addDays(currentDate, 1))) {
+      return false;
+    }
+    return travelerRepository.findAllByCaravanId(caravanId).stream()
+        .map(CaravanTraveler::activeRoleCodes)
+        .flatMap(List::stream)
+        .anyMatch(METEOROLOGIST_ROLE_CODE::equals);
   }
 
   private CaravanSupplyState requireSupplyState(UUID caravanId) {

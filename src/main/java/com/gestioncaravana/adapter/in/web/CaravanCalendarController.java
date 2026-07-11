@@ -48,9 +48,10 @@ public class CaravanCalendarController {
   CalendarMonthResponse getMonth(
       @PathVariable UUID caravanId,
       @RequestParam int year,
-      @RequestParam int month) {
+      @RequestParam int month,
+      @RequestParam(defaultValue = "false") boolean showSecrets) {
     return CalendarResponseMapper.toResponse(
-        getCaravanCalendarMonthUseCase.getMonth(caravanId, year, month));
+        getCaravanCalendarMonthUseCase.getMonth(caravanId, year, month, showSecrets));
   }
 
   @GetMapping("/day")
@@ -58,9 +59,10 @@ public class CaravanCalendarController {
       @PathVariable UUID caravanId,
       @RequestParam int year,
       @RequestParam int month,
-      @RequestParam int day) {
+      @RequestParam int day,
+      @RequestParam(defaultValue = "false") boolean showSecrets) {
     return CalendarResponseMapper.toResponse(
-        getCaravanCalendarDayUseCase.getDay(caravanId, year, month, day));
+        getCaravanCalendarDayUseCase.getDay(caravanId, year, month, day, showSecrets));
   }
 
   @PostMapping("/events")

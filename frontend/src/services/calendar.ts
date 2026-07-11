@@ -10,12 +10,16 @@ export interface CreateCalendarEventRequest {
   secret: boolean;
 }
 
-export function getCalendarMonth(caravanId: string, year: number, month: number) {
-  return fetchJson<CalendarMonth>(`/caravans/${caravanId}/calendar?year=${year}&month=${month}`);
+export function getCalendarMonth(caravanId: string, year: number, month: number, showSecrets = false) {
+  return fetchJson<CalendarMonth>(
+    `/caravans/${caravanId}/calendar?year=${year}&month=${month}&showSecrets=${showSecrets}`,
+  );
 }
 
-export function getCalendarDay(caravanId: string, year: number, month: number, day: number) {
-  return fetchJson<CalendarDay>(`/caravans/${caravanId}/calendar/day?year=${year}&month=${month}&day=${day}`);
+export function getCalendarDay(caravanId: string, year: number, month: number, day: number, showSecrets = false) {
+  return fetchJson<CalendarDay>(
+    `/caravans/${caravanId}/calendar/day?year=${year}&month=${month}&day=${day}&showSecrets=${showSecrets}`,
+  );
 }
 
 export function setCalendarCurrentDate(caravanId: string, year: number, month: number, day: number) {

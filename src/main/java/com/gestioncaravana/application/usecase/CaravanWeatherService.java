@@ -7,10 +7,13 @@ import com.gestioncaravana.application.port.in.GetCaravanWeatherProfileUseCase;
 import com.gestioncaravana.application.port.in.GetCaravanWeatherSnapshotUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanWeatherProfileUseCase;
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanWeatherForecastStateRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWeatherProfileRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWeatherSnapshotRepositoryPort;
+import com.gestioncaravana.domain.CaravanWeatherForecastState;
 import com.gestioncaravana.domain.CaravanWeatherProfile;
 import com.gestioncaravana.domain.CaravanWeatherSnapshot;
+import com.gestioncaravana.domain.GolarionCalendar;
 import com.gestioncaravana.domain.GolarionDate;
 import com.gestioncaravana.domain.WeatherClimateBaseline;
 import com.gestioncaravana.domain.WeatherElevation;
@@ -18,6 +21,9 @@ import com.gestioncaravana.domain.WeatherPeriod;
 import com.gestioncaravana.domain.WeatherSeason;
 import com.gestioncaravana.domain.WeatherSnapshot;
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 import java.util.SplittableRandom;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -30,17 +36,27 @@ public class CaravanWeatherService
         UpdateCaravanWeatherProfileUseCase,
         GetCaravanWeatherSnapshotUseCase {
 
+  private static final String NONE = "NONE";
+  private static final String LIGHT = "LIGHT";
+  private static final String MODERATE = "MODERATE";
+  private static final String STRONG = "STRONG";
+  private static final String SEVERE = "SEVERE";
+  private static final String WINDSTORM = "WINDSTORM";
+
   private final CaravanCampaignRepositoryPort campaignRepository;
+  private final CaravanWeatherForecastStateRepositoryPort forecastStateRepository;
   private final CaravanWeatherProfileRepositoryPort profileRepository;
   private final CaravanWeatherSnapshotRepositoryPort snapshotRepository;
   private final Clock clock;
 
   public CaravanWeatherService(
       CaravanCampaignRepositoryPort campaignRepository,
+      CaravanWeatherForecastStateRepositoryPort forecastStateRepository,
       CaravanWeatherProfileRepositoryPort profileRepository,
       CaravanWeatherSnapshotRepositoryPort snapshotRepository,
       Clock clock) {
     this.campaignRepository = campaignRepository;
+    this.forecastStateRepository = forecastStateRepository;
     this.profileRepository = profileRepository;
     this.snapshotRepository = snapshotRepository;
     this.clock = clock;
@@ -72,6 +88,7 @@ public class CaravanWeatherService
         command.elevation(),
         command.crownOfWorld(),
         clock.instant()));
+    forecastStateRepository.deleteFromDate(caravanId, command.effectiveFrom());
     snapshotRepository.deleteFromDate(caravanId, command.effectiveFrom());
     return toView(saved);
   }
@@ -79,197 +96,566 @@ public class CaravanWeatherService
   @Override
   public WeatherSnapshotView getWeather(UUID caravanId, GolarionDate date) {
     requireCaravan(caravanId);
+    var existing = snapshotRepository.findByCaravanIdAndDate(caravanId, date);
+    if (existing.isPresent()) {
+      return toView(existing.get().weather());
+    }
+
+    var profile = profileRepository.findByCaravanId(caravanId)
+        .orElseGet(() -> CaravanWeatherProfile.defaultProfile(caravanId, clock.instant()));
+    generateWeatherUpTo(caravanId, date, profile);
     return snapshotRepository.findByCaravanIdAndDate(caravanId, date)
         .map(CaravanWeatherSnapshot::weather)
         .map(CaravanWeatherService::toView)
-        .orElseGet(() -> {
-          var profile = profileRepository.findByCaravanId(caravanId)
-              .orElseGet(() -> CaravanWeatherProfile.defaultProfile(caravanId, clock.instant()));
-          var generated = generateWeather(caravanId, date, profile);
-          snapshotRepository.save(generated);
-          return toView(generated.weather());
-        });
+        .orElseThrow(() -> new IllegalStateException("Failed to generate weather snapshot for " + date));
   }
 
   public void deleteByCaravanId(UUID caravanId) {
     profileRepository.deleteByCaravanId(caravanId);
+    forecastStateRepository.deleteByCaravanId(caravanId);
     snapshotRepository.deleteByCaravanId(caravanId);
   }
 
-  private CaravanWeatherSnapshot generateWeather(UUID caravanId, GolarionDate date, CaravanWeatherProfile profile) {
-    var seed = hashSeed(caravanId, date, profile);
-    var random = new SplittableRandom(seed);
+  private void generateWeatherUpTo(UUID caravanId, GolarionDate targetDate, CaravanWeatherProfile profile) {
+    var previousState = findLatestState(caravanId, targetDate);
+    var currentDate = previousState
+        .map(state -> GolarionCalendar.addDays(state.date(), 1))
+        .orElse(GolarionCalendar.MIN_SUPPORTED_DATE);
+
+    while (currentDate.compareTo(targetDate) <= 0) {
+      var generated = generateWeatherForDate(caravanId, currentDate, profile, previousState.orElse(null));
+      snapshotRepository.save(generated.snapshot());
+      forecastStateRepository.save(generated.forecastState());
+      previousState = Optional.of(generated.forecastState());
+      currentDate = GolarionCalendar.addDays(currentDate, 1);
+    }
+  }
+
+  private Optional<CaravanWeatherForecastState> findLatestState(UUID caravanId, GolarionDate targetDate) {
+    var current = targetDate;
+    while (current.compareTo(GolarionCalendar.MIN_SUPPORTED_DATE) >= 0) {
+      var state = forecastStateRepository.findByCaravanIdAndDate(caravanId, current);
+      if (state.isPresent()) {
+        return state;
+      }
+      if (current.equals(GolarionCalendar.MIN_SUPPORTED_DATE)) {
+        break;
+      }
+      current = GolarionCalendar.addDays(current, -1);
+    }
+    return Optional.empty();
+  }
+
+  private GeneratedWeather generateWeatherForDate(
+      UUID caravanId,
+      GolarionDate date,
+      CaravanWeatherProfile profile,
+      CaravanWeatherForecastState previousState) {
     var season = WeatherSeason.fromMonth(date.month());
-    var baseTemperature = baseTemperature(profile.climateBaseline(), profile.elevation(), season, profile.crownOfWorld());
-    var daySwing = swingForSeason(season);
+    var random = new SplittableRandom(hashSeed(caravanId, date, profile, previousState));
 
-    var midnight = period(random, baseTemperature - daySwing, profile, season, date, 0, true);
-    var dawn = period(random, baseTemperature - (daySwing / 3), profile, season, date, 1, false);
-    var noon = period(random, baseTemperature + (daySwing / 2), profile, season, date, 2, false);
-    var dusk = period(random, baseTemperature - (daySwing / 6), profile, season, date, 3, true);
+    var trend = resolveTemperatureTrend(profile, season, previousState, random);
+    var precipitation = resolveDailyPrecipitation(profile, season, trend, previousState, random);
+    var cloudCover = resolveCloudCover(precipitation, previousState, random);
+    var windByPeriod = resolveWinds(precipitation, random);
+    var severeEvent = resolveSevereEvent(profile, season, precipitation, windByPeriod, random);
+    var adjustedTrend = applySevereEvent(trend, severeEvent, random);
+    var periods = resolvePeriods(adjustedTrend, precipitation, cloudCover, windByPeriod, random);
 
-    return new CaravanWeatherSnapshot(
+    var snapshot = new CaravanWeatherSnapshot(
         caravanId,
         date,
-        new WeatherSnapshot(midnight, dawn, noon, dusk),
+        new WeatherSnapshot(periods.get(0), periods.get(1), periods.get(2), periods.get(3)),
         clock.instant());
+    var state = new CaravanWeatherForecastState(
+        caravanId,
+        date,
+        adjustedTrend.targetTemperatureF(),
+        adjustedTrend.remainingTargetDays(),
+        adjustedTrend.dayBaseTemperatureF(),
+        adjustedTrend.nightBaseTemperatureF(),
+        precipitation.carryOverPrecipitation(),
+        precipitation.carryOverRemainingPeriods(),
+        severeEvent,
+        clock.instant());
+    return new GeneratedWeather(snapshot, state);
   }
 
-  private WeatherPeriod period(
-      SplittableRandom random,
-      int temperature,
+  private TemperatureTrendState resolveTemperatureTrend(
       CaravanWeatherProfile profile,
       WeatherSeason season,
-      GolarionDate date,
-      int phase,
-      boolean night) {
-    var precipitationRoll = random.nextInt(100);
-    var precipitation = choosePrecipitation(precipitationRoll, profile, season, temperature);
-    var wind = chooseWind(random.nextInt(100), precipitation);
-    var adjustedTemperature = temperature + temperatureNoise(random, date, phase) + (night ? -1 : 0);
-    return new WeatherPeriod(
-        precipitation,
-        wind,
-        adjustedTemperature,
-        celsiusToFahrenheit(adjustedTemperature));
+      CaravanWeatherForecastState previousState,
+      SplittableRandom random) {
+    var seasonalMeanF = baselineTemperatureF(profile.climateBaseline(), profile.elevation(), season);
+    seasonalMeanF += crownOfWorldAdjustment(profile, season, random);
+
+    int targetTemperatureF;
+    int remainingDays;
+    int previousDayBaseF;
+
+    if (previousState == null) {
+      previousDayBaseF = seasonalMeanF + random.nextInt(-4, 5);
+      targetTemperatureF = seasonalMeanF + randomVariationF(profile.climateBaseline(), random);
+      remainingDays = randomDurationDays(profile.climateBaseline(), random);
+    } else {
+      previousDayBaseF = previousState.dayBaseTemperatureF();
+      if (previousState.remainingTargetDays() <= 0) {
+        targetTemperatureF = seasonalMeanF + randomVariationF(profile.climateBaseline(), random);
+        remainingDays = randomDurationDays(profile.climateBaseline(), random);
+      } else {
+        targetTemperatureF = previousState.targetTemperatureF();
+        remainingDays = previousState.remainingTargetDays();
+      }
+    }
+
+    var deltaToTarget = targetTemperatureF - previousDayBaseF;
+    var divisor = Math.max(1, remainingDays);
+    var step = deltaToTarget / divisor;
+    if (deltaToTarget > 0) {
+      step = Math.max(1, step);
+    } else if (deltaToTarget < 0) {
+      step = Math.min(-1, step);
+    }
+    var driftNoise = random.nextInt(-2, 3);
+    var newDayBaseF = previousDayBaseF + step + driftNoise;
+    var diurnalRangeF = diurnalRangeF(profile.climateBaseline(), profile.elevation(), season, random);
+    var nightBaseF = newDayBaseF - diurnalRangeF;
+
+    return new TemperatureTrendState(
+        targetTemperatureF,
+        Math.max(remainingDays - 1, 0),
+        newDayBaseF,
+        nightBaseF);
   }
 
-  private String choosePrecipitation(int roll, CaravanWeatherProfile profile, WeatherSeason season, int temperature) {
-    var baseChance = switch (season) {
-      case WINTER -> 35;
-      case SPRING, FALL -> 25;
-      case SUMMER -> 18;
+  private DailyPrecipitation resolveDailyPrecipitation(
+      CaravanWeatherProfile profile,
+      WeatherSeason season,
+      TemperatureTrendState trend,
+      CaravanWeatherForecastState previousState,
+      SplittableRandom random) {
+    if (previousState != null
+        && previousState.carryOverPrecipitation() != null
+        && previousState.carryOverRemainingPeriods() > 0) {
+      var continuingPeriods = Math.min(4, previousState.carryOverRemainingPeriods());
+      return new DailyPrecipitation(
+          previousState.carryOverPrecipitation(),
+          0,
+          continuingPeriods - 1,
+          previousState.carryOverRemainingPeriods() - continuingPeriods,
+          cloudCoverForPrecipitation(previousState.carryOverPrecipitation()));
+    }
+
+    var chance = precipitationChance(profile.climateBaseline(), profile.elevation(), season);
+    if (profile.crownOfWorld()) {
+      chance += 5;
+    }
+    if (random.nextInt(100) >= chance) {
+      return DailyPrecipitation.none();
+    }
+
+    var averageTemperatureF = (trend.dayBaseTemperatureF() + trend.nightBaseTemperatureF()) / 2;
+    var precipitation = choosePrecipitationType(profile, season, averageTemperatureF, random);
+    var startPeriod = random.nextInt(4);
+    var duration = 1 + random.nextInt(maxDurationPeriods(profile.climateBaseline(), precipitation));
+    var endPeriod = Math.min(3, startPeriod + duration - 1);
+    var carryOver = Math.max(0, (startPeriod + duration) - 4);
+    return new DailyPrecipitation(
+        precipitation,
+        startPeriod,
+        endPeriod,
+        carryOver,
+        cloudCoverForPrecipitation(precipitation));
+  }
+
+  private String resolveCloudCover(
+      DailyPrecipitation precipitation,
+      CaravanWeatherForecastState previousState,
+      SplittableRandom random) {
+    if (!NONE.equals(precipitation.precipitation())) {
+      return precipitation.cloudCover();
+    }
+    if (previousState != null && previousState.carryOverPrecipitation() != null && random.nextInt(100) < 40) {
+      return "PARTLY_CLOUDY";
+    }
+    var roll = random.nextInt(100);
+    if (roll < 45) {
+      return "CLEAR";
+    }
+    if (roll < 80) {
+      return "PARTLY_CLOUDY";
+    }
+    return "OVERCAST";
+  }
+
+  private List<String> resolveWinds(DailyPrecipitation precipitation, SplittableRandom random) {
+    var winds = new ArrayList<String>(List.of(LIGHT, LIGHT, LIGHT, LIGHT));
+    for (int index = 0; index < 4; index++) {
+      var hasPrecipitation = precipitation.affectsPeriod(index);
+      if (!hasPrecipitation) {
+        winds.set(index, rollFairWeatherWind(random));
+        continue;
+      }
+
+      if (precipitation.isFog()) {
+        winds.set(index, LIGHT);
+        continue;
+      }
+
+      winds.set(index, rollStormWind(precipitation.precipitation(), random));
+    }
+    return winds;
+  }
+
+  private String resolveSevereEvent(
+      CaravanWeatherProfile profile,
+      WeatherSeason season,
+      DailyPrecipitation precipitation,
+      List<String> winds,
+      SplittableRandom random) {
+    var maxWind = winds.stream().mapToInt(this::windRank).max().orElse(0);
+    if (precipitation.isThunderstorm() && maxWind >= windRank(STRONG) && random.nextInt(100) < 8) {
+      return random.nextInt(100) < 35 ? "HAILSTORM" : "SEVERE_THUNDERSTORM";
+    }
+    if (precipitation.isSnowStorm() && maxWind >= windRank(SEVERE) && random.nextInt(100) < 10) {
+      return random.nextInt(100) < 45 ? "BLIZZARD" : "THUNDERSNOW";
+    }
+    if (profile.crownOfWorld() && season != WeatherSeason.SUMMER && random.nextInt(100) < 6) {
+      return "POLAR_SURGE";
+    }
+    return null;
+  }
+
+  private TemperatureTrendState applySevereEvent(
+      TemperatureTrendState trend,
+      String severeEvent,
+      SplittableRandom random) {
+    if (severeEvent == null) {
+      return trend;
+    }
+
+    return switch (severeEvent) {
+      case "POLAR_SURGE" -> new TemperatureTrendState(
+          trend.targetTemperatureF() - 12,
+          trend.remainingTargetDays(),
+          trend.dayBaseTemperatureF() - random.nextInt(10, 19),
+          trend.nightBaseTemperatureF() - random.nextInt(14, 24));
+      case "BLIZZARD", "THUNDERSNOW" -> new TemperatureTrendState(
+          trend.targetTemperatureF() - 6,
+          trend.remainingTargetDays(),
+          trend.dayBaseTemperatureF() - random.nextInt(4, 10),
+          trend.nightBaseTemperatureF() - random.nextInt(6, 12));
+      case "HAILSTORM", "SEVERE_THUNDERSTORM" -> new TemperatureTrendState(
+          trend.targetTemperatureF(),
+          trend.remainingTargetDays(),
+          trend.dayBaseTemperatureF() - random.nextInt(2, 7),
+          trend.nightBaseTemperatureF() - random.nextInt(1, 5));
+      default -> trend;
     };
-    baseChance += profile.climateBaseline() == WeatherClimateBaseline.COLD ? 10 : 0;
-    baseChance += profile.climateBaseline() == WeatherClimateBaseline.TROPICAL ? -5 : 0;
-    baseChance += profile.elevation() == WeatherElevation.HIGHLAND ? 8 : 0;
-    baseChance += profile.elevation() == WeatherElevation.PEAK ? 15 : 0;
-    baseChance += profile.crownOfWorld() ? 10 : 0;
-    if (temperature <= 32) {
-      baseChance += 10;
+  }
+
+  private List<WeatherPeriod> resolvePeriods(
+      TemperatureTrendState trend,
+      DailyPrecipitation precipitation,
+      String cloudCover,
+      List<String> winds,
+      SplittableRandom random) {
+    var cloudAdjustment = cloudTemperatureAdjustment(cloudCover);
+    var dawnF = trend.nightBaseTemperatureF() + cloudAdjustment.nightOffsetF() + random.nextInt(-1, 2);
+    var morningF = ((trend.nightBaseTemperatureF() + trend.dayBaseTemperatureF()) / 2)
+        + cloudAdjustment.transitionOffsetF() + random.nextInt(-1, 2);
+    var afternoonF = trend.dayBaseTemperatureF() + cloudAdjustment.dayOffsetF() + random.nextInt(-1, 2);
+    var nightF = (trend.nightBaseTemperatureF() + trend.dayBaseTemperatureF()) / 2
+        - 2 + cloudAdjustment.nightOffsetF() + random.nextInt(-1, 2);
+
+    if (morningF > afternoonF) {
+      morningF = afternoonF - 1;
+    }
+    if (nightF > afternoonF) {
+      nightF = afternoonF - 2;
     }
 
-    if (roll >= baseChance) {
-      return "NONE";
-    }
+    return List.of(
+        toPeriod(0, precipitation, winds.get(0), dawnF),
+        toPeriod(1, precipitation, winds.get(1), morningF),
+        toPeriod(2, precipitation, winds.get(2), afternoonF),
+        toPeriod(3, precipitation, winds.get(3), nightF));
+  }
 
-    var frozen = temperature <= 32;
-    var typeRoll = roll % 100;
-    if (frozen) {
-      if (typeRoll < 10) {
+  private WeatherPeriod toPeriod(int periodIndex, DailyPrecipitation precipitation, String wind, int temperatureF) {
+    var precipitationLabel = precipitation.affectsPeriod(periodIndex) ? precipitation.precipitation() : NONE;
+    var resolvedWind = precipitationLabel.contains("FOG") ? LIGHT : wind;
+    return new WeatherPeriod(
+        precipitationLabel,
+        resolvedWind,
+        fahrenheitToCelsius(temperatureF),
+        temperatureF);
+  }
+
+  private int baselineTemperatureF(
+      WeatherClimateBaseline baseline,
+      WeatherElevation elevation,
+      WeatherSeason season) {
+    var climateBaseline = switch (baseline) {
+      case COLD -> switch (season) {
+        case WINTER -> 20;
+        case SPRING, FALL -> 35;
+        case SUMMER -> 50;
+      };
+      case TEMPERATE -> switch (season) {
+        case WINTER -> 35;
+        case SPRING, FALL -> 55;
+        case SUMMER -> 75;
+      };
+      case TROPICAL -> switch (season) {
+        case WINTER -> 70;
+        case SPRING, FALL -> 82;
+        case SUMMER -> 88;
+      };
+    };
+    return climateBaseline + switch (elevation) {
+      case SEA_LEVEL -> 3;
+      case LOWLAND -> 0;
+      case HIGHLAND -> -8;
+      case PEAK -> -18;
+    };
+  }
+
+  private int crownOfWorldAdjustment(
+      CaravanWeatherProfile profile,
+      WeatherSeason season,
+      SplittableRandom random) {
+    if (!profile.crownOfWorld()) {
+      return 0;
+    }
+    return switch (season) {
+      case WINTER -> -18 - random.nextInt(0, 5);
+      case SPRING, FALL -> -12 - random.nextInt(0, 4);
+      case SUMMER -> -8 - random.nextInt(0, 4);
+    };
+  }
+
+  private int randomVariationF(WeatherClimateBaseline baseline, SplittableRandom random) {
+    return switch (baseline) {
+      case COLD -> random.nextInt(-16, 13);
+      case TEMPERATE -> random.nextInt(-12, 13);
+      case TROPICAL -> random.nextInt(-8, 10);
+    };
+  }
+
+  private int randomDurationDays(WeatherClimateBaseline baseline, SplittableRandom random) {
+    return switch (baseline) {
+      case COLD -> random.nextInt(3, 7);
+      case TEMPERATE -> random.nextInt(2, 6);
+      case TROPICAL -> random.nextInt(2, 5);
+    };
+  }
+
+  private int diurnalRangeF(
+      WeatherClimateBaseline baseline,
+      WeatherElevation elevation,
+      WeatherSeason season,
+      SplittableRandom random) {
+    var base = switch (baseline) {
+      case COLD -> 10;
+      case TEMPERATE -> 13;
+      case TROPICAL -> 11;
+    };
+    base += switch (season) {
+      case WINTER -> -1;
+      case SPRING, FALL -> 0;
+      case SUMMER -> 2;
+    };
+    base += switch (elevation) {
+      case SEA_LEVEL -> 1;
+      case LOWLAND -> 0;
+      case HIGHLAND -> 1;
+      case PEAK -> 2;
+    };
+    return base + random.nextInt(-2, 3);
+  }
+
+  private int precipitationChance(
+      WeatherClimateBaseline baseline,
+      WeatherElevation elevation,
+      WeatherSeason season) {
+    var seasonal = switch (season) {
+      case WINTER -> 28;
+      case SPRING -> 32;
+      case SUMMER -> 24;
+      case FALL -> 30;
+    };
+    seasonal += switch (baseline) {
+      case COLD -> -4;
+      case TEMPERATE -> 0;
+      case TROPICAL -> 18;
+    };
+    seasonal += switch (elevation) {
+      case SEA_LEVEL -> 8;
+      case LOWLAND -> 3;
+      case HIGHLAND -> -5;
+      case PEAK -> -8;
+    };
+    return seasonal;
+  }
+
+  private String choosePrecipitationType(
+      CaravanWeatherProfile profile,
+      WeatherSeason season,
+      int averageTemperatureF,
+      SplittableRandom random) {
+    var roll = random.nextInt(100);
+    var freezingBoundary = 32;
+    if (averageTemperatureF <= freezingBoundary - 3) {
+      if (roll < 20) {
         return "LIGHT_FOG";
       }
-      if (typeRoll < 30) {
-        return "HEAVY_FOG";
-      }
-      if (typeRoll < 70) {
+      if (roll < 60) {
         return "LIGHT_SNOW";
       }
-      if (typeRoll < 90) {
+      if (roll < 88) {
         return "MEDIUM_SNOW";
       }
       return "HEAVY_SNOW";
     }
 
-    if (typeRoll < 10) {
-      return "LIGHT_FOG";
-    }
-    if (typeRoll < 20) {
-      return "MEDIUM_FOG";
-    }
-    if (typeRoll < 35) {
-      return "DRIZZLE";
-    }
-    if (typeRoll < 60) {
-      return "LIGHT_RAIN";
-    }
-    if (typeRoll < 80) {
+    if (averageTemperatureF <= freezingBoundary + 2) {
+      if (roll < 12) {
+        return "LIGHT_FOG";
+      }
+      if (roll < 35) {
+        return "SLEET";
+      }
+      if (roll < 60) {
+        return "LIGHT_SNOW";
+      }
+      if (roll < 82) {
+        return "LIGHT_RAIN";
+      }
       return "RAIN";
     }
-    if (typeRoll < 92) {
+
+    if (roll < 12) {
+      return season == WeatherSeason.SUMMER && profile.climateBaseline() != WeatherClimateBaseline.COLD
+          ? "MORNING_MIST"
+          : "LIGHT_FOG";
+    }
+    if (roll < 28) {
+      return "DRIZZLE";
+    }
+    if (roll < 58) {
+      return "LIGHT_RAIN";
+    }
+    if (roll < 82) {
+      return "RAIN";
+    }
+    if (roll < 95) {
       return "HEAVY_RAIN";
     }
     return "THUNDERSTORM";
   }
 
-  private String chooseWind(int roll, String precipitation) {
-    if ("THUNDERSTORM".equals(precipitation)) {
-      if (roll < 50) {
-        return "STRONG";
+  private int maxDurationPeriods(WeatherClimateBaseline baseline, String precipitation) {
+    var base = switch (baseline) {
+      case COLD -> 5;
+      case TEMPERATE -> 4;
+      case TROPICAL -> 6;
+    };
+    if (precipitation.contains("THUNDER")) {
+      return Math.max(2, base - 1);
+    }
+    if (precipitation.contains("FOG") || precipitation.contains("MIST")) {
+      return Math.max(2, base - 2);
+    }
+    return base;
+  }
+
+  private String cloudCoverForPrecipitation(String precipitation) {
+    if (precipitation == null || NONE.equals(precipitation)) {
+      return "CLEAR";
+    }
+    if (precipitation.contains("THUNDER") || precipitation.contains("HEAVY")) {
+      return "STORM";
+    }
+    if (precipitation.contains("FOG") || precipitation.contains("MIST")) {
+      return "OVERCAST";
+    }
+    return "OVERCAST";
+  }
+
+  private String rollFairWeatherWind(SplittableRandom random) {
+    var roll = random.nextInt(100);
+    if (roll < 60) {
+      return LIGHT;
+    }
+    if (roll < 90) {
+      return MODERATE;
+    }
+    if (roll < 98) {
+      return STRONG;
+    }
+    return SEVERE;
+  }
+
+  private String rollStormWind(String precipitation, SplittableRandom random) {
+    if (precipitation.contains("THUNDER")) {
+      var roll = random.nextInt(100);
+      if (roll < 45) {
+        return STRONG;
       }
-      if (roll < 90) {
-        return "SEVERE";
+      if (roll < 85) {
+        return SEVERE;
       }
-      return "WINDSTORM";
+      return WINDSTORM;
     }
-
-    if (roll < 50) {
-      return "LIGHT";
+    if (precipitation.contains("HEAVY")) {
+      return random.nextInt(100) < 60 ? STRONG : SEVERE;
     }
-    if (roll < 80) {
-      return "MODERATE";
+    if (precipitation.contains("SNOW") || precipitation.contains("SLEET")) {
+      return random.nextInt(100) < 70 ? MODERATE : STRONG;
     }
-    if (roll < 92) {
-      return "STRONG";
-    }
-    if (roll < 97) {
-      return "SEVERE";
-    }
-    return "WINDSTORM";
+    return random.nextInt(100) < 75 ? LIGHT : MODERATE;
   }
 
-  private int temperatureNoise(SplittableRandom random, GolarionDate date, int phase) {
-    var combined = (date.year() * 31L) + (date.month() * 7L) + date.day() + phase;
-    return (int) (random.split().nextInt(-3, 4) + (combined % 2 == 0 ? 0 : 1));
-  }
-
-  private int swingForSeason(WeatherSeason season) {
-    return switch (season) {
-      case WINTER -> 14;
-      case SPRING -> 16;
-      case SUMMER -> 18;
-      case FALL -> 15;
+  private int windRank(String wind) {
+    return switch (wind) {
+      case LIGHT -> 1;
+      case MODERATE -> 2;
+      case STRONG -> 3;
+      case SEVERE -> 4;
+      case WINDSTORM -> 5;
+      default -> 0;
     };
   }
 
-  private int baseTemperature(WeatherClimateBaseline baseline, WeatherElevation elevation, WeatherSeason season, boolean crownOfWorld) {
-    int base = switch (baseline) {
-      case COLD -> switch (season) {
-        case WINTER -> crownOfWorld ? -10 : 20;
-        case SPRING, FALL -> crownOfWorld ? 10 : 30;
-        case SUMMER -> crownOfWorld ? 15 : 40;
-      };
-      case TEMPERATE -> switch (season) {
-        case WINTER -> 30;
-        case SPRING, FALL -> 60;
-        case SUMMER -> 80;
-      };
-      case TROPICAL -> switch (season) {
-        case WINTER -> 50;
-        case SPRING, FALL -> 75;
-        case SUMMER -> 95;
-      };
-    };
-    return base + elevationAdjustment(elevation);
-  }
-
-  private int elevationAdjustment(WeatherElevation elevation) {
-    return switch (elevation) {
-      case PEAK -> -25;
-      case HIGHLAND -> -10;
-      case SEA_LEVEL -> 10;
-      case LOWLAND -> 0;
+  private CloudTemperatureAdjustment cloudTemperatureAdjustment(String cloudCover) {
+    return switch (cloudCover) {
+      case "CLEAR" -> new CloudTemperatureAdjustment(0, 0, 0);
+      case "PARTLY_CLOUDY" -> new CloudTemperatureAdjustment(-1, 1, 0);
+      case "OVERCAST" -> new CloudTemperatureAdjustment(-2, 2, 0);
+      case "STORM" -> new CloudTemperatureAdjustment(-3, 3, -1);
+      default -> new CloudTemperatureAdjustment(0, 0, 0);
     };
   }
 
-  private long hashSeed(UUID caravanId, GolarionDate date, CaravanWeatherProfile profile) {
+  private long hashSeed(
+      UUID caravanId,
+      GolarionDate date,
+      CaravanWeatherProfile profile,
+      CaravanWeatherForecastState previousState) {
     long seed = caravanId.getMostSignificantBits() ^ caravanId.getLeastSignificantBits();
-    seed = 31 * seed + date.year();
-    seed = 31 * seed + date.month();
-    seed = 31 * seed + date.day();
+    seed = 31 * seed + GolarionCalendar.toOffset(date);
     seed = 31 * seed + profile.climateBaseline().ordinal();
     seed = 31 * seed + profile.elevation().ordinal();
     seed = 31 * seed + (profile.crownOfWorld() ? 1 : 0);
+    if (previousState != null) {
+      seed = 31 * seed + previousState.targetTemperatureF();
+      seed = 31 * seed + previousState.remainingTargetDays();
+      seed = 31 * seed + previousState.dayBaseTemperatureF();
+      seed = 31 * seed + previousState.nightBaseTemperatureF();
+      seed = 31 * seed + previousState.carryOverRemainingPeriods();
+      seed = 31 * seed + (previousState.carryOverPrecipitation() == null ? 0 : previousState.carryOverPrecipitation().hashCode());
+    }
     return seed;
   }
 
@@ -303,7 +689,54 @@ public class CaravanWeatherService
         profile.updatedAt());
   }
 
-  private static int celsiusToFahrenheit(int celsius) {
-    return Math.round((celsius * 9 / 5.0f) + 32);
+  private static int fahrenheitToCelsius(int fahrenheit) {
+    return Math.round((fahrenheit - 32) * 5 / 9.0f);
   }
+
+  private record GeneratedWeather(
+      CaravanWeatherSnapshot snapshot,
+      CaravanWeatherForecastState forecastState) {}
+
+  private record TemperatureTrendState(
+      int targetTemperatureF,
+      int remainingTargetDays,
+      int dayBaseTemperatureF,
+      int nightBaseTemperatureF) {}
+
+  private record DailyPrecipitation(
+      String precipitation,
+      int startPeriod,
+      int endPeriod,
+      int carryOverRemainingPeriods,
+      String cloudCover) {
+
+    static DailyPrecipitation none() {
+      return new DailyPrecipitation(NONE, -1, -1, 0, "CLEAR");
+    }
+
+    boolean affectsPeriod(int periodIndex) {
+      return !NONE.equals(precipitation) && periodIndex >= startPeriod && periodIndex <= endPeriod;
+    }
+
+    boolean isFog() {
+      return precipitation.contains("FOG") || precipitation.contains("MIST");
+    }
+
+    boolean isThunderstorm() {
+      return precipitation.contains("THUNDER");
+    }
+
+    boolean isSnowStorm() {
+      return precipitation.contains("SNOW");
+    }
+
+    String carryOverPrecipitation() {
+      return carryOverRemainingPeriods > 0 ? precipitation : null;
+    }
+  }
+
+  private record CloudTemperatureAdjustment(
+      int dayOffsetF,
+      int nightOffsetF,
+      int transitionOffsetF) {}
 }

@@ -3,10 +3,12 @@ package com.gestioncaravana.application.usecase;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.gestioncaravana.application.port.out.CaravanCampaignRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanWeatherForecastStateRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWeatherProfileRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWeatherSnapshotRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
 import com.gestioncaravana.domain.CaravanMainStats;
+import com.gestioncaravana.domain.CaravanWeatherForecastState;
 import com.gestioncaravana.domain.CaravanWeatherProfile;
 import com.gestioncaravana.domain.CaravanWeatherSnapshot;
 import com.gestioncaravana.domain.GolarionDate;
@@ -23,6 +25,7 @@ import org.junit.jupiter.api.Test;
 class CaravanWeatherServiceTest {
 
   private InMemoryCaravanRepository campaignRepository;
+  private InMemoryWeatherForecastStateRepository weatherForecastStateRepository;
   private InMemoryWeatherProfileRepository weatherProfileRepository;
   private InMemoryWeatherSnapshotRepository weatherSnapshotRepository;
   private CaravanWeatherService service;
@@ -31,10 +34,12 @@ class CaravanWeatherServiceTest {
   @BeforeEach
   void setUp() {
     campaignRepository = new InMemoryCaravanRepository();
+    weatherForecastStateRepository = new InMemoryWeatherForecastStateRepository();
     weatherProfileRepository = new InMemoryWeatherProfileRepository();
     weatherSnapshotRepository = new InMemoryWeatherSnapshotRepository();
     service = new CaravanWeatherService(
         campaignRepository,
+        weatherForecastStateRepository,
         weatherProfileRepository,
         weatherSnapshotRepository,
         Clock.fixed(Instant.parse("2026-07-10T12:00:00Z"), ZoneOffset.UTC));
@@ -56,7 +61,13 @@ class CaravanWeatherServiceTest {
 
     assertThat(first.midnightToDawn()).isNotNull();
     assertThat(second.midnightToDawn()).isEqualTo(first.midnightToDawn());
-    assertThat(weatherSnapshotRepository.count()).isEqualTo(1);
+    assertThat(weatherSnapshotRepository.count()).isGreaterThanOrEqualTo(1);
+    assertThat(weatherForecastStateRepository.findByCaravanIdAndDate(caravanId, date))
+        .hasValueSatisfying(state -> {
+          assertThat(state.targetTemperatureF()).isNotZero();
+          assertThat(state.dayBaseTemperatureF()).isNotZero();
+          assertThat(state.nightBaseTemperatureF()).isNotZero();
+        });
   }
 
   @Test
@@ -78,7 +89,50 @@ class CaravanWeatherServiceTest {
     assertThat(updated.climateBaseline()).isEqualTo(com.gestioncaravana.domain.WeatherClimateBaseline.COLD);
     assertThat(weatherSnapshotRepository.findByCaravanIdAndDate(caravanId, earlierDate)).isPresent();
     assertThat(weatherSnapshotRepository.findByCaravanIdAndDate(caravanId, laterDate)).isEmpty();
-    assertThat(weatherSnapshotRepository.count()).isEqualTo(1);
+    assertThat(weatherForecastStateRepository.findByCaravanIdAndDate(caravanId, earlierDate)).isPresent();
+    assertThat(weatherForecastStateRepository.findByCaravanIdAndDate(caravanId, laterDate)).isEmpty();
+    assertThat(weatherSnapshotRepository.count()).isGreaterThanOrEqualTo(1);
+  }
+
+  private static final class InMemoryWeatherForecastStateRepository
+      implements CaravanWeatherForecastStateRepositoryPort {
+    private final Map<String, CaravanWeatherForecastState> states = new HashMap<>();
+
+    @Override
+    public CaravanWeatherForecastState save(CaravanWeatherForecastState state) {
+      states.put(key(state.caravanId(), state.date()), state);
+      return state;
+    }
+
+    @Override
+    public Optional<CaravanWeatherForecastState> findByCaravanIdAndDate(UUID caravanId, GolarionDate date) {
+      return Optional.ofNullable(states.get(key(caravanId, date)));
+    }
+
+    @Override
+    public void deleteByCaravanIdAndDate(UUID caravanId, GolarionDate date) {
+      states.remove(key(caravanId, date));
+    }
+
+    @Override
+    public void deleteFromDate(UUID caravanId, GolarionDate fromDate) {
+      states.entrySet().removeIf(entry -> entry.getKey().startsWith(caravanId + ":")
+          && toDate(entry.getKey()).compareTo(fromDate) >= 0);
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      states.entrySet().removeIf(entry -> entry.getKey().startsWith(caravanId + ":"));
+    }
+
+    private String key(UUID caravanId, GolarionDate date) {
+      return caravanId + ":" + date.year() + ":" + date.month() + ":" + date.day();
+    }
+
+    private GolarionDate toDate(String key) {
+      var parts = key.split(":");
+      return new GolarionDate(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
+    }
   }
 
   @Test

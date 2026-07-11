@@ -15,6 +15,7 @@ import com.gestioncaravana.application.port.out.CaravanSupplyStateRepositoryPort
 import com.gestioncaravana.application.port.out.CaravanTravelerRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWagonImprovementRepositoryPort;
+import com.gestioncaravana.application.port.out.CaravanWeatherForecastStateRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWeatherProfileRepositoryPort;
 import com.gestioncaravana.application.port.out.CaravanWeatherSnapshotRepositoryPort;
 import com.gestioncaravana.domain.CaravanCampaign;
@@ -29,6 +30,7 @@ import com.gestioncaravana.domain.CaravanSupplyState;
 import com.gestioncaravana.domain.CaravanTraveler;
 import com.gestioncaravana.domain.CaravanWagon;
 import com.gestioncaravana.domain.CaravanWagonImprovement;
+import com.gestioncaravana.domain.CaravanWeatherForecastState;
 import com.gestioncaravana.domain.CaravanWeatherProfile;
 import com.gestioncaravana.domain.CaravanWeatherSnapshot;
 import com.gestioncaravana.domain.GolarionDate;
@@ -51,6 +53,7 @@ class CaravanManagementServiceTest {
   private InMemoryCargoRepository cargoRepository;
   private InMemoryFeatRepository featRepository;
   private InMemoryWeatherProfileRepository weatherProfileRepository;
+  private InMemoryWeatherForecastStateRepository weatherForecastStateRepository;
   private InMemoryWeatherSnapshotRepository weatherSnapshotRepository;
   private CaravanManagementService service;
 
@@ -63,9 +66,11 @@ class CaravanManagementServiceTest {
     cargoRepository = new InMemoryCargoRepository();
     featRepository = new InMemoryFeatRepository();
     weatherProfileRepository = new InMemoryWeatherProfileRepository();
+    weatherForecastStateRepository = new InMemoryWeatherForecastStateRepository();
     weatherSnapshotRepository = new InMemoryWeatherSnapshotRepository();
     var weatherService = new CaravanWeatherService(
         repository,
+        weatherForecastStateRepository,
         weatherProfileRepository,
         weatherSnapshotRepository,
         Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
@@ -608,6 +613,47 @@ class CaravanManagementServiceTest {
     @Override
     public void deleteByCaravanId(UUID caravanId) {
       profiles.remove(caravanId);
+    }
+  }
+
+  private static final class InMemoryWeatherForecastStateRepository
+      implements CaravanWeatherForecastStateRepositoryPort {
+    private final java.util.Map<String, CaravanWeatherForecastState> states = new java.util.HashMap<>();
+
+    @Override
+    public CaravanWeatherForecastState save(CaravanWeatherForecastState state) {
+      states.put(key(state.caravanId(), state.date()), state);
+      return state;
+    }
+
+    @Override
+    public Optional<CaravanWeatherForecastState> findByCaravanIdAndDate(UUID caravanId, GolarionDate date) {
+      return Optional.ofNullable(states.get(key(caravanId, date)));
+    }
+
+    @Override
+    public void deleteByCaravanIdAndDate(UUID caravanId, GolarionDate date) {
+      states.remove(key(caravanId, date));
+    }
+
+    @Override
+    public void deleteFromDate(UUID caravanId, GolarionDate fromDate) {
+      states.entrySet().removeIf(entry -> entry.getKey().startsWith(caravanId + ":")
+          && toDate(entry.getKey()).compareTo(fromDate) >= 0);
+    }
+
+    @Override
+    public void deleteByCaravanId(UUID caravanId) {
+      states.entrySet().removeIf(entry -> entry.getKey().startsWith(caravanId + ":"));
+    }
+
+    private String key(UUID caravanId, GolarionDate date) {
+      return caravanId + ":" + date.year() + ":" + date.month() + ":" + date.day();
+    }
+
+    private GolarionDate toDate(String key) {
+      var parts = key.split(":");
+      return new GolarionDate(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
     }
   }
 

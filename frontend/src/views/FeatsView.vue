@@ -398,56 +398,58 @@ onMounted(refresh);
               <input v-model="search" type="search" placeholder="Buscar dote o causa…" class="search-input" />
             </div>
             <div v-if="visibleFeats.length === 0" class="empty-state">La caravana todavía no tiene dotes que coincidan con el filtro.</div>
-            <table v-else class="data-table">
-            <thead>
-              <tr>
-                <th>Dote</th>
-                <th>Estado</th>
-                <th>Adquisición</th>
-                <th>Detalle</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="feat in visibleFeats" :key="feat.id">
-                <td>
-                  <button class="text-button" type="button" @click="openFeatDetail(feat)">
-                    <strong>{{ feat.name }}</strong>
-                  </button>
-                </td>
-                <td>
-                  <span class="badge" :class="feat.active ? 'badge--ok' : 'badge--warn'">
-                    {{ feat.active ? "Activa" : "Inactiva" }}
-                  </span>
-                  <div v-if="feat.blockedReason" class="muted">{{ feat.blockedReason }}</div>
-                  <div v-if="feat.manualApplies === true" class="muted">
-                    Manual: {{ feat.manualApplies ? "Sí" : "No" }}
-                    <span v-if="feat.manualAppliesReason">· {{ feat.manualAppliesReason }}</span>
-                  </div>
-                </td>
-                <td>
-                  <div>{{ feat.acquisitionSourceType === "LEVEL_UP" ? `Nivel ${feat.acquisitionLevel}` : "Otra causa" }}</div>
-                  <div class="muted">{{ feat.acquisitionCause ?? "—" }}</div>
-                </td>
-                <td>
-                  <div class="muted">{{ feat.benefitText }}</div>
-                </td>
-                <td class="actions">
-                  <button class="ghost-button" type="button" @click="openEditModal(feat)">Editar</button>
-                  <button
-                    class="danger-button"
-                    type="button"
-                    :disabled="submitting"
-                    :aria-busy="isPending(`delete:${feat.id}`)"
-                    @click="deleteFeat(feat)"
-                  >
-                    <span v-if="isPending(`delete:${feat.id}`)" class="button-spinner" aria-hidden="true"></span>
-                    <span>{{ isPending(`delete:${feat.id}`) ? "Eliminando…" : "Borrar" }}</span>
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+            <div v-else class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Dote</th>
+                    <th>Estado</th>
+                    <th>Adquisición</th>
+                    <th>Detalle</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="feat in visibleFeats" :key="feat.id">
+                    <td>
+                      <button class="text-button" type="button" @click="openFeatDetail(feat)">
+                        <strong>{{ feat.name }}</strong>
+                      </button>
+                    </td>
+                    <td>
+                      <span class="badge" :class="feat.active ? 'badge--ok' : 'badge--warn'">
+                        {{ feat.active ? "Activa" : "Inactiva" }}
+                      </span>
+                      <div v-if="feat.blockedReason" class="muted">{{ feat.blockedReason }}</div>
+                      <div v-if="feat.manualApplies === true" class="muted">
+                        Manual: {{ feat.manualApplies ? "Sí" : "No" }}
+                        <span v-if="feat.manualAppliesReason">· {{ feat.manualAppliesReason }}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div>{{ feat.acquisitionSourceType === "LEVEL_UP" ? `Nivel ${feat.acquisitionLevel}` : "Otra causa" }}</div>
+                      <div class="muted">{{ feat.acquisitionCause ?? "—" }}</div>
+                    </td>
+                    <td>
+                      <div class="muted">{{ feat.benefitText }}</div>
+                    </td>
+                    <td class="actions">
+                      <button class="ghost-button" type="button" @click="openEditModal(feat)">Editar</button>
+                      <button
+                        class="danger-button"
+                        type="button"
+                        :disabled="submitting"
+                        :aria-busy="isPending(`delete:${feat.id}`)"
+                        @click="deleteFeat(feat)"
+                      >
+                        <span v-if="isPending(`delete:${feat.id}`)" class="button-spinner" aria-hidden="true"></span>
+                        <span>{{ isPending(`delete:${feat.id}`) ? "Eliminando…" : "Borrar" }}</span>
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </section>
 
           <section class="panel">
@@ -798,6 +800,7 @@ onMounted(refresh);
 .data-table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 760px;
 }
 
 .data-table th,
@@ -812,6 +815,14 @@ onMounted(refresh);
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+
+.table-wrap {
+  overflow: auto;
+  margin-top: 1rem;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable both-edges;
 }
 
 .actions button,
@@ -1036,6 +1047,37 @@ input[type="checkbox"] {
 .modal__body label {
   display: grid;
   gap: 0.35rem;
+}
+
+@media (max-width: 1000px) {
+  .page {
+    padding: 1rem;
+  }
+
+  .panel-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+
+  .catalog-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 720px) {
+  .data-table {
+    min-width: 700px;
+  }
 }
 
 .modal__body span {

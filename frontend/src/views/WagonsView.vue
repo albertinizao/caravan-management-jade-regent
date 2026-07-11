@@ -4400,12 +4400,16 @@ dd {
 .table-wrap {
   overflow: auto;
   margin-top: 1rem;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable both-edges;
 }
 
 .wagon-table {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
+  min-width: 960px;
 }
 
 .wagon-table colgroup col.wagon-col-name { width: 21%; }
@@ -4974,6 +4978,11 @@ dd {
   .draft-summary-cell {
     min-width: 0;
   }
+
+  .table-wrap {
+    margin-inline: -0.25rem;
+    padding-inline: 0.25rem;
+  }
 }
 
 @media (max-width: 700px) {
@@ -4998,6 +5007,10 @@ dd {
   .modal-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .wagon-table {
+    min-width: 900px;
   }
 }
 </style>

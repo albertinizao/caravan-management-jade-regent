@@ -1646,12 +1646,16 @@ p {
 .table-wrap {
   overflow: auto;
   margin-top: 1rem;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable both-edges;
 }
 
 .travelers-table {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
+  min-width: 760px;
 }
 
 .travelers-col-traveler {
@@ -2119,6 +2123,11 @@ dd {
     flex-direction: column;
     align-items: flex-start;
   }
+
+  .table-wrap {
+    margin-inline: -0.25rem;
+    padding-inline: 0.25rem;
+  }
 }
 
 @media (max-width: 720px) {
@@ -2130,6 +2139,10 @@ dd {
   .role-checkbox-grid,
   .role-toggle-grid {
     grid-template-columns: 1fr;
+  }
+
+  .travelers-table {
+    min-width: 700px;
   }
 }
 

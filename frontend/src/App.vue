@@ -75,20 +75,30 @@ watch(
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 1rem;
-  padding: 1rem 1.5rem;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  padding: 1rem var(--page-gutter);
   border-bottom: 1px solid #e5e7eb;
   background: white;
+  position: sticky;
+  top: 0;
+  z-index: 20;
 }
 
 .brand {
+  flex: 1 1 18rem;
   min-width: 0;
+}
+
+.brand strong {
+  display: block;
+  font-size: 1.05rem;
 }
 
 .topbar p {
   margin: 0;
   color: #6b7280;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
 }
 
 .nav-toggle {
@@ -99,9 +109,10 @@ watch(
   border-radius: 0.85rem;
   background: #f9fafb;
   color: #111827;
-  padding: 0.65rem 0.9rem;
+  padding: 0.7rem 0.95rem;
   font: inherit;
   font-weight: 600;
+  min-height: 2.75rem;
 }
 
 .nav-toggle__icon {
@@ -113,9 +124,16 @@ watch(
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: auto;
 }
 
 .nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
   color: #1f2937;
   text-decoration: none;
   padding: 0.55rem 0.85rem;
@@ -128,7 +146,7 @@ watch(
   color: #1d4ed8;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
   .topbar {
     flex-direction: column;
     align-items: stretch;
@@ -145,6 +163,7 @@ watch(
     flex-direction: column;
     gap: 0.5rem;
     padding-top: 0.25rem;
+    justify-content: flex-start;
   }
 
   .nav.nav--open {
@@ -167,6 +186,16 @@ watch(
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
   border: 1px solid transparent;
   font-weight: 600;
+}
+
+@media (max-width: 900px) {
+  .global-toast {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    bottom: max(1rem, env(safe-area-inset-bottom));
+    max-width: min(420px, calc(100vw - 1.5rem));
+  }
 }
 
 .global-toast--success {

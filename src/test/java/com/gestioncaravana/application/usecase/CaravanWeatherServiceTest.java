@@ -81,6 +81,61 @@ class CaravanWeatherServiceTest {
     assertThat(weatherSnapshotRepository.count()).isEqualTo(1);
   }
 
+  @Test
+  void tropicalSeaLevelSummerMonthStaysInRealisticCelsiusBand() {
+    weatherProfileRepository.save(new CaravanWeatherProfile(
+        caravanId,
+        com.gestioncaravana.domain.WeatherClimateBaseline.TROPICAL,
+        com.gestioncaravana.domain.WeatherElevation.SEA_LEVEL,
+        false,
+        Instant.parse("2026-07-10T12:00:00Z")));
+
+    for (int day = 1; day <= 31; day++) {
+      var weather = service.getWeather(caravanId, new GolarionDate(4712, 7, day));
+      assertThat(weather.midnightToDawn().temperatureC()).isBetween(10, 50);
+      assertThat(weather.dawnToNoon().temperatureC()).isBetween(10, 50);
+      assertThat(weather.noonToDusk().temperatureC()).isBetween(10, 50);
+      assertThat(weather.duskToMidnight().temperatureC()).isBetween(10, 50);
+    }
+  }
+
+  @Test
+  void fogNeverAppearsWithWindStrongerThanLight() {
+    for (int day = 1; day <= 31; day++) {
+      var weather = service.getWeather(caravanId, new GolarionDate(4712, 1, day));
+      assertFogHasLightWind(weather.midnightToDawn().precipitation(), weather.midnightToDawn().windStrength());
+      assertFogHasLightWind(weather.dawnToNoon().precipitation(), weather.dawnToNoon().windStrength());
+      assertFogHasLightWind(weather.noonToDusk().precipitation(), weather.noonToDusk().windStrength());
+      assertFogHasLightWind(weather.duskToMidnight().precipitation(), weather.duskToMidnight().windStrength());
+    }
+  }
+
+  @Test
+  void consecutiveDaysKeepReasonableNoonTemperatureTransitions() {
+    weatherProfileRepository.save(new CaravanWeatherProfile(
+        caravanId,
+        com.gestioncaravana.domain.WeatherClimateBaseline.TEMPERATE,
+        com.gestioncaravana.domain.WeatherElevation.LOWLAND,
+        false,
+        Instant.parse("2026-07-10T12:00:00Z")));
+
+    Integer previousNoon = null;
+    for (int day = 1; day <= 31; day++) {
+      var weather = service.getWeather(caravanId, new GolarionDate(4712, 3, day));
+      var currentNoon = weather.noonToDusk().temperatureC();
+      if (previousNoon != null) {
+        assertThat(Math.abs(currentNoon - previousNoon)).isLessThanOrEqualTo(8);
+      }
+      previousNoon = currentNoon;
+    }
+  }
+
+  private void assertFogHasLightWind(String precipitation, String windStrength) {
+    if (precipitation != null && precipitation.contains("FOG")) {
+      assertThat(windStrength).isEqualTo("LIGHT");
+    }
+  }
+
   private static final class InMemoryCaravanRepository implements CaravanCampaignRepositoryPort {
     private final Map<UUID, CaravanCampaign> caravans = new HashMap<>();
 

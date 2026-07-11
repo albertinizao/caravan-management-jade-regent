@@ -2532,8 +2532,8 @@ textarea {
 
 .weather-period-card {
   display: grid;
-  gap: 0.75rem;
-  padding: 0.9rem;
+  gap: 0.55rem;
+  padding: 0.75rem 0.8rem;
   border-radius: 0.9rem;
   border: 1px solid #e2e8f0;
   background: #f8fafc;
@@ -2598,31 +2598,32 @@ textarea {
 .weather-period-metrics {
   display: grid;
   grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.45fr);
-  gap: 0.5rem;
+  gap: 0.4rem;
   margin: 0;
 }
 
 .weather-period-metrics div {
-  padding: 0.7rem;
+  padding: 0.55rem 0.6rem;
   border-radius: 0.85rem;
   background: white;
   display: grid;
-  gap: 0.35rem;
-  justify-items: center;
-  text-align: center;
-  align-content: center;
+  gap: 0.2rem;
+  justify-items: start;
+  text-align: left;
+  align-content: start;
+  min-height: 4.2rem;
 }
 
 .weather-period-metrics dt {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #64748b;
 }
 
 .weather-period-metrics dd {
-  margin: 0.25rem 0 0;
-  font-size: 0.95rem;
+  margin: 0.1rem 0 0;
+  font-size: 0.9rem;
   font-weight: 800;
   color: #0f172a;
 }
@@ -2630,10 +2631,10 @@ textarea {
 .weather-temperature__value {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.35rem;
   white-space: nowrap;
-  min-width: 4.75rem;
-  justify-content: center;
+  min-width: 4.25rem;
+  justify-content: flex-start;
 }
 
 .day-cycle-timeline {
@@ -3102,7 +3103,7 @@ textarea {
   }
 
   .weather-period-list {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -3156,6 +3157,20 @@ textarea {
   }
 
   .day-cycle-group__cards {
+    grid-template-columns: 1fr;
+  }
+
+  .weather-period-card {
+    padding: 0.7rem 0.75rem;
+  }
+
+  .weather-period-metrics div {
+    min-height: 3.85rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .weather-period-list {
     grid-template-columns: 1fr;
   }
 }

@@ -1705,6 +1705,9 @@ p {
 .table-wrap {
   overflow: auto;
   margin-top: 1rem;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable both-edges;
 }
 
 .cargo-groups {
@@ -1724,6 +1727,7 @@ p {
 .cargo-table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 860px;
 }
 
 .cargo-table th,
@@ -1943,6 +1947,11 @@ dd {
     flex-direction: column;
     align-items: flex-start;
   }
+
+  .table-wrap {
+    margin-inline: -0.25rem;
+    padding-inline: 0.25rem;
+  }
 }
 
 @media (max-width: 700px) {
@@ -1953,6 +1962,10 @@ dd {
   .modal-actions {
     width: 100%;
     flex-direction: column;
+  }
+
+  .cargo-table {
+    min-width: 780px;
   }
 }
 </style>

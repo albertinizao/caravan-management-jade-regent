@@ -4,4 +4,5 @@ public record WeatherSnapshotView(
     WeatherPeriodView midnightToDawn,
     WeatherPeriodView dawnToNoon,
     WeatherPeriodView noonToDusk,
-    WeatherPeriodView duskToMidnight) {}
+    WeatherPeriodView duskToMidnight,
+    String crownLightCondition) {}

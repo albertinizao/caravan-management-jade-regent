@@ -4,4 +4,5 @@ public record WeatherSnapshotResponse(
     WeatherPeriodResponse midnightToDawn,
     WeatherPeriodResponse dawnToNoon,
     WeatherPeriodResponse noonToDusk,
-    WeatherPeriodResponse duskToMidnight) {}
+    WeatherPeriodResponse duskToMidnight,
+    String crownLightCondition) {}

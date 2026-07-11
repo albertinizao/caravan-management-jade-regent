@@ -85,6 +85,28 @@ class CaravanCalendarControllerTest {
   }
 
   @Test
+  void exposesPolarLightConditionWhenCrownOfWorldIsActive() throws Exception {
+    mockMvc.perform(put("/api/caravans/{caravanId}/weather/profile", caravanId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of(
+                "climateBaseline", "COLD",
+                "elevation", "HIGHLAND",
+                "crownOfWorld", true,
+                "effectiveFromYear", 4712,
+                "effectiveFromMonth", 1,
+                "effectiveFromDay", 1))))
+        .andExpect(status().isOk());
+
+    mockMvc.perform(get("/api/caravans/{caravanId}/calendar/day", caravanId)
+            .param("year", "4712")
+            .param("month", "1")
+            .param("day", "12")
+            .param("showSecrets", "true"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.weather.crownLightCondition").value("POLAR_TWILIGHT"));
+  }
+
+  @Test
   void updatesCurrentDateAndAdvancesDays() throws Exception {
     mockMvc.perform(put("/api/caravans/{caravanId}/calendar/current-date", caravanId)
             .contentType(MediaType.APPLICATION_JSON)

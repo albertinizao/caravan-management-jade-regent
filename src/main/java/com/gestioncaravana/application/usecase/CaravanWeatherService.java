@@ -42,6 +42,11 @@ public class CaravanWeatherService
   private static final String STRONG = "STRONG";
   private static final String SEVERE = "SEVERE";
   private static final String WINDSTORM = "WINDSTORM";
+  private static final String NORMAL = "NORMAL";
+  private static final String POLAR_TWILIGHT = "POLAR_TWILIGHT";
+  private static final String POLAR_NIGHT = "POLAR_NIGHT";
+  private static final String MIDNIGHT_SUN = "MIDNIGHT_SUN";
+  private static final String POLAR_DAY = "POLAR_DAY";
 
   private final CaravanCampaignRepositoryPort campaignRepository;
   private final CaravanWeatherForecastStateRepositoryPort forecastStateRepository;
@@ -96,17 +101,17 @@ public class CaravanWeatherService
   @Override
   public WeatherSnapshotView getWeather(UUID caravanId, GolarionDate date) {
     requireCaravan(caravanId);
-    var existing = snapshotRepository.findByCaravanIdAndDate(caravanId, date);
-    if (existing.isPresent()) {
-      return toView(existing.get().weather());
-    }
-
     var profile = profileRepository.findByCaravanId(caravanId)
         .orElseGet(() -> CaravanWeatherProfile.defaultProfile(caravanId, clock.instant()));
+    var existing = snapshotRepository.findByCaravanIdAndDate(caravanId, date);
+    if (existing.isPresent()) {
+      return toView(existing.get().weather(), crownLightCondition(profile, date));
+    }
+
     generateWeatherUpTo(caravanId, date, profile);
     return snapshotRepository.findByCaravanIdAndDate(caravanId, date)
         .map(CaravanWeatherSnapshot::weather)
-        .map(CaravanWeatherService::toView)
+        .map(weather -> toView(weather, crownLightCondition(profile, date)))
         .orElseThrow(() -> new IllegalStateException("Failed to generate weather snapshot for " + date));
   }
 
@@ -153,14 +158,15 @@ public class CaravanWeatherService
       CaravanWeatherForecastState previousState) {
     var season = WeatherSeason.fromMonth(date.month());
     var random = new SplittableRandom(hashSeed(caravanId, date, profile, previousState));
+    var crownLightCondition = crownLightCondition(profile, date);
 
-    var trend = resolveTemperatureTrend(profile, season, previousState, random);
+    var trend = resolveTemperatureTrend(profile, season, crownLightCondition, previousState, random);
     var precipitation = resolveDailyPrecipitation(profile, season, trend, previousState, random);
     var cloudCover = resolveCloudCover(precipitation, previousState, random);
     var windByPeriod = resolveWinds(precipitation, random);
     var severeEvent = resolveSevereEvent(profile, season, precipitation, windByPeriod, random);
     var adjustedTrend = applySevereEvent(trend, severeEvent, random);
-    var periods = resolvePeriods(adjustedTrend, precipitation, cloudCover, windByPeriod, random);
+    var periods = resolvePeriods(adjustedTrend, precipitation, cloudCover, windByPeriod, crownLightCondition, random);
 
     var snapshot = new CaravanWeatherSnapshot(
         caravanId,
@@ -184,6 +190,7 @@ public class CaravanWeatherService
   private TemperatureTrendState resolveTemperatureTrend(
       CaravanWeatherProfile profile,
       WeatherSeason season,
+      String crownLightCondition,
       CaravanWeatherForecastState previousState,
       SplittableRandom random) {
     var seasonalMeanF = baselineTemperatureF(profile.climateBaseline(), profile.elevation(), season);
@@ -218,7 +225,12 @@ public class CaravanWeatherService
     }
     var driftNoise = random.nextInt(-2, 3);
     var newDayBaseF = previousDayBaseF + step + driftNoise;
-    var diurnalRangeF = diurnalRangeF(profile.climateBaseline(), profile.elevation(), season, random);
+    var diurnalRangeF = diurnalRangeF(
+        profile.climateBaseline(),
+        profile.elevation(),
+        season,
+        crownLightCondition,
+        random);
     var nightBaseF = newDayBaseF - diurnalRangeF;
 
     return new TemperatureTrendState(
@@ -359,7 +371,13 @@ public class CaravanWeatherService
       DailyPrecipitation precipitation,
       String cloudCover,
       List<String> winds,
+      String crownLightCondition,
       SplittableRandom random) {
+    if (POLAR_NIGHT.equals(crownLightCondition)
+        || POLAR_DAY.equals(crownLightCondition)
+        || MIDNIGHT_SUN.equals(crownLightCondition)) {
+      return resolvePolarPeriods(trend, precipitation, winds, crownLightCondition, random);
+    }
     var cloudAdjustment = cloudTemperatureAdjustment(cloudCover);
     var dawnF = trend.nightBaseTemperatureF() + cloudAdjustment.nightOffsetF() + random.nextInt(-1, 2);
     var morningF = ((trend.nightBaseTemperatureF() + trend.dayBaseTemperatureF()) / 2)
@@ -377,6 +395,47 @@ public class CaravanWeatherService
 
     return List.of(
         toPeriod(0, precipitation, winds.get(0), dawnF),
+        toPeriod(1, precipitation, winds.get(1), morningF),
+        toPeriod(2, precipitation, winds.get(2), afternoonF),
+        toPeriod(3, precipitation, winds.get(3), nightF));
+  }
+
+  private List<WeatherPeriod> resolvePolarPeriods(
+      TemperatureTrendState trend,
+      DailyPrecipitation precipitation,
+      List<String> winds,
+      String crownLightCondition,
+      SplittableRandom random) {
+    var meanF = Math.round((trend.dayBaseTemperatureF() + trend.nightBaseTemperatureF()) / 2.0f);
+    int midnightF;
+    int morningF;
+    int afternoonF;
+    int nightF;
+
+    switch (crownLightCondition) {
+      case POLAR_NIGHT -> {
+        midnightF = meanF + random.nextInt(-1, 1);
+        morningF = meanF + random.nextInt(-1, 2);
+        afternoonF = meanF + random.nextInt(0, 2);
+        nightF = meanF + random.nextInt(-1, 1);
+      }
+      case POLAR_DAY -> {
+        midnightF = meanF + random.nextInt(-1, 1);
+        morningF = meanF + random.nextInt(0, 2);
+        afternoonF = meanF + random.nextInt(1, 3);
+        nightF = meanF + random.nextInt(0, 2);
+      }
+      case MIDNIGHT_SUN -> {
+        midnightF = meanF + random.nextInt(-1, 2);
+        morningF = meanF + random.nextInt(0, 3);
+        afternoonF = meanF + random.nextInt(1, 4);
+        nightF = meanF + random.nextInt(0, 2);
+      }
+      default -> throw new IllegalArgumentException("Unsupported polar condition: " + crownLightCondition);
+    }
+
+    return List.of(
+        toPeriod(0, precipitation, winds.get(0), midnightF),
         toPeriod(1, precipitation, winds.get(1), morningF),
         toPeriod(2, precipitation, winds.get(2), afternoonF),
         toPeriod(3, precipitation, winds.get(3), nightF));
@@ -455,6 +514,7 @@ public class CaravanWeatherService
       WeatherClimateBaseline baseline,
       WeatherElevation elevation,
       WeatherSeason season,
+      String crownLightCondition,
       SplittableRandom random) {
     var base = switch (baseline) {
       case COLD -> 10;
@@ -472,6 +532,14 @@ public class CaravanWeatherService
       case HIGHLAND -> 1;
       case PEAK -> 2;
     };
+    if (crownLightCondition != null) {
+      base = switch (crownLightCondition) {
+        case POLAR_NIGHT, POLAR_DAY -> Math.max(3, base / 4);
+        case POLAR_TWILIGHT -> Math.max(5, base / 2);
+        case MIDNIGHT_SUN -> Math.max(4, (base / 2) + 1);
+        default -> base;
+      };
+    }
     return base + random.nextInt(-2, 3);
   }
 
@@ -638,6 +706,41 @@ public class CaravanWeatherService
     };
   }
 
+  private String crownLightCondition(CaravanWeatherProfile profile, GolarionDate date) {
+    if (!profile.crownOfWorld()) {
+      return null;
+    }
+    return switch (crownRegionBand(profile.elevation())) {
+      case "OUTER_RIM" -> switch (date.month()) {
+        case 1, 11, 12 -> POLAR_TWILIGHT;
+        case 5, 6, 7 -> MIDNIGHT_SUN;
+        default -> NORMAL;
+      };
+      case "HIGH_ICE" -> switch (date.month()) {
+        case 1, 11 -> POLAR_TWILIGHT;
+        case 12 -> POLAR_NIGHT;
+        case 5, 6, 7 -> MIDNIGHT_SUN;
+        default -> NORMAL;
+      };
+      case "BOREAL_EXPANSE" -> switch (date.month()) {
+        case 1, 12 -> POLAR_NIGHT;
+        case 2, 11 -> POLAR_TWILIGHT;
+        case 5, 8 -> MIDNIGHT_SUN;
+        case 6, 7 -> POLAR_DAY;
+        default -> NORMAL;
+      };
+      default -> NORMAL;
+    };
+  }
+
+  private String crownRegionBand(WeatherElevation elevation) {
+    return switch (elevation) {
+      case SEA_LEVEL, LOWLAND -> "OUTER_RIM";
+      case HIGHLAND -> "HIGH_ICE";
+      case PEAK -> "BOREAL_EXPANSE";
+    };
+  }
+
   private long hashSeed(
       UUID caravanId,
       GolarionDate date,
@@ -669,7 +772,17 @@ public class CaravanWeatherService
         toView(weather.midnightToDawn()),
         toView(weather.dawnToNoon()),
         toView(weather.noonToDusk()),
-        toView(weather.duskToMidnight()));
+        toView(weather.duskToMidnight()),
+        null);
+  }
+
+  private static WeatherSnapshotView toView(WeatherSnapshot weather, String crownLightCondition) {
+    return new WeatherSnapshotView(
+        toView(weather.midnightToDawn()),
+        toView(weather.dawnToNoon()),
+        toView(weather.noonToDusk()),
+        toView(weather.duskToMidnight()),
+        crownLightCondition);
   }
 
   private static WeatherPeriodView toView(WeatherPeriod weather) {

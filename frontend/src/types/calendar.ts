@@ -30,6 +30,7 @@ export interface WeatherSnapshot {
   dawnToNoon: WeatherPeriod | null;
   noonToDusk: WeatherPeriod | null;
   duskToMidnight: WeatherPeriod | null;
+  crownLightCondition: string | null;
 }
 
 export interface CalendarDay {

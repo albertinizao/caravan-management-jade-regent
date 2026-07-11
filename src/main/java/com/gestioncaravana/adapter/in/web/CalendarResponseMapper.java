@@ -55,7 +55,8 @@ final class CalendarResponseMapper {
         toResponse(view.midnightToDawn()),
         toResponse(view.dawnToNoon()),
         toResponse(view.noonToDusk()),
-        toResponse(view.duskToMidnight()));
+        toResponse(view.duskToMidnight()),
+        view.crownLightCondition());
   }
 
   private static WeatherPeriodResponse toResponse(WeatherPeriodView view) {

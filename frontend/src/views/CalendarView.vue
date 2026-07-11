@@ -802,6 +802,23 @@ function weatherPeriodRows(weather: WeatherSnapshot | null) {
   ];
 }
 
+function weatherCrownLightConditionLabel(value: string | null | undefined) {
+  switch (value) {
+    case "POLAR_TWILIGHT":
+      return "Crepúsculo polar";
+    case "POLAR_NIGHT":
+      return "Noche polar";
+    case "MIDNIGHT_SUN":
+      return "Sol de medianoche";
+    case "POLAR_DAY":
+      return "Día polar";
+    case "NORMAL":
+      return "Luz diurna normal";
+    default:
+      return "";
+  }
+}
+
 function syncWeatherProfileForm(profile: CaravanWeatherProfile) {
   weatherClimateBaseline.value = profile.climateBaseline;
   weatherElevation.value = profile.elevation;
@@ -1363,6 +1380,12 @@ onMounted(loadActiveCaravan);
                 <section class="detail-section placeholder-block">
                   <h3>Clima</h3>
                   <div v-if="selectedDay.weather" class="weather-period-list">
+                    <p
+                      v-if="selectedDay.weather.crownLightCondition"
+                      class="muted weather-light-condition"
+                    >
+                      Luz estacional: {{ weatherCrownLightConditionLabel(selectedDay.weather.crownLightCondition) }}
+                    </p>
                     <article v-for="period in weatherPeriodRows(selectedDay.weather)" :key="period.key" class="weather-period-card">
                       <header class="weather-period-card__header">
                         <strong>{{ period.label }}</strong>

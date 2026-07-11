@@ -184,6 +184,42 @@ class CaravanWeatherServiceTest {
     }
   }
 
+  @Test
+  void crownOfWorldHighlandAbadioUsesPolarTwilight() {
+    weatherProfileRepository.save(new CaravanWeatherProfile(
+        caravanId,
+        com.gestioncaravana.domain.WeatherClimateBaseline.COLD,
+        com.gestioncaravana.domain.WeatherElevation.HIGHLAND,
+        true,
+        Instant.parse("2026-07-10T12:00:00Z")));
+
+    var weather = service.getWeather(caravanId, new GolarionDate(4712, 1, 12));
+
+    assertThat(weather.crownLightCondition()).isEqualTo("POLAR_TWILIGHT");
+  }
+
+  @Test
+  void crownOfWorldPeakAbadioKeepsIntradayTemperaturesNearlyFlatDuringPolarNight() {
+    weatherProfileRepository.save(new CaravanWeatherProfile(
+        caravanId,
+        com.gestioncaravana.domain.WeatherClimateBaseline.COLD,
+        com.gestioncaravana.domain.WeatherElevation.PEAK,
+        true,
+        Instant.parse("2026-07-10T12:00:00Z")));
+
+    var weather = service.getWeather(caravanId, new GolarionDate(4712, 1, 12));
+    var temperatures = java.util.List.of(
+        weather.midnightToDawn().temperatureC(),
+        weather.dawnToNoon().temperatureC(),
+        weather.noonToDusk().temperatureC(),
+        weather.duskToMidnight().temperatureC());
+    var min = temperatures.stream().mapToInt(Integer::intValue).min().orElseThrow();
+    var max = temperatures.stream().mapToInt(Integer::intValue).max().orElseThrow();
+
+    assertThat(weather.crownLightCondition()).isEqualTo("POLAR_NIGHT");
+    assertThat(max - min).isLessThanOrEqualTo(3);
+  }
+
   private void assertFogHasLightWind(String precipitation, String windStrength) {
     if (precipitation != null && precipitation.contains("FOG")) {
       assertThat(windStrength).isEqualTo("LIGHT");

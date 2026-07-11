@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 import { useToast } from "@/composables/useToast";
 import {
@@ -49,7 +49,7 @@ const weatherProfileSaving = ref(false);
 const weatherConfigModalOpen = ref(false);
 const weatherClimateBaseline = ref<CaravanWeatherProfile["climateBaseline"]>("TEMPERATE");
 const weatherElevation = ref<CaravanWeatherProfile["elevation"]>("SEA_LEVEL");
-const weatherCrownOfWorld = ref(false);
+const weatherCrownRegion = ref<CaravanWeatherProfile["crownRegion"]>(null);
 const weatherEffectiveFromYear = ref(4712);
 const weatherEffectiveFromMonth = ref(1);
 const weatherEffectiveFromDay = ref(1);
@@ -111,6 +111,7 @@ const supportedMonths = [
 ];
 const weatherClimateBaselineOptions: Array<{ value: CaravanWeatherProfile["climateBaseline"]; label: string; description: string }> = [
   { value: "COLD", label: "Frío", description: "Más nieve y temperaturas más duras." },
+  { value: "CROWN_OF_THE_WORLD", label: "Corona del Mundo", description: "Frío polar sobrenatural, más severo que el baseline frío normal." },
   { value: "TEMPERATE", label: "Templado", description: "Base equilibrada para la mayoría de campañas." },
   { value: "TROPICAL", label: "Tropical", description: "Más calor y lluvia con menos hielo." },
 ];
@@ -120,6 +121,19 @@ const weatherElevationOptions: Array<{ value: CaravanWeatherProfile["elevation"]
   { value: "HIGHLAND", label: "Tierras altas", description: "Enfría y endurece el clima." },
   { value: "PEAK", label: "Cima", description: "Penalización fuerte de temperatura." },
 ];
+const weatherCrownRegionOptions: Array<{ value: NonNullable<CaravanWeatherProfile["crownRegion"]>; label: string; description: string }> = [
+  { value: "OUTER_RIM", label: "Borde exterior", description: "Corona del Mundo periférica, equivalente a tierras bajas polares." },
+  { value: "HIGH_ICE", label: "Hielo alto", description: "Meseta helada elevada, equivalente a tierras altas polares." },
+  { value: "BOREAL_EXPANSE", label: "Extensión boreal", description: "Interior polar más severo y oscuro de la Corona del Mundo." },
+];
+const crownElevationOptionsByRegion: Record<
+  NonNullable<CaravanWeatherProfile["crownRegion"]>,
+  CaravanWeatherProfile["elevation"][]
+> = {
+  OUTER_RIM: ["LOWLAND"],
+  HIGH_ICE: ["HIGHLAND", "PEAK"],
+  BOREAL_EXPANSE: ["HIGHLAND", "PEAK"],
+};
 const calendarEventNameTranslations: Record<string, string> = {
   "Abjurant Day": "Día de la abjuración",
   "Archerfeast / Archer's Day": "Fiesta de los arqueros / Día del arquero",
@@ -393,6 +407,29 @@ const customEventDayOptions = computed(() => dayOptionsFor(customEventYear.value
 const weatherEffectiveFromDayOptions = computed(() =>
   dayOptionsFor(weatherEffectiveFromYear.value, weatherEffectiveFromMonth.value, weatherEffectiveFromDay),
 );
+const isCrownOfTheWorldSelected = computed(() => weatherClimateBaseline.value === "CROWN_OF_THE_WORLD");
+const availableWeatherElevationOptions = computed(() => {
+  if (!isCrownOfTheWorldSelected.value) {
+    return weatherElevationOptions;
+  }
+
+  if (!weatherCrownRegion.value) {
+    return weatherElevationOptions.filter((option) => option.value !== "SEA_LEVEL");
+  }
+
+  const allowedElevations = crownElevationOptionsByRegion[weatherCrownRegion.value];
+  return weatherElevationOptions.filter((option) => allowedElevations.includes(option.value));
+});
+
+watch(weatherClimateBaseline, () => {
+  normalizeWeatherProfileSelections();
+});
+
+watch(weatherCrownRegion, () => {
+  if (isCrownOfTheWorldSelected.value) {
+    normalizeWeatherProfileSelections();
+  }
+});
 
 const currentDateLabel = computed(() =>
   monthView.value
@@ -822,7 +859,8 @@ function weatherCrownLightConditionLabel(value: string | null | undefined) {
 function syncWeatherProfileForm(profile: CaravanWeatherProfile) {
   weatherClimateBaseline.value = profile.climateBaseline;
   weatherElevation.value = profile.elevation;
-  weatherCrownOfWorld.value = profile.crownOfWorld;
+  weatherCrownRegion.value = profile.crownRegion;
+  normalizeWeatherProfileSelections();
 }
 
 function syncWeatherEffectiveFromDate(date: GolarionDate) {
@@ -836,7 +874,28 @@ function weatherClimateBaselineDescription() {
 }
 
 function weatherElevationDescription() {
-  return weatherElevationOptions.find((option) => option.value === weatherElevation.value)?.description ?? "";
+  return availableWeatherElevationOptions.value.find((option) => option.value === weatherElevation.value)?.description
+    ?? "";
+}
+
+function weatherCrownRegionDescription() {
+  return weatherCrownRegionOptions.find((option) => option.value === weatherCrownRegion.value)?.description ?? "";
+}
+
+function normalizeWeatherProfileSelections() {
+  if (!isCrownOfTheWorldSelected.value) {
+    weatherCrownRegion.value = null;
+    return;
+  }
+
+  if (!weatherCrownRegion.value) {
+    weatherCrownRegion.value = "OUTER_RIM";
+  }
+
+  const allowedElevations = crownElevationOptionsByRegion[weatherCrownRegion.value];
+  if (!allowedElevations.includes(weatherElevation.value)) {
+    weatherElevation.value = allowedElevations[0];
+  }
 }
 
 async function loadWeatherProfile() {
@@ -865,7 +924,7 @@ async function saveWeatherProfile() {
     const updated = await updateCaravanWeatherProfile(activeCaravan.value.id, {
       climateBaseline: weatherClimateBaseline.value,
       elevation: weatherElevation.value,
-      crownOfWorld: weatherCrownOfWorld.value,
+      crownRegion: isCrownOfTheWorldSelected.value ? weatherCrownRegion.value : null,
       effectiveFromYear: weatherEffectiveFromYear.value,
       effectiveFromMonth: weatherEffectiveFromMonth.value,
       effectiveFromDay: weatherEffectiveFromDay.value,
@@ -971,6 +1030,11 @@ function openWeatherConfigModal() {
   }
 
   syncWeatherEffectiveFromDate(selectedDay.value?.date ?? monthView.value.currentDate);
+  if (weatherProfile.value) {
+    syncWeatherProfileForm(weatherProfile.value);
+  } else {
+    normalizeWeatherProfileSelections();
+  }
   weatherConfigModalOpen.value = true;
 }
 
@@ -1645,19 +1709,24 @@ onMounted(loadActiveCaravan);
                   <small class="muted">{{ weatherClimateBaselineDescription() }}</small>
                 </label>
 
+                <label v-if="isCrownOfTheWorldSelected">
+                  <span>Zona de la Corona del Mundo</span>
+                  <select v-model="weatherCrownRegion">
+                    <option v-for="option in weatherCrownRegionOptions" :key="option.value" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                  <small class="muted">{{ weatherCrownRegionDescription() }}</small>
+                </label>
+
                 <label>
                   <span>Elevación</span>
                   <select v-model="weatherElevation">
-                    <option v-for="option in weatherElevationOptions" :key="option.value" :value="option.value">
+                    <option v-for="option in availableWeatherElevationOptions" :key="option.value" :value="option.value">
                       {{ option.label }}
                     </option>
                   </select>
                   <small class="muted">{{ weatherElevationDescription() }}</small>
-                </label>
-
-                <label class="checkbox-field">
-                  <input v-model="weatherCrownOfWorld" type="checkbox" />
-                  <span>Crown of the World</span>
                 </label>
               </div>
             </section>

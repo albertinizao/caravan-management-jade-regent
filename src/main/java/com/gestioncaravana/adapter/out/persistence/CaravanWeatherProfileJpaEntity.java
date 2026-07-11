@@ -20,8 +20,11 @@ public class CaravanWeatherProfileJpaEntity {
   @Column(nullable = false)
   private String elevation;
 
-  @Column(nullable = false)
-  private boolean crownOfWorld;
+  @Column
+  private String crownRegion;
+
+  @Column(name = "crown_of_world")
+  private Boolean legacyCrownOfWorld;
 
   @Column(nullable = false)
   private Instant updatedAt;
@@ -52,12 +55,20 @@ public class CaravanWeatherProfileJpaEntity {
     this.elevation = elevation;
   }
 
-  public boolean isCrownOfWorld() {
-    return crownOfWorld;
+  public String getCrownRegion() {
+    return crownRegion;
   }
 
-  public void setCrownOfWorld(boolean crownOfWorld) {
-    this.crownOfWorld = crownOfWorld;
+  public void setCrownRegion(String crownRegion) {
+    this.crownRegion = crownRegion;
+  }
+
+  public Boolean getLegacyCrownOfWorld() {
+    return legacyCrownOfWorld;
+  }
+
+  public void setLegacyCrownOfWorld(Boolean legacyCrownOfWorld) {
+    this.legacyCrownOfWorld = legacyCrownOfWorld;
   }
 
   public Instant getUpdatedAt() {

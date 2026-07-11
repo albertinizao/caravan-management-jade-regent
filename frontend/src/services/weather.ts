@@ -4,7 +4,7 @@ import type { CaravanWeatherProfile } from "@/types/weather";
 export interface UpdateCaravanWeatherProfilePayload {
   climateBaseline: CaravanWeatherProfile["climateBaseline"];
   elevation: CaravanWeatherProfile["elevation"];
-  crownOfWorld: boolean;
+  crownRegion: CaravanWeatherProfile["crownRegion"];
   effectiveFromYear: number;
   effectiveFromMonth: number;
   effectiveFromDay: number;

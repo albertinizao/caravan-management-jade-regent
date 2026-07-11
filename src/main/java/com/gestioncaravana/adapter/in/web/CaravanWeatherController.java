@@ -2,6 +2,7 @@ package com.gestioncaravana.adapter.in.web;
 
 import com.gestioncaravana.application.port.in.GetCaravanWeatherProfileUseCase;
 import com.gestioncaravana.application.port.in.UpdateCaravanWeatherProfileUseCase;
+import com.gestioncaravana.domain.CrownWeatherRegion;
 import com.gestioncaravana.domain.GolarionDate;
 import com.gestioncaravana.domain.WeatherClimateBaseline;
 import com.gestioncaravana.domain.WeatherElevation;
@@ -43,7 +44,7 @@ public class CaravanWeatherController {
             new UpdateCaravanWeatherProfileUseCase.UpdateCaravanWeatherProfileCommand(
                 WeatherClimateBaseline.valueOf(request.climateBaseline()),
                 WeatherElevation.valueOf(request.elevation()),
-                request.crownOfWorld(),
+                request.crownRegion() == null ? null : CrownWeatherRegion.valueOf(request.crownRegion()),
                 new GolarionDate(request.effectiveFromYear(), request.effectiveFromMonth(), request.effectiveFromDay()))));
   }
 }

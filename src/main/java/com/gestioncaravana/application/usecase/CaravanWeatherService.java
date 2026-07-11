@@ -13,6 +13,7 @@ import com.gestioncaravana.application.port.out.CaravanWeatherSnapshotRepository
 import com.gestioncaravana.domain.CaravanWeatherForecastState;
 import com.gestioncaravana.domain.CaravanWeatherProfile;
 import com.gestioncaravana.domain.CaravanWeatherSnapshot;
+import com.gestioncaravana.domain.CrownWeatherRegion;
 import com.gestioncaravana.domain.GolarionCalendar;
 import com.gestioncaravana.domain.GolarionDate;
 import com.gestioncaravana.domain.WeatherClimateBaseline;
@@ -91,7 +92,7 @@ public class CaravanWeatherService
         caravanId,
         command.climateBaseline(),
         command.elevation(),
-        command.crownOfWorld(),
+        command.crownRegion(),
         clock.instant()));
     forecastStateRepository.deleteFromDate(caravanId, command.effectiveFrom());
     snapshotRepository.deleteFromDate(caravanId, command.effectiveFrom());
@@ -193,7 +194,11 @@ public class CaravanWeatherService
       String crownLightCondition,
       CaravanWeatherForecastState previousState,
       SplittableRandom random) {
-    var seasonalMeanF = baselineTemperatureF(profile.climateBaseline(), profile.elevation(), season);
+    var seasonalMeanF = baselineTemperatureF(
+        profile.climateBaseline(),
+        profile.elevation(),
+        profile.crownRegion(),
+        season);
     seasonalMeanF += crownOfWorldAdjustment(profile, season, random);
 
     int targetTemperatureF;
@@ -259,7 +264,7 @@ public class CaravanWeatherService
     }
 
     var chance = precipitationChance(profile.climateBaseline(), profile.elevation(), season);
-    if (profile.crownOfWorld()) {
+    if (profile.isCrownOfTheWorld()) {
       chance += 5;
     }
     if (random.nextInt(100) >= chance) {
@@ -332,7 +337,7 @@ public class CaravanWeatherService
     if (precipitation.isSnowStorm() && maxWind >= windRank(SEVERE) && random.nextInt(100) < 10) {
       return random.nextInt(100) < 45 ? "BLIZZARD" : "THUNDERSNOW";
     }
-    if (profile.crownOfWorld() && season != WeatherSeason.SUMMER && random.nextInt(100) < 6) {
+    if (profile.isCrownOfTheWorld() && season != WeatherSeason.SUMMER && random.nextInt(100) < 6) {
       return "POLAR_SURGE";
     }
     return null;
@@ -454,12 +459,18 @@ public class CaravanWeatherService
   private int baselineTemperatureF(
       WeatherClimateBaseline baseline,
       WeatherElevation elevation,
+      CrownWeatherRegion crownRegion,
       WeatherSeason season) {
     var climateBaseline = switch (baseline) {
       case COLD -> switch (season) {
         case WINTER -> 20;
         case SPRING, FALL -> 35;
         case SUMMER -> 50;
+      };
+      case CROWN_OF_THE_WORLD -> switch (season) {
+        case WINTER -> 5;
+        case SPRING, FALL -> 18;
+        case SUMMER -> 30;
       };
       case TEMPERATE -> switch (season) {
         case WINTER -> 35;
@@ -472,31 +483,40 @@ public class CaravanWeatherService
         case SUMMER -> 88;
       };
     };
-    return climateBaseline + switch (elevation) {
+    climateBaseline += switch (elevation) {
       case SEA_LEVEL -> 3;
       case LOWLAND -> 0;
       case HIGHLAND -> -8;
       case PEAK -> -18;
     };
+    if (baseline == WeatherClimateBaseline.CROWN_OF_THE_WORLD) {
+      climateBaseline += switch (crownRegion) {
+        case OUTER_RIM -> -2;
+        case HIGH_ICE -> -14;
+        case BOREAL_EXPANSE -> -22;
+      };
+    }
+    return climateBaseline;
   }
 
   private int crownOfWorldAdjustment(
       CaravanWeatherProfile profile,
       WeatherSeason season,
       SplittableRandom random) {
-    if (!profile.crownOfWorld()) {
+    if (!profile.isCrownOfTheWorld()) {
       return 0;
     }
     return switch (season) {
-      case WINTER -> -18 - random.nextInt(0, 5);
-      case SPRING, FALL -> -12 - random.nextInt(0, 4);
-      case SUMMER -> -8 - random.nextInt(0, 4);
+      case WINTER -> -12 - random.nextInt(0, 5);
+      case SPRING, FALL -> -8 - random.nextInt(0, 4);
+      case SUMMER -> -4 - random.nextInt(0, 4);
     };
   }
 
   private int randomVariationF(WeatherClimateBaseline baseline, SplittableRandom random) {
     return switch (baseline) {
       case COLD -> random.nextInt(-16, 13);
+      case CROWN_OF_THE_WORLD -> random.nextInt(-22, 9);
       case TEMPERATE -> random.nextInt(-12, 13);
       case TROPICAL -> random.nextInt(-8, 10);
     };
@@ -505,6 +525,7 @@ public class CaravanWeatherService
   private int randomDurationDays(WeatherClimateBaseline baseline, SplittableRandom random) {
     return switch (baseline) {
       case COLD -> random.nextInt(3, 7);
+      case CROWN_OF_THE_WORLD -> random.nextInt(4, 8);
       case TEMPERATE -> random.nextInt(2, 6);
       case TROPICAL -> random.nextInt(2, 5);
     };
@@ -518,6 +539,7 @@ public class CaravanWeatherService
       SplittableRandom random) {
     var base = switch (baseline) {
       case COLD -> 10;
+      case CROWN_OF_THE_WORLD -> 9;
       case TEMPERATE -> 13;
       case TROPICAL -> 11;
     };
@@ -555,6 +577,7 @@ public class CaravanWeatherService
     };
     seasonal += switch (baseline) {
       case COLD -> -4;
+      case CROWN_OF_THE_WORLD -> -2;
       case TEMPERATE -> 0;
       case TROPICAL -> 18;
     };
@@ -604,7 +627,9 @@ public class CaravanWeatherService
     }
 
     if (roll < 12) {
-      return season == WeatherSeason.SUMMER && profile.climateBaseline() != WeatherClimateBaseline.COLD
+      return season == WeatherSeason.SUMMER
+              && profile.climateBaseline() != WeatherClimateBaseline.COLD
+              && profile.climateBaseline() != WeatherClimateBaseline.CROWN_OF_THE_WORLD
           ? "MORNING_MIST"
           : "LIGHT_FOG";
     }
@@ -626,6 +651,7 @@ public class CaravanWeatherService
   private int maxDurationPeriods(WeatherClimateBaseline baseline, String precipitation) {
     var base = switch (baseline) {
       case COLD -> 5;
+      case CROWN_OF_THE_WORLD -> 5;
       case TEMPERATE -> 4;
       case TROPICAL -> 6;
     };
@@ -707,37 +733,28 @@ public class CaravanWeatherService
   }
 
   private String crownLightCondition(CaravanWeatherProfile profile, GolarionDate date) {
-    if (!profile.crownOfWorld()) {
+    if (!profile.isCrownOfTheWorld()) {
       return null;
     }
-    return switch (crownRegionBand(profile.elevation())) {
-      case "OUTER_RIM" -> switch (date.month()) {
+    return switch (profile.crownRegion()) {
+      case OUTER_RIM -> switch (date.month()) {
         case 1, 11, 12 -> POLAR_TWILIGHT;
         case 5, 6, 7 -> MIDNIGHT_SUN;
         default -> NORMAL;
       };
-      case "HIGH_ICE" -> switch (date.month()) {
+      case HIGH_ICE -> switch (date.month()) {
         case 1, 11 -> POLAR_TWILIGHT;
         case 12 -> POLAR_NIGHT;
         case 5, 6, 7 -> MIDNIGHT_SUN;
         default -> NORMAL;
       };
-      case "BOREAL_EXPANSE" -> switch (date.month()) {
+      case BOREAL_EXPANSE -> switch (date.month()) {
         case 1, 12 -> POLAR_NIGHT;
         case 2, 11 -> POLAR_TWILIGHT;
         case 5, 8 -> MIDNIGHT_SUN;
         case 6, 7 -> POLAR_DAY;
         default -> NORMAL;
       };
-      default -> NORMAL;
-    };
-  }
-
-  private String crownRegionBand(WeatherElevation elevation) {
-    return switch (elevation) {
-      case SEA_LEVEL, LOWLAND -> "OUTER_RIM";
-      case HIGHLAND -> "HIGH_ICE";
-      case PEAK -> "BOREAL_EXPANSE";
     };
   }
 
@@ -750,7 +767,7 @@ public class CaravanWeatherService
     seed = 31 * seed + GolarionCalendar.toOffset(date);
     seed = 31 * seed + profile.climateBaseline().ordinal();
     seed = 31 * seed + profile.elevation().ordinal();
-    seed = 31 * seed + (profile.crownOfWorld() ? 1 : 0);
+    seed = 31 * seed + (profile.crownRegion() == null ? 0 : profile.crownRegion().ordinal() + 1);
     if (previousState != null) {
       seed = 31 * seed + previousState.targetTemperatureF();
       seed = 31 * seed + previousState.remainingTargetDays();
@@ -798,7 +815,7 @@ public class CaravanWeatherService
         profile.caravanId(),
         profile.climateBaseline(),
         profile.elevation(),
-        profile.crownOfWorld(),
+        profile.crownRegion(),
         profile.updatedAt());
   }
 

@@ -2,6 +2,7 @@ package com.gestioncaravana.adapter.out.persistence;
 
 import com.gestioncaravana.application.port.out.CaravanWeatherProfileRepositoryPort;
 import com.gestioncaravana.domain.CaravanWeatherProfile;
+import com.gestioncaravana.domain.CrownWeatherRegion;
 import com.gestioncaravana.domain.WeatherClimateBaseline;
 import com.gestioncaravana.domain.WeatherElevation;
 import java.util.Optional;
@@ -37,17 +38,40 @@ public class CaravanWeatherProfileRepositoryAdapter implements CaravanWeatherPro
     entity.setCaravanId(profile.caravanId().toString());
     entity.setClimateBaseline(profile.climateBaseline().name());
     entity.setElevation(profile.elevation().name());
-    entity.setCrownOfWorld(profile.crownOfWorld());
+    entity.setCrownRegion(profile.crownRegion() == null ? null : profile.crownRegion().name());
+    entity.setLegacyCrownOfWorld(profile.isCrownOfTheWorld());
     entity.setUpdatedAt(profile.updatedAt());
     return entity;
   }
 
   private CaravanWeatherProfile toDomain(CaravanWeatherProfileJpaEntity entity) {
+    var baseline = WeatherClimateBaseline.valueOf(entity.getClimateBaseline());
+    var elevation = WeatherElevation.valueOf(entity.getElevation());
+    var crownRegion = entity.getCrownRegion() == null ? null : CrownWeatherRegion.valueOf(entity.getCrownRegion());
+
+    if (Boolean.TRUE.equals(entity.getLegacyCrownOfWorld()) && baseline != WeatherClimateBaseline.CROWN_OF_THE_WORLD) {
+      baseline = WeatherClimateBaseline.CROWN_OF_THE_WORLD;
+    }
+    if (baseline == WeatherClimateBaseline.CROWN_OF_THE_WORLD && crownRegion == null) {
+      crownRegion = inferLegacyRegion(elevation);
+    }
+    if (baseline == WeatherClimateBaseline.CROWN_OF_THE_WORLD && elevation == WeatherElevation.SEA_LEVEL) {
+      elevation = WeatherElevation.LOWLAND;
+    }
+
     return new CaravanWeatherProfile(
         UUID.fromString(entity.getCaravanId()),
-        WeatherClimateBaseline.valueOf(entity.getClimateBaseline()),
-        WeatherElevation.valueOf(entity.getElevation()),
-        entity.isCrownOfWorld(),
+        baseline,
+        elevation,
+        crownRegion,
         entity.getUpdatedAt());
+  }
+
+  private CrownWeatherRegion inferLegacyRegion(WeatherElevation elevation) {
+    return switch (elevation) {
+      case SEA_LEVEL, LOWLAND -> CrownWeatherRegion.OUTER_RIM;
+      case HIGHLAND -> CrownWeatherRegion.HIGH_ICE;
+      case PEAK -> CrownWeatherRegion.BOREAL_EXPANSE;
+    };
   }
 }

@@ -10,7 +10,7 @@ final class CaravanWeatherResponseMapper {
     return new CaravanWeatherProfileResponse(
         view.climateBaseline().name(),
         view.elevation().name(),
-        view.crownOfWorld(),
+        view.crownRegion() == null ? null : view.crownRegion().name(),
         view.updatedAt().toString());
   }
 }

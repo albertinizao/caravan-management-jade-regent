@@ -1,6 +1,7 @@
 package com.gestioncaravana.application.port.in;
 
 import com.gestioncaravana.application.model.CaravanWeatherProfileView;
+import com.gestioncaravana.domain.CrownWeatherRegion;
 import com.gestioncaravana.domain.GolarionDate;
 import com.gestioncaravana.domain.WeatherClimateBaseline;
 import com.gestioncaravana.domain.WeatherElevation;
@@ -13,6 +14,6 @@ public interface UpdateCaravanWeatherProfileUseCase {
   record UpdateCaravanWeatherProfileCommand(
       WeatherClimateBaseline climateBaseline,
       WeatherElevation elevation,
-      boolean crownOfWorld,
+      CrownWeatherRegion crownRegion,
       GolarionDate effectiveFrom) {}
 }

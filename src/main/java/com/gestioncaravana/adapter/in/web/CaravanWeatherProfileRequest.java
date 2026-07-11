@@ -6,7 +6,7 @@ import jakarta.validation.constraints.NotNull;
 public record CaravanWeatherProfileRequest(
     @NotBlank String climateBaseline,
     @NotBlank String elevation,
-    boolean crownOfWorld,
+    String crownRegion,
     @NotNull Integer effectiveFromYear,
     @NotNull Integer effectiveFromMonth,
     @NotNull Integer effectiveFromDay) {}

@@ -2,7 +2,7 @@ spring:
   application:
     name: gestion-caravana
   datasource:
-    url: jdbc:h2:file:./data/gestion-caravana;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
+    url: jdbc:h2:file:${APP_DATA_PATH:./data/gestion-caravana};DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
     driver-class-name: org.h2.Driver
     username: sa
     password: ""
@@ -30,6 +30,6 @@ management:
 
 server:
   address: 0.0.0.0
-  port: 8080
+  port: ${SERVER_PORT:8082}
   error:
     include-message: never

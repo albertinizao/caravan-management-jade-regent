@@ -61,8 +61,8 @@ Keep the domain free from Spring, web, JPA, and filesystem concerns.
 .\mvnw.cmd spring-boot:run
 ```
 
-The backend binds to `0.0.0.0:8080`, so it is reachable from the local network
-through the machine IP, for example `http://192.168.1.201:8080`.
+The backend binds to `0.0.0.0:8080` by default, so it is reachable from the
+local network through the machine IP, for example `http://192.168.1.201:8080`.
 
 ### Frontend
 
@@ -72,8 +72,59 @@ npm install
 npm run dev
 ```
 
-The Vite dev server binds to `0.0.0.0`, so the UI is reachable from other
-devices on the LAN, for example `http://192.168.1.201:5173`.
+The Vite dev server binds to `0.0.0.0:5173` by default, so the UI is reachable
+from other devices on the LAN, for example `http://192.168.1.201:5173`.
+
+### Running two instances at the same time
+
+The application now reads the backend port and H2 file path from environment
+variables, and the frontend dev proxy target and port are configurable as well.
+This instance defaults to `8082/5175`.
+
+Use separate terminals for each backend/frontend pair.
+
+#### App1
+
+Backend:
+
+```powershell
+$env:SERVER_PORT = "8082"
+$env:APP_DATA_PATH = "./data/gestion-caravana-app1"
+.\mvnw.cmd spring-boot:run
+```
+
+Frontend:
+
+```powershell
+cd frontend
+$env:VITE_DEV_PORT = "5175"
+$env:VITE_API_PROXY_TARGET = "http://localhost:8082"
+npm run dev
+```
+
+#### App2
+
+Backend:
+
+```powershell
+$env:SERVER_PORT = "8083"
+$env:APP_DATA_PATH = "./data/gestion-caravana-app2"
+.\mvnw.cmd spring-boot:run
+```
+
+Frontend:
+
+```powershell
+cd frontend
+$env:VITE_DEV_PORT = "5176"
+$env:VITE_API_PROXY_TARGET = "http://localhost:8083"
+npm run dev
+```
+
+The H2 consoles stay attached to their respective backend ports:
+
+- App1: `http://localhost:8082/h2-console`
+- App2: `http://localhost:8083/h2-console`
 
 ### Frontend checks
 

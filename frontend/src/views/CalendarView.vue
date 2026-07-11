@@ -1444,12 +1444,6 @@ onMounted(loadActiveCaravan);
                 <section class="detail-section placeholder-block">
                   <h3>Clima</h3>
                   <div v-if="selectedDay.weather" class="weather-period-list">
-                    <p
-                      v-if="selectedDay.weather.crownLightCondition"
-                      class="muted weather-light-condition"
-                    >
-                      Luz estacional: {{ weatherCrownLightConditionLabel(selectedDay.weather.crownLightCondition) }}
-                    </p>
                     <article v-for="period in weatherPeriodRows(selectedDay.weather)" :key="period.key" class="weather-period-card">
                       <header class="weather-period-card__header">
                         <strong>{{ period.label }}</strong>
@@ -1489,6 +1483,12 @@ onMounted(loadActiveCaravan);
                         </div>
                       </dl>
                     </article>
+                    <p
+                      v-if="selectedDay.weather.crownLightCondition"
+                      class="muted weather-light-condition"
+                    >
+                      Luz estacional: {{ weatherCrownLightConditionLabel(selectedDay.weather.crownLightCondition) }}
+                    </p>
                   </div>
                   <p v-else class="muted">
                     No hay clima visible para este día.
@@ -2524,6 +2524,10 @@ textarea {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
+}
+
+.weather-light-condition {
+  grid-column: 1 / -1;
 }
 
 .weather-period-card {

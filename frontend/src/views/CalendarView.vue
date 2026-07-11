@@ -3170,8 +3170,60 @@ textarea {
 }
 
 @media (max-width: 720px) {
+  .calendar-toolbar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .calendar-toolbar > .ghost-button:first-child {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .calendar-toolbar > div:first-of-type {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  .calendar-toolbar__actions {
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .calendar-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .weather-period-list {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .calendar-toolbar__actions,
+  .modal-actions {
+    width: 100%;
+  }
+
+  .calendar-grid {
+    gap: 0.5rem;
+  }
+
+  .day-cell {
+    min-height: 7.5rem;
+    padding: 0.65rem;
+  }
+
+  .weather-period-card {
+    padding: 0.65rem 0.7rem;
+  }
+
+  .weather-period-metrics div {
+    padding: 0.5rem 0.55rem;
+    min-height: 3.5rem;
   }
 }
 </style>

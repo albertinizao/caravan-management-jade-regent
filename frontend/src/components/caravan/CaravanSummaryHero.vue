@@ -247,4 +247,20 @@ const hasAction = computed(() => Boolean(props.actionLabel || slots.action));
     grid-template-columns: 1fr;
   }
 }
+
+@media (max-width: 480px) {
+  .caravan-summary-hero {
+    padding: 0.9rem;
+    gap: 0.85rem;
+  }
+
+  .caravan-summary-hero__top {
+    gap: 0.85rem;
+  }
+
+  .caravan-summary-hero__stats,
+  .caravan-summary-hero__kpis {
+    gap: 0.65rem;
+  }
+}
 </style>

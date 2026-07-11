@@ -59,6 +59,10 @@ a {
   color: inherit;
 }
 
+.table-wrap {
+  scrollbar-width: thin;
+}
+
 .button-with-spinner {
   display: inline-flex;
   align-items: center;
@@ -83,5 +87,31 @@ a {
 
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 480px) {
+  :root {
+    --page-gutter: 0.85rem;
+    --touch-target-min: 3rem;
+  }
+
+  #app .page {
+    padding-left: max(0.85rem, env(safe-area-inset-left));
+    padding-right: max(0.85rem, env(safe-area-inset-right));
+  }
+
+  button,
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    min-height: var(--touch-target-min);
+  }
+
+  .table-wrap {
+    margin-inline: -0.35rem;
+    padding-inline: 0.35rem;
+    padding-bottom: 0.35rem;
+    scroll-padding-inline: 0.35rem;
   }
 }
